@@ -239,10 +239,11 @@ export default function Editor() {
             <ChevronRight size={16} />
           </button>
           {videoUrl && (
-            <a href={videoUrl} download={clip?.filename || `clip_${curIdx + 1}.mp4`}
+            <button
+              onClick={() => api.downloadFile(videoUrl, clip?.filename || `clip_${curIdx + 1}.mp4`).catch(() => setError("Download failed — file may have expired after redeploy"))}
               className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs ml-2">
               <Download size={14} /> Download
-            </a>
+            </button>
           )}
         </div>
       </div>

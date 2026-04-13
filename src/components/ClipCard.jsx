@@ -44,14 +44,13 @@ export default function ClipCard({ clip, jobId, index }) {
             <Edit2 size={12} /> Edit
           </Link>
           {videoUrl && (
-            <a
-              href={videoUrl}
-              download={clip.filename || `clip_${index + 1}.mp4`}
+            <button
+              onClick={() => api.downloadFile(videoUrl, clip.filename || `clip_${index + 1}.mp4`).catch(() => alert("Download failed — file may have expired"))}
               className="btn btn-secondary flex items-center justify-center gap-1 text-xs py-1.5 px-2"
               title="Download clip"
             >
               <Download size={12} />
-            </a>
+            </button>
           )}
         </div>
       </div>

@@ -44,4 +44,17 @@ export const api = {
 
   // Prefix backend origin to a relative API URL (e.g. /api/file/?path=...)
   mediaUrl: (relUrl) => relUrl ? `${ORIGIN}${relUrl}` : "",
+
+  // Cross-origin download via fetch + blob (download attribute ignored cross-origin)
+  downloadFile: async (url, filename) => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Download failed — file may have expired after redeploy");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename || "clip.mp4";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  },
 };
