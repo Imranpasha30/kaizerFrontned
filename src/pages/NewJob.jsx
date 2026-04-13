@@ -14,6 +14,7 @@ export default function NewJob() {
   const [platforms, setPlatforms] = useState({});
   const [frames, setFrames]   = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [uploadPct, setUploadPct]  = useState(0);
   const [error, setError]     = useState("");
   const dropRef = useRef(null);
 
@@ -42,13 +43,14 @@ export default function NewJob() {
 
   async function submit() {
     setSubmitting(true);
+    setUploadPct(0);
     setError("");
     try {
       const form = new FormData();
       form.append("video", file);
       form.append("platform", platform);
       form.append("frame_layout", frame);
-      const { id } = await api.createJob(form);
+      const { id } = await api.createJob(form, pct => setUploadPct(pct));
       navigate(`/jobs/${id}`);
     } catch (e) {
       setError(e.message);
@@ -170,14 +172,28 @@ export default function NewJob() {
               <Row label="Frame"    value={frame?.replace("_", " ")} />
             </div>
             {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+            {submitting && (
+              <div className="mb-3">
+                <div className="flex justify-between text-xs text-gray-400 mb-1">
+                  <span>{uploadPct < 100 ? "Uploading video…" : "Starting pipeline…"}</span>
+                  <span>{uploadPct}%</span>
+                </div>
+                <div className="w-full h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-accent transition-all duration-300 rounded-full"
+                    style={{ width: `${uploadPct}%` }}
+                  />
+                </div>
+              </div>
+            )}
             <button
               onClick={submit}
               disabled={submitting}
               className="btn btn-primary w-full flex items-center justify-center gap-2"
             >
               {submitting
-                ? <><Loader2 size={16} className="animate-spin" /> Starting pipeline…</>
-                : "▶ Start Pipeline"}
+                ? <><Loader2 size={16} className="animate-spin" /> {uploadPct < 100 ? `Uploading ${uploadPct}%` : "Starting pipeline…"}</>
+                : "\u25B6 Start Pipeline"}
             </button>
           </div>
         )}

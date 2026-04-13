@@ -28,7 +28,28 @@ export const api = {
 
   // Jobs
   listJobs:     ()           => req("GET",    "/jobs/"),
-  createJob:    (form)       => req("POST",   "/jobs/create/", form, true),
+  // createJob uses XMLHttpRequest for upload progress
+  createJob: (form, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/jobs/create/`);
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
+        catch { reject(new Error(xhr.statusText || "Upload failed")); }
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error — check your connection"));
+    xhr.ontimeout = () => reject(new Error("Upload timed out"));
+    xhr.timeout = 600000; // 10 minutes for large uploads
+    xhr.send(form);
+  }),
   getJob:       (id)         => req("GET",    `/jobs/${id}/`),
   getJobStatus: (id)         => req("GET",    `/jobs/${id}/status/`),
   exportJob:    (id)         => req("POST",   `/jobs/${id}/export/`),
