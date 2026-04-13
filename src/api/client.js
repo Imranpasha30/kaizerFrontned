@@ -41,4 +41,7 @@ export const api = {
 
   // File URL — points to backend for serving pipeline output files
   fileUrl: (path) => path ? `${ORIGIN}/api/file/?path=${encodeURIComponent(path)}` : "",
+
+  // Prefix backend origin to a relative API URL (e.g. /api/file/?path=...)
+  mediaUrl: (relUrl) => relUrl ? `${ORIGIN}${relUrl}` : "",
 };

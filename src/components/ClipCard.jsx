@@ -1,9 +1,11 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Edit2, Film } from "lucide-react";
+import { Edit2, Film, Download } from "lucide-react";
+import { api } from "../api/client";
 
 export default function ClipCard({ clip, jobId, index }) {
-  const thumbUrl = clip.thumb_url ? clip.thumb_url + "&t=" + Date.now() : "";
+  const thumbUrl = clip.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + Date.now() : "";
+  const videoUrl = clip.video_url ? api.mediaUrl(clip.video_url) : "";
 
   return (
     <div className="card overflow-hidden group hover:border-gray-600 transition-colors">
@@ -34,12 +36,24 @@ export default function ClipCard({ clip, jobId, index }) {
         <p className="text-xs text-gray-300 line-clamp-2 leading-relaxed min-h-[2.5rem]">
           {clip.text || <span className="text-gray-600">No text</span>}
         </p>
-        <Link
-          to={`/jobs/${jobId}/edit/${clip.id}`}
-          className="btn btn-secondary flex items-center justify-center gap-1.5 text-xs py-1.5"
-        >
-          <Edit2 size={12} /> Edit Clip
-        </Link>
+        <div className="flex gap-1.5">
+          <Link
+            to={`/jobs/${jobId}/edit/${clip.id}`}
+            className="btn btn-secondary flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5"
+          >
+            <Edit2 size={12} /> Edit
+          </Link>
+          {videoUrl && (
+            <a
+              href={videoUrl}
+              download={clip.filename || `clip_${index + 1}.mp4`}
+              className="btn btn-secondary flex items-center justify-center gap-1 text-xs py-1.5 px-2"
+              title="Download clip"
+            >
+              <Download size={12} />
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

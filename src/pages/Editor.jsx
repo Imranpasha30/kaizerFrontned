@@ -161,7 +161,8 @@ export default function Editor() {
     }
   }
 
-  const thumbUrl = clip?.thumb_url ? clip.thumb_url + "&t=" + imgTs : "";
+  const thumbUrl = clip?.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + imgTs : "";
+  const videoUrl = clip?.video_url ? api.mediaUrl(clip.video_url) : "";
   const isTorn   = clip?.frame_type === "torn_card";
   const isFollow = clip?.frame_type === "follow_bar";
 
@@ -186,7 +187,7 @@ export default function Editor() {
               ${i === curIdx ? "border-accent" : "border-transparent hover:border-gray-600"}`}
           >
             {c.thumb_url ? (
-              <img src={c.thumb_url + "&t=" + imgTs} alt="" className="w-full aspect-[9/16] object-cover block" />
+              <img src={api.mediaUrl(c.thumb_url) + "&t=" + imgTs} alt="" className="w-full aspect-[9/16] object-cover block" />
             ) : (
               <div className="w-full aspect-[9/16] bg-[#111] flex items-center justify-center text-gray-600 text-xs">
                 {i + 1}
@@ -201,9 +202,18 @@ export default function Editor() {
 
       {/* ── Center: preview ───────────────────────────────── */}
       <div className="flex-1 flex flex-col items-center justify-center bg-[#060606] p-4 gap-4 overflow-hidden">
-        {/* Clip preview */}
+        {/* Clip preview — video player with thumbnail fallback */}
         <div className="relative shadow-2xl" style={{ height: "calc(100% - 56px)", aspectRatio: "9/16", maxHeight: "600px" }}>
-          {thumbUrl ? (
+          {videoUrl ? (
+            <video
+              key={videoUrl + imgTs}
+              src={videoUrl}
+              poster={thumbUrl}
+              controls
+              loop
+              className="w-full h-full object-cover rounded bg-black"
+            />
+          ) : thumbUrl ? (
             <img src={thumbUrl} alt="preview" className="w-full h-full object-cover rounded" />
           ) : (
             <div className="w-full h-full bg-[#111] rounded flex items-center justify-center text-gray-600">
@@ -217,7 +227,7 @@ export default function Editor() {
           )}
         </div>
 
-        {/* Clip nav */}
+        {/* Clip nav + download */}
         <div className="flex items-center gap-3">
           <button onClick={() => setCurIdx(i => Math.max(0, i - 1))} disabled={curIdx === 0}
             className="btn btn-secondary py-1 px-2 disabled:opacity-30">
@@ -228,6 +238,12 @@ export default function Editor() {
             className="btn btn-secondary py-1 px-2 disabled:opacity-30">
             <ChevronRight size={16} />
           </button>
+          {videoUrl && (
+            <a href={videoUrl} download={clip?.filename || `clip_${curIdx + 1}.mp4`}
+              className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs ml-2">
+              <Download size={14} /> Download
+            </a>
+          )}
         </div>
       </div>
 

@@ -30,8 +30,9 @@ export default function JobDetail() {
     loadJob();
     pollStatus();
     const t = setInterval(() => {
-      pollStatus().then(() => {
-        if (status?.status === "done" || status?.status === "failed") {
+      api.getJobStatus(jobId).then(s => {
+        setStatus(s);
+        if (s?.status === "done" || s?.status === "failed") {
           clearInterval(t);
           loadJob();
         }
