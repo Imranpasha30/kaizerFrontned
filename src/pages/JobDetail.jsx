@@ -59,12 +59,13 @@ export default function JobDetail() {
     );
   }
 
-  const isRunning = status?.status === "running" || job.status === "running";
-  const isDone    = status?.status === "done"    || job.status === "done";
-  const isFailed  = status?.status === "failed"  || job.status === "failed";
+  // Use polled status (fresher) over initial job status
+  const currentStatus = status?.status || job.status;
+  const isRunning = currentStatus === "running" || currentStatus === "pending";
+  const isDone    = currentStatus === "done";
+  const isFailed  = currentStatus === "failed";
   const pct       = status?.progress_pct ?? job.progress_pct;
   const logLines  = status?.log_lines ?? job.log?.split("\n") ?? [];
-  const currentStatus = status?.status || job.status;
 
   return (
     <div className="max-w-5xl mx-auto p-6">
