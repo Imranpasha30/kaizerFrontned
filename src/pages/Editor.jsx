@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "../api/client";
+import LivePreview from "../components/LivePreview";
 
 const FONTS = [
   "Ponnala-Regular.ttf", "NotoSansTelugu-Bold.ttf", "NotoSerifTelugu-Bold.ttf",
@@ -200,26 +201,32 @@ export default function Editor() {
         ))}
       </div>
 
-      {/* ── Center: preview ───────────────────────────────── */}
+      {/* ── Center: live preview ───────────────────────────── */}
       <div className="flex-1 flex flex-col items-center justify-center bg-[#060606] p-4 gap-4 overflow-hidden">
-        {/* Clip preview — video player with thumbnail fallback */}
-        <div className="relative shadow-2xl" style={{ height: "calc(100% - 56px)", aspectRatio: "9/16", maxHeight: "600px" }}>
-          {videoUrl ? (
-            <video
-              key={videoUrl + imgTs}
-              src={videoUrl}
-              poster={thumbUrl}
-              controls
-              loop
-              className="w-full h-full object-cover rounded bg-black"
-            />
-          ) : thumbUrl ? (
-            <img src={thumbUrl} alt="preview" className="w-full h-full object-cover rounded" />
-          ) : (
-            <div className="w-full h-full bg-[#111] rounded flex items-center justify-center text-gray-600">
-              No preview
-            </div>
-          )}
+        {/* Live preview — updates in real-time as controls change */}
+        <div className="relative shadow-2xl" style={{ height: "calc(100% - 56px)", maxHeight: "600px" }}>
+          <LivePreview
+            rawUrl={clip?.raw_url}
+            videoUrl={clip?.video_url}
+            imageUrl={clip?.image_url}
+            frameType={clip?.frame_type}
+            text={text}
+            fontFile={fontFile}
+            fontSize={fontSize}
+            textColor={textColor}
+            bgColor={fbBg}
+            followText={fbText}
+            followTextColor={fbTextColor}
+            fbBg={fbBg}
+            fbTitleColor={fbTc}
+            sectionPct={{
+              video: secVideo / 100,
+              text:  secText  / 100,
+              image: secImage / 100,
+            }}
+            cardStyle={{ bgr0, bgr1, edge, jag, seed, vsid, vcor, vwid, overlap }}
+            width={270}
+          />
           {rendering && (
             <div className="absolute inset-0 bg-black/60 rounded flex items-center justify-center">
               <Loader2 size={32} className="animate-spin text-accent" />
