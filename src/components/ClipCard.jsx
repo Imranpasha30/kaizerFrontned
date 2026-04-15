@@ -1,11 +1,23 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { Edit2, Film, Download } from "lucide-react";
+import { Edit2, Film, Download, Loader2 } from "lucide-react";
 import { api } from "../api/client";
 
 export default function ClipCard({ clip, jobId, index }) {
   const thumbUrl = clip.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + Date.now() : "";
   const videoUrl = clip.video_url ? api.mediaUrl(clip.video_url) : "";
+  const [dlPct, setDlPct] = useState(null); // null=idle, 0-100=downloading
+
+  async function handleDownload() {
+    setDlPct(0);
+    try {
+      await api.downloadFile(videoUrl, clip.filename || `clip_${index + 1}.mp4`, pct => setDlPct(pct));
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setDlPct(null);
+    }
+  }
 
   return (
     <div className="card overflow-hidden group hover:border-gray-600 transition-colors">
@@ -36,6 +48,14 @@ export default function ClipCard({ clip, jobId, index }) {
         <p className="text-xs text-gray-300 line-clamp-2 leading-relaxed min-h-[2.5rem]">
           {clip.text || <span className="text-gray-600">No text</span>}
         </p>
+        {dlPct !== null && (
+          <div className="w-full h-1.5 bg-[#1a1a1a] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-green-500 transition-all duration-200 rounded-full"
+              style={{ width: `${dlPct >= 0 ? dlPct : 100}%`, animation: dlPct < 0 ? "pulse 1s infinite" : "none" }}
+            />
+          </div>
+        )}
         <div className="flex gap-1.5">
           <Link
             to={`/jobs/${jobId}/edit/${clip.id}`}
@@ -45,11 +65,14 @@ export default function ClipCard({ clip, jobId, index }) {
           </Link>
           {videoUrl && (
             <button
-              onClick={() => api.downloadFile(videoUrl, clip.filename || `clip_${index + 1}.mp4`).catch(() => alert("Download failed — file may have expired"))}
+              onClick={handleDownload}
+              disabled={dlPct !== null}
               className="btn btn-secondary flex items-center justify-center gap-1 text-xs py-1.5 px-2"
               title="Download clip"
             >
-              <Download size={12} />
+              {dlPct !== null
+                ? <Loader2 size={12} className="animate-spin" />
+                : <Download size={12} />}
             </button>
           )}
         </div>

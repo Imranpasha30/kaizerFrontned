@@ -32,7 +32,9 @@ export default function Editor() {
   const [clip, setClip]       = useState(null);
   const [rendering, setRendering] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [dlPct, setDlPct]     = useState(null); // null=idle, 0-100=downloading
   const [imgTs, setImgTs]     = useState(Date.now());
+  const [vidTs, setVidTs]     = useState(Date.now());
   const [error, setError]     = useState("");
 
   // Editable fields
@@ -128,6 +130,7 @@ export default function Editor() {
       setClips(newClips);
       setClip(updated);
       setImgTs(Date.now());
+      setVidTs(Date.now());
     } catch (e) {
       setError(e.message);
     } finally {
@@ -163,7 +166,7 @@ export default function Editor() {
   }
 
   const thumbUrl = clip?.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + imgTs : "";
-  const videoUrl = clip?.video_url ? api.mediaUrl(clip.video_url) : "";
+  const videoUrl = clip?.video_url ? api.mediaUrl(clip.video_url) + "&t=" + vidTs : "";
   const isTorn   = clip?.frame_type === "torn_card";
   const isFollow = clip?.frame_type === "follow_bar";
 
@@ -247,9 +250,21 @@ export default function Editor() {
           </button>
           {videoUrl && (
             <button
-              onClick={() => api.downloadFile(videoUrl, clip?.filename || `clip_${curIdx + 1}.mp4`).catch(() => setError("Download failed — file may have expired after redeploy"))}
+              onClick={async () => {
+                setDlPct(0);
+                try {
+                  await api.downloadFile(videoUrl, clip?.filename || `clip_${curIdx + 1}.mp4`, pct => setDlPct(pct));
+                } catch {
+                  setError("Download failed — file may have expired after redeploy");
+                } finally {
+                  setDlPct(null);
+                }
+              }}
+              disabled={dlPct !== null}
               className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs ml-2">
-              <Download size={14} /> Download
+              {dlPct !== null
+                ? <><Loader2 size={14} className="animate-spin" /> {dlPct >= 0 ? `${dlPct}%` : "Preparing…"}</>
+                : <><Download size={14} /> Download</>}
             </button>
           )}
         </div>
