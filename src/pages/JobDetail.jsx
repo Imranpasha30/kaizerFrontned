@@ -18,11 +18,9 @@ export default function JobDetail() {
   const [exporting, setExporting] = useState(false);
   const [exportDone, setExportDone] = useState(null);
 
-  // Load full job (for clips)
   const loadJob = useCallback(() =>
     api.getJob(jobId).then(setJob), [jobId]);
 
-  // Poll lightweight status while running
   const pollStatus = useCallback(() =>
     api.getJobStatus(jobId).then(setStatus), [jobId]);
 
@@ -59,7 +57,6 @@ export default function JobDetail() {
     );
   }
 
-  // Use polled status (fresher) over initial job status
   const currentStatus = status?.status || job.status;
   const isRunning = currentStatus === "running" || currentStatus === "pending";
   const isDone    = currentStatus === "done";
@@ -68,32 +65,32 @@ export default function JobDetail() {
   const logLines  = status?.log_lines ?? job.log?.split("\n") ?? [];
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
+    <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {/* Header */}
-      <div className="flex items-start gap-4 mb-6">
-        <Link to="/" className="btn btn-secondary py-1.5 px-2.5 mt-0.5 flex items-center gap-1">
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4 mb-6">
+        <Link to="/" className="btn btn-secondary py-1.5 px-2.5 self-start flex items-center gap-1">
           <ArrowLeft size={14} />
         </Link>
-        <div className="flex-1">
-          <h1 className="text-xl font-bold text-white">{job.video_name}</h1>
-          <div className="text-sm text-gray-500 mt-0.5 flex gap-3">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-white truncate">{job.video_name}</h1>
+          <div className="text-sm text-gray-500 mt-0.5 flex gap-2 sm:gap-3 flex-wrap">
             <span>{PLATFORM_LABEL[job.platform] || job.platform}</span>
-            <span>·</span>
+            <span className="text-gray-700">|</span>
             <span className="capitalize">{job.frame_layout?.replace("_", " ")}</span>
-            <span>·</span>
+            <span className="text-gray-700">|</span>
             <span>{new Date(job.created_at).toLocaleString()}</span>
           </div>
         </div>
 
         {isDone && (
-          <div className="flex gap-2">
-            <Link to={`/jobs/${jobId}/edit`} className="btn btn-secondary flex items-center gap-1.5">
+          <div className="flex gap-2 self-start flex-shrink-0">
+            <Link to={`/jobs/${jobId}/edit`} className="btn btn-secondary flex items-center gap-1.5 text-sm">
               <Edit2 size={14} /> Editor
             </Link>
             <button
               onClick={doExport}
               disabled={exporting}
-              className="btn btn-green flex items-center gap-1.5"
+              className="btn btn-green flex items-center gap-1.5 text-sm"
             >
               {exporting
                 ? <Loader2 size={14} className="animate-spin" />
@@ -106,7 +103,7 @@ export default function JobDetail() {
 
       {exportDone && (
         <div className="card p-3 mb-4 text-sm text-green-300 flex items-center gap-2">
-          ✓ Exported {exportDone.count} clips → <code className="text-xs text-green-500">{exportDone.export_dir}</code>
+          Exported {exportDone.count} clips
         </div>
       )}
 
@@ -130,7 +127,7 @@ export default function JobDetail() {
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
             Clips ({job.clips.length})
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4">
             {job.clips.map((clip, i) => (
               <ClipCard key={clip.id} clip={clip} jobId={jobId} index={i} />
             ))}
@@ -141,7 +138,7 @@ export default function JobDetail() {
       {isRunning && (
         <div className="card p-8 text-center text-gray-600">
           <Loader2 size={32} className="animate-spin mx-auto mb-3 text-accent" />
-          <p>Pipeline running… clips will appear when done</p>
+          <p>Pipeline running... clips will appear when done</p>
         </div>
       )}
     </div>

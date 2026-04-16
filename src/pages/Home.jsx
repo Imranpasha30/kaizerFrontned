@@ -10,6 +10,13 @@ const STATUS_ICON = {
   failed:  <XCircle size={14} className="text-red-400" />,
 };
 
+const STATUS_BADGE = {
+  pending: "bg-gray-800/60 text-gray-400 border-gray-700/50",
+  running: "bg-yellow-900/40 text-yellow-400 border-yellow-700/40",
+  done:    "bg-green-900/40 text-green-400 border-green-700/40",
+  failed:  "bg-red-900/40 text-red-400 border-red-700/40",
+};
+
 const PLATFORM_LABEL = {
   instagram_reel: "Instagram Reel",
   youtube_short:  "YouTube Short",
@@ -33,6 +40,7 @@ export default function Home() {
 
   async function deleteJob(id, e) {
     e.preventDefault();
+    e.stopPropagation();
     if (!confirm("Delete this job?")) return;
     await api.deleteJob(id);
     setJobs(j => j.filter(x => x.id !== id));
@@ -47,7 +55,7 @@ export default function Home() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
+    <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -61,57 +69,61 @@ export default function Home() {
 
       {jobs.length === 0 ? (
         <div className="card p-12 text-center">
-          <p className="text-gray-600 mb-4">No jobs yet</p>
+          <p className="text-gray-500 mb-4">No jobs yet</p>
           <Link to="/new" className="btn btn-primary inline-flex items-center gap-2">
             <Plus size={16} /> Create your first job
           </Link>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           {jobs.map(job => (
             <Link
               key={job.id}
               to={`/jobs/${job.id}`}
-              className="card p-4 flex items-center gap-4 hover:border-gray-600 transition-colors group"
+              className="card px-4 py-3.5 sm:px-5 flex items-center gap-3 sm:gap-4
+                         hover:border-border-hover hover:bg-panel-hover group"
             >
               {/* Status icon */}
-              <div className="flex-shrink-0">{STATUS_ICON[job.status]}</div>
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface flex items-center justify-center">
+                {STATUS_ICON[job.status]}
+              </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-white truncate">{job.video_name}</span>
-                  {job.status === "running" && (
-                    <span className="text-xs bg-yellow-900/50 text-yellow-400 px-2 py-0.5 rounded-full">
-                      {job.progress_pct}%
-                    </span>
-                  )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-white truncate max-w-[200px] sm:max-w-none">
+                    {job.video_name}
+                  </span>
+                  <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full border ${STATUS_BADGE[job.status]}`}>
+                    {job.status}
+                  </span>
                 </div>
-                <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                <div className="flex items-center gap-2 sm:gap-3 mt-1 text-xs text-gray-500 flex-wrap">
                   <span>{PLATFORM_LABEL[job.platform] || job.platform}</span>
-                  <span>·</span>
+                  <span className="text-gray-700">|</span>
                   <span className="capitalize">{job.frame_layout?.replace("_", " ")}</span>
-                  <span>·</span>
-                  <span>{job.clip_count} clips</span>
-                  <span>·</span>
-                  <span>{new Date(job.created_at).toLocaleDateString()}</span>
+                  <span className="text-gray-700">|</span>
+                  <span>{job.clip_count} clip{job.clip_count !== 1 ? "s" : ""}</span>
+                  <span className="hidden sm:inline text-gray-700">|</span>
+                  <span className="hidden sm:inline">{new Date(job.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center gap-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              {/* Actions — always visible on mobile, hover on desktop */}
+              <div className="flex items-center gap-2 flex-shrink-0
+                              sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 {job.status === "done" && (
                   <Link
                     to={`/jobs/${job.id}/edit`}
                     onClick={e => e.stopPropagation()}
-                    className="btn btn-secondary py-1 px-2 flex items-center gap-1 text-xs"
+                    className="btn btn-secondary py-1.5 px-2.5 flex items-center gap-1 text-xs"
                   >
-                    <Edit2 size={12} /> Editor
+                    <Edit2 size={12} /> <span className="hidden sm:inline">Editor</span>
                   </Link>
                 )}
                 <button
                   onClick={(e) => deleteJob(job.id, e)}
-                  className="btn btn-secondary py-1 px-2 hover:border-red-800 hover:text-red-400 text-xs"
+                  className="btn btn-secondary py-1.5 px-2.5 hover:border-red-800 hover:text-red-400 text-xs"
                 >
                   <Trash2 size={12} />
                 </button>

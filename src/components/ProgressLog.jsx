@@ -15,18 +15,18 @@ export default function ProgressLog({ lines = [], pct = 0, status }) {
   }[status] || "text-gray-400";
 
   return (
-    <div className="card p-4 flex flex-col gap-3">
+    <div className="card p-3 sm:p-4 flex flex-col gap-3">
       {/* Progress bar */}
       <div className="flex items-center gap-3">
-        <div className="flex-1 h-2 bg-[#1a1a1a] rounded-full overflow-hidden">
+        <div className="flex-1 h-2 bg-surface rounded-full overflow-hidden">
           <div
             className="h-full bg-accent transition-all duration-500 rounded-full"
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className={`text-xs font-bold w-16 text-right ${statusColor}`}>
-          {status === "done" ? "✓ Done" :
-           status === "failed" ? "✗ Failed" :
+        <span className={`text-xs font-bold w-16 text-right tabular-nums ${statusColor}`}>
+          {status === "done" ? "Done" :
+           status === "failed" ? "Failed" :
            status === "running" ? `${pct}%` : "Pending"}
         </span>
       </div>
@@ -34,14 +34,14 @@ export default function ProgressLog({ lines = [], pct = 0, status }) {
       {/* Log terminal */}
       <div
         ref={ref}
-        className="bg-black rounded p-3 h-64 overflow-y-auto font-mono text-xs leading-5 text-gray-300"
+        className="bg-black rounded p-3 h-48 sm:h-56 lg:h-64 overflow-y-auto font-mono text-[11px] sm:text-xs leading-5 text-gray-400"
       >
         {lines.length === 0 ? (
-          <span className="text-gray-600">Waiting for pipeline to start…</span>
+          <span className="text-gray-600">Waiting for pipeline to start...</span>
         ) : (
           lines.map((line, i) => {
-            const isError = line.toLowerCase().includes("error") || line.startsWith("✗");
-            const isDone  = line.startsWith("✓");
+            const isError = line.toLowerCase().includes("error") || line.startsWith("\u2717");
+            const isDone  = line.startsWith("\u2713");
             const isStep  = /^\s*\[/.test(line);
             return (
               <div
@@ -58,7 +58,7 @@ export default function ProgressLog({ lines = [], pct = 0, status }) {
           })
         )}
         {status === "running" && (
-          <span className="animate-pulse text-accent">▌</span>
+          <span className="animate-pulse text-accent">{"\u258C"}</span>
         )}
       </div>
     </div>
