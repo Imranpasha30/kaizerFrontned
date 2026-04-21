@@ -23,6 +23,11 @@ const PLATFORM_LABEL = {
   youtube_full:   "YouTube Full",
 };
 
+const LANG_LABEL = {
+  te: "తెలుగు", hi: "हिन्दी", ta: "தமிழ்", kn: "ಕನ್ನಡ",
+  ml: "മലയാളം", bn: "বাংলা", mr: "मराठी", gu: "ગુજરાતી", en: "EN",
+};
+
 export default function Home() {
   const [jobs, setJobs]     = useState([]);
   const [loading, setLoading] = useState(true);
@@ -102,6 +107,10 @@ export default function Home() {
                   <span>{PLATFORM_LABEL[job.platform] || job.platform}</span>
                   <span className="text-gray-700">|</span>
                   <span className="capitalize">{job.frame_layout?.replace("_", " ")}</span>
+                  <span className="text-gray-700">|</span>
+                  <span className="inline-flex items-center gap-1 text-accent2">
+                    {LANG_LABEL[job.language] || job.language?.toUpperCase() || "TE"}
+                  </span>
                   <span className="text-gray-700">|</span>
                   <span>{job.clip_count} clip{job.clip_count !== 1 ? "s" : ""}</span>
                   <span className="hidden sm:inline text-gray-700">|</span>

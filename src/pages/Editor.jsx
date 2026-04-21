@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight, Settings, Eye } from "lucide-react";
+import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight, Settings, Eye, Sparkles } from "lucide-react";
 import { api } from "../api/client";
 import LivePreview from "../components/LivePreview";
+import SEOPanel from "../components/SEOPanel";
 
 const FONTS = [
   "Ponnala-Regular.ttf", "NotoSansTelugu-Bold.ttf", "NotoSerifTelugu-Bold.ttf",
@@ -30,6 +31,14 @@ export default function Editor() {
   const [clips, setClips]     = useState([]);
   const [curIdx, setCurIdx]   = useState(0);
   const [clip, setClip]       = useState(null);
+  // Right panel width is user-draggable + persisted.  Defaults to 320px.
+  const [rightWidth, setRightWidth] = useState(() => {
+    const v = Number(localStorage.getItem("kaizer_editor_right_px") || 0);
+    return v >= 260 && v <= 900 ? v : 320;
+  });
+  useEffect(() => {
+    localStorage.setItem("kaizer_editor_right_px", String(rightWidth));
+  }, [rightWidth]);
   const [rendering, setRendering] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [dlPct, setDlPct]     = useState(null);
@@ -39,6 +48,9 @@ export default function Editor() {
 
   // Mobile panel toggle: "preview" | "controls"
   const [mobilePanel, setMobilePanel] = useState("preview");
+
+  // Right sidebar tab: "style" | "seo"
+  const [rightTab, setRightTab] = useState("style");
 
   // Editable fields
   const [text, setText]           = useState("");
@@ -208,9 +220,28 @@ export default function Editor() {
   );
 
   const previewArea = (
-    <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 gap-3 sm:gap-4 overflow-hidden min-h-0">
+    <div
+      className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 gap-3 sm:gap-4 overflow-hidden min-h-0 relative"
+      style={{
+        // Canvas-style dot grid — radial-gradient dots on a dark base.
+        backgroundColor: "#060606",
+        backgroundImage:
+          "radial-gradient(circle, rgba(255,255,255,0.055) 1px, transparent 1.5px)",
+        backgroundSize: "22px 22px",
+        backgroundPosition: "0 0",
+      }}
+    >
+      {/* Subtle vignette over the dots so preview pops */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.5) 100%)",
+        }}
+      />
       {/* Live preview */}
-      <div className="relative shadow-2xl flex-1 flex items-center justify-center min-h-0">
+      <div className="relative shadow-2xl flex-1 flex items-center justify-center min-h-0 z-[1]">
         <LivePreview
           rawUrl={clip?.raw_url}
           videoUrl={clip?.video_url}
@@ -241,7 +272,7 @@ export default function Editor() {
       </div>
 
       {/* Clip nav + download */}
-      <div className="flex items-center gap-3 flex-shrink-0">
+      <div className="flex items-center gap-3 flex-shrink-0 relative z-[1]">
         <button onClick={() => setCurIdx(i => Math.max(0, i - 1))} disabled={curIdx === 0}
           className="btn btn-secondary py-1 px-2 disabled:opacity-30">
           <ChevronLeft size={16} />
@@ -274,8 +305,52 @@ export default function Editor() {
     </div>
   );
 
+  const tabsBar = (
+    <div className="flex border-b border-border flex-shrink-0 bg-[#0a0a0a]">
+      <button
+        onClick={() => setRightTab("style")}
+        className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors
+          ${rightTab === "style" ? "text-accent2 border-b-2 border-accent2" : "text-gray-500 hover:text-gray-300"}`}
+      >
+        <Settings size={13} /> Styling
+      </button>
+      <button
+        onClick={() => setRightTab("seo")}
+        className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors
+          ${rightTab === "seo" ? "text-accent2 border-b-2 border-accent2" : "text-gray-500 hover:text-gray-300"}`}
+      >
+        <Sparkles size={13} /> SEO
+        {clip?.seo && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
+      </button>
+    </div>
+  );
+
+  const seoPanel = (
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      <div className="p-3 border-b border-border flex items-center gap-2 flex-shrink-0">
+        <Link to={`/jobs/${jobId}`} className="btn btn-secondary py-1 px-2">
+          <ArrowLeft size={14} />
+        </Link>
+        <span className="text-xs text-gray-400 flex-1 truncate">{job.video_name}</span>
+        <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs">
+          {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+        </button>
+      </div>
+      {tabsBar}
+      <SEOPanel
+        clip={clip}
+        onSeoChange={(newSeo) => {
+          if (!clip) return;
+          const updated = { ...clip, seo: newSeo };
+          setClip(updated);
+          setClips((list) => list.map((c) => c.id === clip.id ? updated : c));
+        }}
+      />
+    </div>
+  );
+
   const controlsPanel = (
-    <div className="flex flex-col flex-1 md:flex-none overflow-y-auto">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Header */}
       <div className="p-3 border-b border-border flex items-center gap-2 flex-shrink-0">
         <Link to={`/jobs/${jobId}`} className="btn btn-secondary py-1 px-2">
@@ -286,6 +361,8 @@ export default function Editor() {
           {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
         </button>
       </div>
+
+      {tabsBar}
 
       <div className="p-3 flex-1 overflow-y-auto">
         {error && <p className="text-red-400 text-xs mb-3 bg-red-950/30 p-2 rounded">{error}</p>}
@@ -424,9 +501,40 @@ export default function Editor() {
           {previewArea}
         </div>
 
-        {/* Right: controls */}
-        <div className="w-60 lg:w-64 xl:w-72 2xl:w-80 bg-[#0e0e0e] border-l border-border flex flex-col flex-shrink-0">
-          {controlsPanel}
+        {/* Drag handle — resizes right panel. Persists to localStorage. */}
+        <div
+          role="separator"
+          title="Drag to resize"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startW = rightWidth;
+            function onMove(ev) {
+              const dx = startX - ev.clientX;        // dragging left grows the panel
+              const next = Math.max(260, Math.min(900, startW + dx));
+              setRightWidth(next);
+            }
+            function onUp() {
+              window.removeEventListener("mousemove", onMove);
+              window.removeEventListener("mouseup", onUp);
+              document.body.style.cursor = "";
+              document.body.style.userSelect = "";
+            }
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+            window.addEventListener("mousemove", onMove);
+            window.addEventListener("mouseup", onUp);
+          }}
+          onDoubleClick={() => setRightWidth(320)}
+          className="w-1.5 bg-black hover:bg-accent2/70 cursor-col-resize flex-shrink-0 transition-colors"
+        />
+
+        {/* Right: controls / SEO */}
+        <div
+          className="bg-[#0e0e0e] border-l border-border flex flex-col flex-shrink-0"
+          style={{ width: rightWidth }}
+        >
+          {rightTab === "seo" ? seoPanel : controlsPanel}
         </div>
       </div>
 
@@ -463,7 +571,7 @@ export default function Editor() {
             </div>
           ) : (
             <div className="flex-1 flex flex-col bg-[#0e0e0e] min-h-0 overflow-y-auto">
-              {controlsPanel}
+              {rightTab === "seo" ? seoPanel : controlsPanel}
             </div>
           )}
         </div>

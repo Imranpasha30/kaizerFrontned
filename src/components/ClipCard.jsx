@@ -1,12 +1,16 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
-import { Edit2, Film, Download, Loader2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { Edit2, Film, Download, Loader2, Youtube, Sparkles } from "lucide-react";
 import { api } from "../api/client";
+import PublishModal from "./PublishModal";
 
 export default function ClipCard({ clip, jobId, index }) {
   const thumbUrl = clip.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + Date.now() : "";
   const videoUrl = clip.video_url ? api.mediaUrl(clip.video_url) : "";
   const [dlPct, setDlPct] = useState(null);
+  const [showPublish, setShowPublish] = useState(false);
+  const navigate = useNavigate();
+  const hasSeo = !!(clip.seo && clip.seo.title);
 
   async function handleDownload() {
     setDlPct(0);
@@ -61,9 +65,20 @@ export default function ClipCard({ clip, jobId, index }) {
           <Link
             to={`/jobs/${jobId}/edit/${clip.id}`}
             className="btn btn-secondary flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5"
+            title={hasSeo ? "Edit clip" : "Edit clip — generate SEO here"}
           >
             <Edit2 size={12} /> Edit
+            {hasSeo && <Sparkles size={10} className="text-accent2" />}
           </Link>
+          {videoUrl && (
+            <button
+              onClick={() => setShowPublish(true)}
+              className="btn flex items-center justify-center gap-1 text-xs py-1.5 px-2 bg-accent/80 hover:bg-accent text-white border-transparent"
+              title="Publish to YouTube"
+            >
+              <Youtube size={12} />
+            </button>
+          )}
           {videoUrl && (
             <button
               onClick={handleDownload}
@@ -78,6 +93,14 @@ export default function ClipCard({ clip, jobId, index }) {
           )}
         </div>
       </div>
+
+      <PublishModal
+        open={showPublish}
+        onClose={() => setShowPublish(false)}
+        clip={clip}
+        jobId={jobId}
+        onPublished={() => navigate("/uploads")}
+      />
     </div>
   );
 }

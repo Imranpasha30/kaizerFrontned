@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 import { api } from "../api/client";
 
 const ORIGIN = import.meta.env.VITE_API_URL || "";
@@ -43,37 +44,73 @@ export default function LivePreview({
   const scale = width / 1080;
   const fontFamily = getFontFamily(fontFile || "Ponnala-Regular.ttf");
 
+  // Autoplay policy: browsers only allow unmuted autoplay after a user gesture.
+  // Start muted so the preview plays on mount; user clicks the speaker icon
+  // to unmute (the click itself counts as the required user gesture).
+  const [audioOn, setAudioOn] = useState(false);
+
   // Use raw video for live preview (uncomposed), fall back to composed
   const srcUrl = rawUrl ? api.mediaUrl(rawUrl) : (videoUrl ? api.mediaUrl(videoUrl) : "");
 
-  if (frameType === "follow_bar") {
+  const variant = (() => {
+    if (frameType === "follow_bar") {
+      return (
+        <FollowBarPreview
+          srcUrl={srcUrl} imageUrl={imageUrl}
+          width={width} height={h} scale={scale}
+          text={text} fontFamily={fontFamily} fontSize={fontSize} textColor={textColor}
+          bgColor={fbBg || bgColor || "#1a0a2e"}
+          followText={followText} followTextColor={followTextColor}
+          titleColor={fbTitleColor || textColor || "#ffff00"}
+          audioOn={audioOn}
+        />
+      );
+    }
+    if (frameType === "torn_card") {
+      return (
+        <TornCardPreview
+          srcUrl={srcUrl} imageUrl={imageUrl}
+          width={width} height={h} scale={scale}
+          text={text} fontFamily={fontFamily} fontSize={fontSize} textColor={textColor}
+          sectionPct={sectionPct} cardStyle={cardStyle}
+          audioOn={audioOn}
+        />
+      );
+    }
+    // Fallback: just show video with native controls
     return (
-      <FollowBarPreview
-        srcUrl={srcUrl} imageUrl={imageUrl}
-        width={width} height={h} scale={scale}
-        text={text} fontFamily={fontFamily} fontSize={fontSize} textColor={textColor}
-        bgColor={fbBg || bgColor || "#1a0a2e"}
-        followText={followText} followTextColor={followTextColor}
-        titleColor={fbTitleColor || textColor || "#ffff00"}
-      />
+      <div style={{ width, height: h, background: "#000", borderRadius: 6, overflow: "hidden" }}>
+        {srcUrl && (
+          <video
+            src={srcUrl}
+            controls loop playsInline autoPlay
+            muted={!audioOn}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        )}
+      </div>
     );
-  }
+  })();
 
-  if (frameType === "torn_card") {
-    return (
-      <TornCardPreview
-        srcUrl={srcUrl} imageUrl={imageUrl}
-        width={width} height={h} scale={scale}
-        text={text} fontFamily={fontFamily} fontSize={fontSize} textColor={textColor}
-        sectionPct={sectionPct} cardStyle={cardStyle}
-      />
-    );
-  }
-
-  // Fallback: just show video
   return (
-    <div style={{ width, height: h, background: "#000", borderRadius: 6, overflow: "hidden" }}>
-      {srcUrl && <video src={srcUrl} controls loop muted autoPlay style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+    <div style={{ position: "relative", width, display: "inline-block" }}>
+      {variant}
+      {srcUrl && (
+        <button
+          type="button"
+          onClick={() => setAudioOn((v) => !v)}
+          title={audioOn ? "Mute preview" : "Unmute preview"}
+          style={{
+            position: "absolute", bottom: 8, right: 8, zIndex: 5,
+            background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 999, padding: 7, color: audioOn ? "#ffeb3b" : "#fff",
+            cursor: "pointer", display: "inline-flex", alignItems: "center",
+            justifyContent: "center", lineHeight: 0,
+          }}
+        >
+          {audioOn ? <Volume2 size={14} /> : <VolumeX size={14} />}
+        </button>
+      )}
     </div>
   );
 }
@@ -83,6 +120,7 @@ function FollowBarPreview({
   srcUrl, width, height, scale,
   text, fontFamily, fontSize, textColor, bgColor,
   followText, followTextColor, titleColor,
+  audioOn = false,
 }) {
   // Layout proportions (matching pipeline: 1080x1920)
   const txtH = Math.round(323 * scale);
@@ -136,7 +174,8 @@ function FollowBarPreview({
         {srcUrl && (
           <video
             src={srcUrl}
-            muted autoPlay loop playsInline
+            muted={!audioOn}
+            autoPlay loop playsInline
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         )}
@@ -170,6 +209,7 @@ function TornCardPreview({
   srcUrl, imageUrl, width, height, scale,
   text, fontFamily, fontSize, textColor,
   sectionPct, cardStyle,
+  audioOn = false,
 }) {
   const sp = sectionPct || {};
   const videoPct = sp.video || 0.4619;
@@ -197,7 +237,8 @@ function TornCardPreview({
         {srcUrl && (
           <video
             src={srcUrl}
-            muted autoPlay loop playsInline
+            muted={!audioOn}
+            autoPlay loop playsInline
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         )}

@@ -1,10 +1,31 @@
-import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Home, Plus, Menu, X } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import {
+  Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
+  Radar, Zap, User, LogOut, LogIn, UserPlus, Image as ImageIcon,
+  Settings as SettingsIcon,
+} from "lucide-react";
+import { useAuth } from "../auth/AuthProvider";
 
 export default function NavBar() {
-  const loc = useLocation();
+  const loc  = useLocation();
+  const nav  = useNavigate();
+  const { user, isAuthenticated, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    function onClick(e) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [userMenuOpen]);
 
   const active = (path) =>
     loc.pathname === path
@@ -12,9 +33,25 @@ export default function NavBar() {
       : "text-gray-400 hover:text-gray-200";
 
   const navLinks = [
-    { to: "/",    icon: Home, label: "Jobs" },
-    { to: "/new", icon: Plus, label: "New Job" },
+    { to: "/",              icon: Home,        label: "Jobs" },
+    { to: "/new",           icon: Plus,        label: "New Job" },
+    { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
+    { to: "/assets",        icon: ImageIcon,   label: "Assets" },
+    { to: "/channels",      icon: Palette,     label: "Style Profiles" },
+    { to: "/uploads",       icon: UploadCloud, label: "Uploads" },
+    { to: "/campaigns",     icon: Megaphone,   label: "Campaigns" },
+    { to: "/performance",   icon: BarChart3,   label: "Performance" },
+    { to: "/trending",      icon: Radar,       label: "Trending" },
   ];
+
+  const displayName = user?.name?.trim() || user?.email?.split("@")[0] || "Account";
+  const avatarLetter = (displayName[0] || "U").toUpperCase();
+
+  function handleLogout() {
+    setUserMenuOpen(false);
+    logout();
+    nav("/login", { replace: true });
+  }
 
   return (
     <header className="bg-[#0a0a0a] border-b-2 border-accent flex-shrink-0 relative z-50">
@@ -38,14 +75,72 @@ export default function NavBar() {
           ))}
         </nav>
 
-        {/* Mobile toggle */}
-        <button
-          onClick={() => setOpen(!open)}
-          className="sm:hidden p-2 -mr-2 text-gray-400 hover:text-white"
-          aria-label="Toggle menu"
-        >
-          {open ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        {/* Right cluster: user menu + mobile toggle */}
+        <div className="flex items-center gap-2">
+          {isAuthenticated ? (
+            <div ref={userMenuRef} className="relative">
+              <button
+                onClick={() => setUserMenuOpen((v) => !v)}
+                className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 text-gray-200"
+                title={user?.email}
+              >
+                <span className="w-6 h-6 rounded-full bg-accent2 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                  {avatarLetter}
+                </span>
+                <span className="hidden md:inline text-xs font-medium max-w-[120px] truncate">
+                  {displayName}
+                </span>
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-56 bg-[#0c0c0c] border border-border rounded shadow-xl py-1 z-50">
+                  <div className="px-3 py-2 border-b border-border">
+                    <div className="text-sm text-gray-100 font-medium truncate">{displayName}</div>
+                    <div className="text-[11px] text-gray-500 truncate">{user?.email}</div>
+                    {user?.google && (
+                      <div className="text-[10px] text-accent2 mt-0.5">Signed in with Google</div>
+                    )}
+                  </div>
+                  <Link
+                    to="/settings"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                  >
+                    <SettingsIcon size={13} /> Settings & social links
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                  >
+                    <LogOut size={13} /> Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="hidden sm:flex items-center gap-1.5">
+              <Link
+                to="/login"
+                className="text-xs text-gray-300 hover:text-white px-2 py-1 rounded hover:bg-white/5 flex items-center gap-1"
+              >
+                <LogIn size={12} /> Sign in
+              </Link>
+              <Link
+                to="/register"
+                className="text-xs bg-accent hover:bg-accent2 text-white font-medium px-2.5 py-1 rounded flex items-center gap-1"
+              >
+                <UserPlus size={12} /> Sign up
+              </Link>
+            </div>
+          )}
+
+          <button
+            onClick={() => setOpen(!open)}
+            className="sm:hidden p-2 -mr-2 text-gray-400 hover:text-white"
+            aria-label="Toggle menu"
+          >
+            {open ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile dropdown */}
@@ -64,6 +159,32 @@ export default function NavBar() {
               <Icon size={16} /> {label}
             </Link>
           ))}
+          {!isAuthenticated && (
+            <>
+              <Link
+                to="/login"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-gray-300 hover:bg-white/5"
+              >
+                <LogIn size={16} /> Sign in
+              </Link>
+              <Link
+                to="/register"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-white bg-accent hover:bg-accent2"
+              >
+                <UserPlus size={16} /> Sign up
+              </Link>
+            </>
+          )}
+          {isAuthenticated && (
+            <button
+              onClick={() => { setOpen(false); handleLogout(); }}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-gray-300 hover:bg-white/5 text-left"
+            >
+              <LogOut size={16} /> Sign out ({displayName})
+            </button>
+          )}
         </nav>
       )}
     </header>
