@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
   Radar, Zap, User, LogOut, LogIn, UserPlus, Image as ImageIcon,
-  Settings as SettingsIcon,
+  Settings as SettingsIcon, CreditCard,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -106,6 +106,13 @@ export default function NavBar() {
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
                   >
                     <SettingsIcon size={13} /> Settings & social links
+                  </Link>
+                  <Link
+                    to="/billing"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                  >
+                    <CreditCard size={13} /> Billing & Plans
                   </Link>
                   <button
                     onClick={handleLogout}

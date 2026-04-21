@@ -52,6 +52,13 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Publish presets: "global" | "individual" | "<group_id>"
+  // - global   = every connected YT account auto-selected (default)
+  // - individual = user ticks/unticks each destination manually
+  // - <group_id> = only destinations in that named group
+  const [preset, setPreset] = useState("global");
+  const [groups, setGroups] = useState([]);
+
   const hasSeo = !!(clip && clip.seo && clip.seo.title);
   const variantMap = (clip?.seo_variants && typeof clip.seo_variants === "object")
     ? clip.seo_variants : {};
@@ -80,6 +87,10 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     // Reset per-destination map — will be filled by the effect below once
     // the list of destinations is computed.
     setVariantByDest({});
+
+    // Load the user's named publish presets — shows up as preset buttons.
+    api.listChannelGroups().then(setGroups).catch(() => setGroups([]));
+    setPreset("global");
 
     setLoadingCh(true);
     api.listChannels()
@@ -183,6 +194,39 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+    // Any manual toggle flips the mode to "individual" — the preset no
+    // longer represents what's actually selected.
+    setPreset("individual");
+  }
+
+  // Apply a preset = auto-select destinations according to its policy.
+  // "global"     → every destination
+  // "individual" → no change (leave current selection, user picks manually)
+  // <groupId>    → only destinations whose google_channel_id is in the group
+  function applyPreset(nextPreset) {
+    setPreset(nextPreset);
+    if (nextPreset === "global") {
+      setSelectedDests(new Set(destinations.map(([k]) => k)));
+      return;
+    }
+    if (nextPreset === "individual") {
+      // Keep current selection — user edits manually from here
+      return;
+    }
+    // Group preset
+    const group = groups.find((g) => String(g.id) === String(nextPreset));
+    if (!group) return;
+    const wanted = new Set(group.google_channel_ids || []);
+    const nextKeys = new Set();
+    for (const [, profiles] of destinations) {
+      const gid = profiles[0]?.youtube_channel_id;
+      if (gid && wanted.has(gid)) {
+        nextKeys.add(
+          profiles[0].youtube_channel_title || profiles[0].youtube_channel_id || `__p_${profiles[0].id}`,
+        );
+      }
+    }
+    setSelectedDests(nextKeys);
   }
   function setProfileForDest(key, profileId) {
     setProfileByDest((prev) => ({ ...prev, [key]: Number(profileId) }));
@@ -305,6 +349,41 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
               {selectedDests.size} destination{selectedDests.size === 1 ? "" : "s"} selected
             </span>
           </label>
+
+          {/* Preset picker — Global / Individual / named groups.  One click
+              sets the selection; ticking/unticking after that flips to
+              Individual so the two stay in sync. */}
+          {destinations.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="text-[10px] uppercase tracking-wider text-gray-500 mr-1">Preset:</span>
+              <PresetChip
+                active={preset === "global"}
+                label="Global"
+                hint="All channels"
+                onClick={() => applyPreset("global")}
+              />
+              <PresetChip
+                active={preset === "individual"}
+                label="Individual"
+                hint="Pick each manually"
+                onClick={() => applyPreset("individual")}
+              />
+              {groups.map((g) => (
+                <PresetChip
+                  key={g.id}
+                  active={String(preset) === String(g.id)}
+                  label={g.name}
+                  hint={`${(g.google_channel_ids || []).length} channels`}
+                  onClick={() => applyPreset(String(g.id))}
+                />
+              ))}
+              {groups.length === 0 && (
+                <span className="text-[10px] text-gray-600">
+                  (make named groups on the <strong>Style Profiles</strong> page to see them here)
+                </span>
+              )}
+            </div>
+          )}
           {loadingCh ? (
             <div className="text-xs text-gray-500 flex items-center gap-2 py-2">
               <Loader2 size={12} className="animate-spin" /> Loading accounts…
@@ -350,7 +429,15 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
                         {" "}— {profiles.length} profiles share this YouTube account.
                       </div>
                     )}
-                    {/* Per-destination SEO variant picker */}
+                    {/* Composed-SEO preview — what WILL be uploaded to this destination */}
+                    {isSel && hasSeo && useSeo && (
+                      <ComposedPreview
+                        clipId={clip.id}
+                        channelId={activeProfileId}
+                        publishKind={publishKind}
+                      />
+                    )}
+                    {/* Per-destination SEO variant picker (legacy variants only) */}
                     {isSel && variantList.length > 0 && (() => {
                       const destKey = String(profiles[0].id);
                       const localIds = new Set(profiles.map((p) => p.id));
@@ -608,6 +695,105 @@ function PrivacyOption({ active, onClick, icon: Icon, label, hint }) {
         <Icon size={12} /> {label}
       </span>
       <span className="text-[10px] text-gray-500">{hint}</span>
+    </button>
+  );
+}
+
+/**
+ * ComposedPreview — shows the EXACT title / description / tags that will be
+ * uploaded to one YouTube destination, after the brand overlay is applied to
+ * the generic SEO.  Collapsed by default to keep the modal compact; opened
+ * on demand.  Also surfaces any cross-brand leak warnings from the backend
+ * auditor as a prominent red banner so the user can bail before publish.
+ */
+function ComposedPreview({ clipId, channelId, publishKind }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!open || data || loading) return;
+    setLoading(true);
+    setErr("");
+    api.previewComposedSEO(clipId, channelId, publishKind)
+      .then((res) => setData(res))
+      .catch((e) => setErr(e.message || "Preview failed"))
+      .finally(() => setLoading(false));
+  }, [open, clipId, channelId, publishKind]);
+
+  // Invalidate cache if destination or publishKind changes while expanded
+  useEffect(() => { setData(null); }, [channelId, publishKind]);
+
+  return (
+    <div className="mt-2 pl-6">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-[11px] text-accent2 hover:text-accent underline underline-offset-2"
+      >
+        {open ? "hide preview" : "preview what will be uploaded"}
+      </button>
+      {open && (
+        <div className="mt-1.5 text-[11px] rounded border border-border bg-black/40 p-2 space-y-1.5">
+          {loading && (
+            <div className="flex items-center gap-1.5 text-gray-500"><Loader2 size={12} className="animate-spin" /> composing…</div>
+          )}
+          {err && (
+            <div className="text-red-400 flex items-start gap-1.5"><AlertCircle size={12} className="mt-0.5" /> {err}</div>
+          )}
+          {data?.leak_warnings?.length > 0 && (
+            <div className="text-red-300 bg-red-950/30 border border-red-900 rounded px-1.5 py-1">
+              <div className="font-semibold flex items-center gap-1"><AlertCircle size={11} /> leak warning</div>
+              <ul className="list-disc pl-4 mt-0.5 space-y-0.5">
+                {data.leak_warnings.slice(0, 3).map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+          )}
+          {data?.composed && (
+            <>
+              <div>
+                <span className="text-gray-500 uppercase text-[9px]">Title</span>
+                <div className="text-gray-200 break-words">{data.composed.title}</div>
+              </div>
+              <div>
+                <span className="text-gray-500 uppercase text-[9px]">Description (first 200 chars)</span>
+                <div className="text-gray-300 whitespace-pre-wrap">{(data.composed.description || "").slice(0, 200)}{(data.composed.description || "").length > 200 ? "…" : ""}</div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(data.composed.keywords || []).slice(0, 12).map((k, i) => (
+                  <span key={i} className="bg-black/50 border border-border rounded px-1 text-[10px] text-gray-400">{k}</span>
+                ))}
+                {(data.composed.keywords || []).length > 12 && (
+                  <span className="text-[10px] text-gray-500">+{data.composed.keywords.length - 12}</span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(data.composed.hashtags || []).map((h, i) => (
+                  <span key={i} className="bg-accent2/10 border border-accent2/30 rounded px-1 text-[10px] text-accent2">{h}</span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PresetChip({ active, label, hint, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+        active
+          ? "bg-accent2/30 border-accent2 text-white"
+          : "bg-black/30 border-border text-gray-400 hover:text-gray-200"
+      }`}
+    >
+      {label}
     </button>
   );
 }

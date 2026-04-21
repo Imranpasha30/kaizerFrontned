@@ -140,6 +140,25 @@ export const api = {
   oauthDisconnect:  (channelId)  => req("DELETE", `/youtube/oauth/${channelId}`),
   listYtAccounts:   ()           => req("GET",    "/youtube/oauth/accounts"),
   newYtAccount:     ()           => req("POST",   "/youtube/oauth/new-account"),
+  // Re-fetch live channel metadata (thumbnail, subs, description, etc.) and
+  // update the DB cache.  Call this when the user changed their YT channel
+  // settings — the UI will then reflect the new values without ever having
+  // to hit YouTube again for normal page loads.
+  refreshYtAccount: (channelId)  => req("POST",   `/youtube/oauth/accounts/${channelId}/refresh`),
+
+  // Channel groups — one-click presets for publish fan-out (e.g. "English",
+  // "Telugu").  Stored per-user; each group holds a list of google_channel_ids.
+  listChannelGroups:   ()                     => req("GET",    "/channel-groups/"),
+  createChannelGroup:  (payload)              => req("POST",   "/channel-groups/", payload),
+  updateChannelGroup:  (id, payload)          => req("PATCH",  `/channel-groups/${id}`, payload),
+  deleteChannelGroup:  (id)                   => req("DELETE", `/channel-groups/${id}`),
+
+  // Billing — plan tiers, current usage, Stripe checkout (stubbed until live).
+  listPlans:         ()                              => req("GET",  "/billing/plans"),
+  getMyBilling:      ()                              => req("GET",  "/billing/me"),
+  createCheckout:    (plan_key, cycle = "monthly")   => req("POST", "/billing/checkout-session", { plan_key, cycle }),
+  createPortal:      ()                              => req("POST", "/billing/portal-session"),
+  devSetPlan:        (plan_key)                      => req("POST", `/billing/dev/set-plan?plan_key=${encodeURIComponent(plan_key)}`),
 
   // Many-to-many: which destinations a style profile is allowed to publish to
   setProfileDestinations: (channelId, googleChannelIds) =>
@@ -161,12 +180,16 @@ export const api = {
   retryUpload:    (id)              => req("POST",   `/uploads/${id}/retry`),
   getQuota:       ()                => req("GET",    `/quota`),
 
-  // SEO (phase 2+3)
+  // SEO (phase 2+3 + Content+Brand Overlay refactor)
   generateClipSEO: (clipId, payload) => req("POST",   `/clips/${clipId}/seo/generate`, payload),
   getClipSEOStatus: (clipId)         => req("GET",    `/clips/${clipId}/seo/status`),
   updateClipSEO:   (clipId, payload) => req("PUT",    `/clips/${clipId}/seo`, payload),
   clearClipSEO:    (clipId)          => req("DELETE", `/clips/${clipId}/seo`),
   bulkGenerateSEO: (jobId, payload)  => req("POST",   `/jobs/${jobId}/seo/generate-all`, payload),
+  // Compose-preview: returns exact title/desc/tags that WOULD be uploaded to
+  // `channelId` for this clip (generic SEO + that destination's brand overlay).
+  previewComposedSEO: (clipId, channelId, publishKind = "video") =>
+    req("GET", `/clips/${clipId}/seo/compose-preview?channel_id=${channelId}&publish_kind=${encodeURIComponent(publishKind)}`),
 
   // Campaigns (phase A — multi-channel auto-publish)
   listCampaigns:    ()                   => req("GET",    "/campaigns/"),

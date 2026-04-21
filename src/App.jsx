@@ -13,6 +13,7 @@ import Trending from "./pages/Trending";
 import QuickPublish from "./pages/QuickPublish";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
+import Billing  from "./pages/Billing";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
 import AuthProvider from "./auth/AuthProvider";
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/campaigns"                     element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
           <Route path="/performance"                   element={<ProtectedRoute><Performance /></ProtectedRoute>} />
           <Route path="/trending"                      element={<ProtectedRoute><Trending /></ProtectedRoute>} />
+          <Route path="/billing"                       element={<ProtectedRoute><Billing /></ProtectedRoute>} />
         </Routes>
       </Shell>
     </AuthProvider>

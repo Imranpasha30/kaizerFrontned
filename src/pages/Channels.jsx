@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import Modal from "../components/Modal";
 import ChannelForm from "../components/ChannelForm";
 import YouTubeAccountsPanel from "../components/YouTubeAccountsPanel";
+import ChannelGroupsManager from "../components/ChannelGroupsManager";
 
 export default function Channels() {
   const [channels, setChannels]   = useState([]);
@@ -241,6 +242,9 @@ export default function Channels() {
 
       {/* Unique YouTube accounts — the real destinations */}
       <YouTubeAccountsPanel oauthConfigured={oauthState.configured} onRefresh={load} />
+
+      {/* Channel groups — user-defined presets for publish fan-out */}
+      <ChannelGroupsManager ytAccounts={ytAccounts} />
 
       {/* How it works explainer */}
       <div className="mb-5 p-3 bg-blue-950/20 border border-blue-900/40 rounded text-xs text-gray-300 leading-relaxed">

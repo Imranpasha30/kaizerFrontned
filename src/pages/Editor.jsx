@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight, Settings, Eye, Sparkles } from "lucide-react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight, Settings, Eye, Sparkles, Youtube } from "lucide-react";
 import { api } from "../api/client";
 import LivePreview from "../components/LivePreview";
 import SEOPanel from "../components/SEOPanel";
+import PublishModal from "../components/PublishModal";
 
 const FONTS = [
   "Ponnala-Regular.ttf", "NotoSansTelugu-Bold.ttf", "NotoSerifTelugu-Bold.ttf",
@@ -48,6 +49,10 @@ export default function Editor() {
 
   // Mobile panel toggle: "preview" | "controls"
   const [mobilePanel, setMobilePanel] = useState("preview");
+  // Publish-to-YouTube modal state.  Clip ID comes from the currently-selected
+  // clip so the button on any clip works without extra navigation.
+  const [publishOpen, setPublishOpen] = useState(false);
+  const navigate = useNavigate();
 
   // Right sidebar tab: "style" | "seo"
   const [rightTab, setRightTab] = useState("style");
@@ -332,7 +337,15 @@ export default function Editor() {
           <ArrowLeft size={14} />
         </Link>
         <span className="text-xs text-gray-400 flex-1 truncate">{job.video_name}</span>
-        <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs">
+        <button
+          onClick={() => setPublishOpen(true)}
+          disabled={!clip}
+          title={clip?.seo ? "Publish this clip to YouTube" : "Generate SEO first, then publish"}
+          className="btn py-1 px-2 flex items-center gap-1 text-xs bg-red-600 hover:bg-red-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Youtube size={12} /> Publish
+        </button>
+        <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs" title="Export rendered MP4">
           {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
         </button>
       </div>
@@ -357,7 +370,15 @@ export default function Editor() {
           <ArrowLeft size={14} />
         </Link>
         <span className="text-xs text-gray-400 flex-1 truncate">{job.video_name}</span>
-        <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs">
+        <button
+          onClick={() => setPublishOpen(true)}
+          disabled={!clip}
+          title={clip?.seo ? "Publish this clip to YouTube" : "Generate SEO first, then publish"}
+          className="btn py-1 px-2 flex items-center gap-1 text-xs bg-red-600 hover:bg-red-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Youtube size={12} /> Publish
+        </button>
+        <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs" title="Export rendered MP4">
           {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
         </button>
       </div>
@@ -576,6 +597,20 @@ export default function Editor() {
           )}
         </div>
       </div>
+
+      {/* Publish-to-YouTube modal — operates on the CURRENTLY-SELECTED clip
+          so the user can fire it from any panel without leaving the editor.
+          On publish, route to /uploads to watch the upload progress. */}
+      <PublishModal
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        clip={clip}
+        jobId={jobId}
+        onPublished={() => {
+          setPublishOpen(false);
+          navigate("/uploads");
+        }}
+      />
     </>
   );
 }

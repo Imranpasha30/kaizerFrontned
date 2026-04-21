@@ -38,8 +38,30 @@ export default function Performance() {
   async function handlePoll() {
     try {
       setPolling(true);
+      setError("");
       await api.triggerPoll();
-      setNotice("Stats poll triggered — refresh in a minute.");
+      setNotice("Stats poll triggered — fetching fresh data…");
+      // Backend poll is async and hits YouTube for every recent upload — can
+      // take 15–60 s depending on how many uploads are in flight.  Pull fresh
+      // data a few times so late-arriving stats flow in without a manual reload.
+      let ticks = 0;
+      const maxTicks = 8;          // ~40 s total
+      const intervalMs = 5000;
+      const timer = setInterval(async () => {
+        ticks += 1;
+        try {
+          await load();
+        } catch { /* surfaced inside load() */ }
+        if (ticks >= maxTicks) {
+          clearInterval(timer);
+          setNotice("Poll complete — showing latest stats.");
+          // Clear the notice after a moment so it doesn't linger forever.
+          setTimeout(() => setNotice(""), 4000);
+        }
+      }, intervalMs);
+      // Do one immediate refresh too, so the "n=0" skeleton doesn't sit there
+      // for 5 full seconds if the poll was fast.
+      setTimeout(() => load().catch(() => {}), 800);
     } catch (e) {
       setError(e.message);
     } finally {
