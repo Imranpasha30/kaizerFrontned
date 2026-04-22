@@ -381,6 +381,17 @@ export default function Editor() {
         <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs" title="Export rendered MP4">
           {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
         </button>
+        {clip && (
+          <Link
+            to={`/jobs/${jobId}/editor-beta/${clip.id}`}
+            className="btn btn-beta py-1 px-2 flex items-center gap-1 text-xs"
+            title="Try the animated effects editor"
+          >
+            <Sparkles size={12} />
+            Beta
+            <span className="beta-badge">NEW</span>
+          </Link>
+        )}
       </div>
 
       {tabsBar}

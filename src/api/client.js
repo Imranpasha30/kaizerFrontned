@@ -324,3 +324,10 @@ export const api = {
     xhr.send();
   }),
 };
+
+// ── Wave 2 — editor beta ────────────────────────────────────────────────────
+export const editorApi = {
+  listStyles:    ()         => req("GET",  "/editor/styles"),
+  renderBeta:    (body)     => req("POST", "/editor/render-beta", body),
+  getLastRender: (clipId)   => req("GET",  `/editor/render-beta/${clipId}`),
+};
