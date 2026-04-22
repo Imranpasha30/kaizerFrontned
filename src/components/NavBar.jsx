@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
   Radar, Zap, User, LogOut, LogIn, UserPlus, Image as ImageIcon,
-  Settings as SettingsIcon, CreditCard,
+  Settings as SettingsIcon, CreditCard, Sparkles,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -36,6 +36,7 @@ export default function NavBar() {
     { to: "/",              icon: Home,        label: "Jobs" },
     { to: "/new",           icon: Plus,        label: "New Job" },
     { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
+    { to: "/studio-beta",   icon: Sparkles,    label: "Studio Beta", badge: "NEW" },
     { to: "/assets",        icon: ImageIcon,   label: "Assets" },
     { to: "/channels",      icon: Palette,     label: "Style Profiles" },
     { to: "/uploads",       icon: UploadCloud, label: "Uploads" },
@@ -68,9 +69,10 @@ export default function NavBar() {
 
         {/* Desktop nav */}
         <nav className="hidden sm:flex items-center gap-4 text-sm font-medium">
-          {navLinks.map(({ to, icon: Icon, label }) => (
+          {navLinks.map(({ to, icon: Icon, label, badge }) => (
             <Link key={to} to={to} className={`flex items-center gap-1.5 pb-0.5 ${active(to)}`}>
               <Icon size={14} /> {label}
+              {badge && <span className="beta-badge">{badge}</span>}
             </Link>
           ))}
         </nav>
@@ -153,7 +155,7 @@ export default function NavBar() {
       {/* Mobile dropdown */}
       {open && (
         <nav className="sm:hidden border-t border-border bg-[#0a0a0a] px-4 pb-3 pt-2 flex flex-col gap-1">
-          {navLinks.map(({ to, icon: Icon, label }) => (
+          {navLinks.map(({ to, icon: Icon, label, badge }) => (
             <Link
               key={to}
               to={to}
@@ -164,6 +166,7 @@ export default function NavBar() {
                   : "text-gray-400 hover:bg-white/5 hover:text-gray-200"}`}
             >
               <Icon size={16} /> {label}
+              {badge && <span className="beta-badge">{badge}</span>}
             </Link>
           ))}
           {!isAuthenticated && (
