@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Save, Loader2, Tag, Hash, Star } from "lucide-react";
 import TagInput from "./TagInput";
+import LogoPicker from "./LogoPicker";
 
 const DESC_STYLES = [
   { value: "hook_first",     label: "Hook First — open with the viral sentence" },
@@ -27,6 +28,9 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
   const [hashtags,         setHashtags]          = useState([]);
   const [mandatoryHashtags,setMandatoryHashtags] = useState([]);
   const [isPriority,       setIsPriority]        = useState(false);
+  // Channel-level logo — FK to a UserAsset.  Null = no logo on renders.
+  const [logoAssetId,      setLogoAssetId]       = useState(null);
+  const [logoPreview,      setLogoPreview]       = useState(null);
 
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
@@ -44,6 +48,12 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
     setHashtags(initial.hashtags || []);
     setMandatoryHashtags(initial.mandatory_hashtags || []);
     setIsPriority(!!initial.is_priority);
+    setLogoAssetId(initial.logo_asset_id ?? null);
+    setLogoPreview(
+      initial.logo?.url
+        ? { url: initial.logo.url, filename: initial.logo.filename }
+        : null,
+    );
   }, [initial?.id]);
 
   async function handleSubmit(e) {
@@ -66,6 +76,7 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         hashtags,
         mandatory_hashtags: mandatoryHashtags,
         is_priority: isPriority,
+        logo_asset_id: logoAssetId,
       });
     } catch (err) {
       setError(err.message || "Failed to save profile");
@@ -185,6 +196,10 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         </span>
         <TagInput value={mandatoryHashtags} onChange={setMandatoryHashtags} placeholder="#KaizerNews" hashtagMode />
       </div>
+
+      {/* Logo moved to the YouTube Account cards at the top of the page —
+          style templates (this form) don't have logos, only real YT
+          accounts do.  See the "Your YouTube Accounts" section. */}
 
       <label className="flex items-center gap-2 cursor-pointer select-none pt-1">
         <input

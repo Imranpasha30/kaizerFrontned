@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Image as ImageIcon, UploadCloud, Trash2, Star, StarOff, Loader2,
-  AlertCircle, CheckCircle2, Info, X, Search,
+  AlertCircle, CheckCircle2, Info, X, Search, Folder, FolderPlus, Move,
 } from "lucide-react";
 import { api } from "../api/client";
 
@@ -14,6 +14,8 @@ import { api } from "../api/client";
  */
 export default function Assets() {
   const [assets, setAssets]     = useState([]);
+  const [folders, setFolders]   = useState([]);
+  const [folder, setFolder]     = useState("");      // current folder; "" = root
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState("");
   const [notice, setNotice]     = useState("");
@@ -22,10 +24,15 @@ export default function Assets() {
   const dropRef = useRef(null);
   const inputRef = useRef(null);
 
-  async function load() {
+  async function load(nextFolder = folder) {
     setLoading(true);
     try {
-      setAssets(await api.listAssets() || []);
+      const [list, flds] = await Promise.all([
+        api.listAssets(nextFolder),
+        api.listAssetFolders(),
+      ]);
+      setAssets(list || []);
+      setFolders(flds || []);
       setError("");
     } catch (e) {
       setError(e.message || "Failed to load assets");
@@ -34,6 +41,51 @@ export default function Assets() {
     }
   }
   useEffect(() => { load(); }, []);
+
+  async function switchFolder(path) {
+    setFolder(path);
+    await load(path);
+  }
+
+  async function createFolder() {
+    const name = prompt("New folder name (use / for sub-folders, e.g. 'logos/english')");
+    if (!name || !name.trim()) return;
+    try {
+      // If we're inside a folder, nest under it
+      const path = folder ? `${folder}/${name.trim()}` : name.trim();
+      await api.createAssetFolder(path);
+      setNotice(`Folder "${path}" created`);
+      await load(folder);
+    } catch (e) {
+      setError(e.message || "Failed to create folder");
+    }
+  }
+
+  async function deleteFolderAction() {
+    if (!folder) return;
+    const cascade = confirm(
+      `Delete folder "${folder}" AND every asset inside it?\n\n`
+      + "Click OK to delete folder + contents.\n"
+      + "Click Cancel to keep the assets (they'll move to the Root).",
+    );
+    try {
+      await api.deleteAssetFolder(folder, cascade);
+      setNotice(`Folder deleted${cascade ? " (with contents)" : " (contents moved to Root)"}`);
+      await switchFolder("");
+    } catch (e) {
+      setError(e.message || "Failed to delete folder");
+    }
+  }
+
+  async function moveAssetToFolder(asset, targetPath) {
+    try {
+      await api.moveAsset(asset.id, targetPath);
+      setNotice(`Moved "${asset.filename}" to ${targetPath || "Root"}`);
+      await load(folder);
+    } catch (e) {
+      setError(e.message || "Failed to move asset");
+    }
+  }
 
   async function doUpload(files, markDefault = false) {
     if (!files || files.length === 0) return;
@@ -45,6 +97,8 @@ export default function Assets() {
         const form = new FormData();
         form.append("file", f);
         form.append("kind", "image");
+        // Upload into the currently-viewed folder (empty = root)
+        form.append("folder_path", folder || "");
         // Only mark the first file as default (if requested) to respect
         // "at most one default" invariant.
         if (markDefault && i === 0) form.append("is_default_ad", "true");
@@ -147,6 +201,51 @@ export default function Assets() {
         </div>
       </div>
 
+      {/* Folder navigation — pills + create + delete current */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => switchFolder("")}
+          className={`text-xs px-2.5 py-1 rounded border transition-colors flex items-center gap-1 ${
+            folder === ""
+              ? "bg-accent2/30 border-accent2 text-white"
+              : "bg-black/30 border-border text-gray-400 hover:text-gray-200"
+          }`}
+          title="Root folder"
+        >
+          <Folder size={11} /> Root
+        </button>
+        {folders.filter((f) => f).map((f) => (
+          <button
+            key={f}
+            onClick={() => switchFolder(f)}
+            className={`text-xs px-2.5 py-1 rounded border transition-colors flex items-center gap-1 ${
+              folder === f
+                ? "bg-accent2/30 border-accent2 text-white"
+                : "bg-black/30 border-border text-gray-400 hover:text-gray-200"
+            }`}
+            title={f}
+          >
+            <Folder size={11} /> {f.split("/").slice(-1)[0]}
+          </button>
+        ))}
+        <button
+          onClick={createFolder}
+          className="text-xs px-2.5 py-1 rounded border border-border bg-black/30 text-gray-400 hover:text-accent2 flex items-center gap-1"
+          title={folder ? `Create a sub-folder inside "${folder}"` : "Create a new folder at root"}
+        >
+          <FolderPlus size={11} /> New folder
+        </button>
+        {folder && (
+          <button
+            onClick={deleteFolderAction}
+            className="text-xs px-2.5 py-1 rounded border border-red-900/40 bg-red-950/30 text-red-300 hover:text-red-200 flex items-center gap-1 ml-auto"
+            title={`Delete folder "${folder}"`}
+          >
+            <Trash2 size={11} /> Delete "{folder.split("/").slice(-1)[0]}"
+          </button>
+        )}
+      </div>
+
       {/* Current default strip */}
       {defaultAsset && (
         <div className="mb-4 p-3 bg-yellow-950/20 border border-yellow-900/40 rounded flex items-center gap-3">
@@ -237,9 +336,12 @@ export default function Assets() {
             <AssetCard
               key={a.id}
               asset={a}
+              folders={folders}
+              currentFolder={folder}
               onSetDefault={() => setAsDefault(a)}
               onUnsetDefault={() => unsetDefault(a)}
               onDelete={() => doDelete(a)}
+              onMove={(target) => moveAssetToFolder(a, target)}
             />
           ))}
         </div>
@@ -248,9 +350,11 @@ export default function Assets() {
   );
 }
 
-function AssetCard({ asset, onSetDefault, onUnsetDefault, onDelete }) {
+function AssetCard({ asset, folders = [], currentFolder = "", onSetDefault, onUnsetDefault, onDelete, onMove }) {
   const src = api.mediaUrl(asset.thumb_url || asset.url);
   const kb = Math.round((asset.size_bytes || 0) / 1024);
+  // Candidate move destinations = all folders except the current one
+  const moveTargets = ["", ...folders.filter((f) => f && f !== currentFolder)];
   return (
     <div
       className={`relative bg-surface border rounded overflow-hidden group transition-colors ${
@@ -279,6 +383,26 @@ function AssetCard({ asset, onSetDefault, onUnsetDefault, onDelete }) {
             >
               <Star size={11} /> Set as default
             </button>
+          )}
+          {moveTargets.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value !== "" || e.nativeEvent.target.selectedIndex > 0) {
+                  onMove?.(e.target.value);
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full px-2 py-1.5 rounded bg-blue-500/70 hover:bg-blue-500 text-white text-xs flex items-center justify-center"
+              title="Move to another folder"
+            >
+              <option value="" disabled>📂 Move to…</option>
+              {moveTargets.map((t) => (
+                <option key={t || "__root"} value={t}>
+                  {t === "" ? "Root" : t}
+                </option>
+              ))}
+            </select>
           )}
           <button
             onClick={onDelete}

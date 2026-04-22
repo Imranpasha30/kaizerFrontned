@@ -145,6 +145,7 @@ export const api = {
   // settings — the UI will then reflect the new values without ever having
   // to hit YouTube again for normal page loads.
   refreshYtAccount: (channelId)  => req("POST",   `/youtube/oauth/accounts/${channelId}/refresh`),
+  setYtAccountLogo: (channelId, logo_asset_id) => req("POST", `/youtube/oauth/accounts/${channelId}/logo`, { logo_asset_id }),
 
   // Channel groups — one-click presets for publish fan-out (e.g. "English",
   // "Telugu").  Stored per-user; each group holds a list of google_channel_ids.
@@ -249,7 +250,19 @@ export const api = {
   suggestFromProfiles: () => req("GET", "/trending/suggest-from-profiles"),
 
   // User assets (image library)
-  listAssets:      ()        => req("GET",    "/assets/"),
+  // Assets (including virtual folders for organization).  `folder_path`
+  // filter returns only assets directly in that folder (no subtree).
+  listAssets:        (folderPath = null) =>
+    req("GET", folderPath != null ? `/assets/?folder_path=${encodeURIComponent(folderPath)}` : "/assets/"),
+  listAssetFolders:  () => req("GET",    "/assets/folders"),
+  createAssetFolder: (path) => req("POST",   "/assets/folders", { path }),
+  renameAssetFolder: (old_path, new_path) => req("PATCH",  "/assets/folders", { old_path, new_path }),
+  deleteAssetFolder: (path, cascade = false) =>
+    req("DELETE", `/assets/folders?path=${encodeURIComponent(path)}&cascade=${cascade}`),
+  moveAsset:         (assetId, folder_path) => req("PATCH", `/assets/${assetId}`, { folder_path }),
+  // Multi-channel logo apply (power-user shortcut)
+  applyLogoToChannels: (channel_ids, logo_asset_id) =>
+    req("POST", "/channels/apply-logo", { channel_ids, logo_asset_id }),
   getDefaultAsset: ()        => req("GET",    "/assets/default"),
   patchAsset:      (id, p)   => req("PATCH",  `/assets/${id}`, p),
   deleteAsset:     (id)      => req("DELETE", `/assets/${id}`),

@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Youtube, Plus, CheckCircle2, Loader2, RefreshCw, AlertCircle, Users,
+  Image as ImageIcon, X,
 } from "lucide-react";
 import { api } from "../api/client";
+import LogoPicker from "./LogoPicker";
 
 /**
  * Shows each unique YouTube account the user has linked, with the style
@@ -21,7 +23,31 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
   const [notice, setNotice] = useState("");
   // Per-account refresh spinner: { [google_channel_id]: true } while pulling
   const [refreshingIds, setRefreshingIds] = useState({});
+  // Logo editor modal state — which YT account is being edited
+  const [logoAcc, setLogoAcc]     = useState(null);        // the acc object or null
+  const [logoValue, setLogoValue] = useState(null);        // pending asset id (or null)
+  const [logoSaving, setLogoSaving] = useState(false);
   const popupRef = useRef(null);
+
+  function openLogoEditor(acc) {
+    setLogoAcc(acc);
+    setLogoValue(acc.logo_asset_id ?? null);
+  }
+  function closeLogoEditor() { setLogoAcc(null); setLogoValue(null); }
+
+  async function saveLogo() {
+    if (!logoAcc?.primary_profile_id) { closeLogoEditor(); return; }
+    setLogoSaving(true);
+    try {
+      await api.setYtAccountLogo(logoAcc.primary_profile_id, logoValue);
+      closeLogoEditor();
+      await load();
+    } catch (e) {
+      setError(e.message || "Failed to save logo");
+    } finally {
+      setLogoSaving(false);
+    }
+  }
 
   async function handleAccountRefresh(acc) {
     if (!acc?.primary_profile_id) return;
@@ -222,6 +248,36 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                   </div>
                 )}
 
+                {/* Video-overlay logo — logo belongs to the real YT account,
+                    not to style-template profiles.  Click to open picker. */}
+                <div className="flex items-center gap-2 mb-2 p-1.5 rounded border border-border bg-black/30">
+                  {acc.logo?.url ? (
+                    <img
+                      src={acc.logo.thumb_url || acc.logo.url}
+                      alt="logo"
+                      className="w-8 h-8 rounded object-contain bg-black/40"
+                      onError={(e) => { e.target.style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded border border-border bg-black/50 flex items-center justify-center text-gray-600">
+                      <ImageIcon size={14} />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Video overlay logo</div>
+                    <div className="text-[11px] text-gray-300 truncate">
+                      {acc.logo?.filename || <span className="text-gray-500 italic">No logo — videos render with no overlay</span>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => openLogoEditor(acc)}
+                    className="text-[10px] text-accent2 hover:text-accent underline underline-offset-2"
+                    title="Set or change this account's overlay logo"
+                  >
+                    {acc.logo?.url ? "change" : "set"}
+                  </button>
+                </div>
+
                 <div className="border-t border-border/60 pt-2">
                   <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
                     Style profiles on this account
@@ -251,6 +307,55 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Logo editor modal — overlay for the YT account being edited */}
+      {logoAcc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3"
+          onClick={closeLogoEditor}
+        >
+          <div
+            className="bg-[#0c0c0c] border border-border rounded-lg p-4 max-w-lg w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-100">
+                Overlay logo — <span className="text-green-300">{logoAcc.youtube_channel_title}</span>
+              </h3>
+              <button onClick={closeLogoEditor} className="text-gray-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Videos rendered for this YouTube account will get this logo overlaid.
+              Leave empty for no overlay.
+            </p>
+            <LogoPicker
+              value={logoValue}
+              onChange={setLogoValue}
+              initialPreview={
+                logoAcc.logo?.url
+                  ? { url: logoAcc.logo.url, filename: logoAcc.logo.filename }
+                  : null
+              }
+              currentChannelId={null}
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={closeLogoEditor} className="btn btn-secondary text-xs py-1 px-3">
+                Cancel
+              </button>
+              <button
+                onClick={saveLogo}
+                disabled={logoSaving}
+                className="btn btn-primary text-xs py-1 px-3 flex items-center gap-1 disabled:opacity-50"
+              >
+                {logoSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>

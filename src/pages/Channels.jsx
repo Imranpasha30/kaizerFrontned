@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Plus, Edit2, Trash2, Youtube, Star, Loader2,
   AlertCircle, CheckCircle2, RefreshCw, Link as LinkIcon, Unlink,
-  Brain, X, CheckSquare, Square, Palette, Info,
+  Brain, X, CheckSquare, Square, Palette, Info, Image as ImageIcon,
 } from "lucide-react";
+import LogoPicker from "../components/LogoPicker";
 import { api } from "../api/client";
 import Modal from "../components/Modal";
 import ChannelForm from "../components/ChannelForm";
@@ -388,6 +389,26 @@ function ChannelCard({
   const tagCount = (channel.fixed_tags || []).length;
   const hashCount = (channel.hashtags || []).length;
 
+  // Quick logo edit — inline modal instead of opening the full ChannelForm.
+  const [logoOpen, setLogoOpen]       = React.useState(false);
+  const [logoValue, setLogoValue]     = React.useState(channel.logo_asset_id ?? null);
+  const [logoSaving, setLogoSaving]   = React.useState(false);
+  React.useEffect(() => { setLogoValue(channel.logo_asset_id ?? null); }, [channel.logo_asset_id]);
+
+  async function saveLogo() {
+    if (logoValue === (channel.logo_asset_id ?? null)) { setLogoOpen(false); return; }
+    setLogoSaving(true);
+    try {
+      await api.updateChannel(channel.id, { logo_asset_id: logoValue });
+      onSavedDestinations?.();   // parent re-fetches channels
+      setLogoOpen(false);
+    } catch (e) {
+      alert(e.message || "Failed to save logo");
+    } finally {
+      setLogoSaving(false);
+    }
+  }
+
   // Multi-select state for "Publishes to": starts from server-known allowed_destinations.
   const [allowed, setAllowed] = React.useState(
     new Set((channel.allowed_destinations || []).map(String))
@@ -585,6 +606,52 @@ function ChannelCard({
               ? <><Loader2 size={11} className="animate-spin" /> Learning…</>
               : <><Brain size={11} /> {corpus?.refreshed_at ? "Re-learn" : "Learn"}</>}
           </button>
+        </div>
+      )}
+
+      {/* Quick logo-edit modal — only the LogoPicker, no full channel form. */}
+      {logoOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3"
+          onClick={() => setLogoOpen(false)}
+        >
+          <div
+            className="bg-[#0c0c0c] border border-border rounded-lg p-4 max-w-lg w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-100">
+                Set logo — <span className="text-accent2">{channel.name}</span>
+              </h3>
+              <button onClick={() => setLogoOpen(false)} className="text-gray-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+            <LogoPicker
+              value={logoValue}
+              onChange={setLogoValue}
+              initialPreview={
+                channel.logo?.url ? { url: channel.logo.url, filename: channel.logo.filename } : null
+              }
+              currentChannelId={channel.id}
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                onClick={() => setLogoOpen(false)}
+                className="btn btn-secondary text-xs py-1 px-3"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveLogo}
+                disabled={logoSaving}
+                className="btn btn-primary text-xs py-1 px-3 flex items-center gap-1 disabled:opacity-50"
+              >
+                {logoSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
