@@ -5,8 +5,6 @@ import Home     from "./pages/Home";
 import NewJob   from "./pages/NewJob";
 import JobDetail from "./pages/JobDetail";
 import Editor   from "./pages/Editor";
-import EditorBeta from "./pages/EditorBeta";
-import StudioBeta from "./pages/StudioBeta";
 import Channels from "./pages/Channels";
 import Uploads  from "./pages/Uploads";
 import Campaigns from "./pages/Campaigns";
@@ -51,8 +49,6 @@ export default function App() {
           <Route path="/jobs/:jobId"                   element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/edit"              element={<ProtectedRoute><Editor /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/edit/:clipId"      element={<ProtectedRoute><Editor /></ProtectedRoute>} />
-          <Route path="/jobs/:jobId/editor-beta/:clipId" element={<ProtectedRoute><EditorBeta /></ProtectedRoute>} />
-          <Route path="/studio-beta"                   element={<ProtectedRoute><StudioBeta /></ProtectedRoute>} />
           <Route path="/channels"                      element={<ProtectedRoute><Channels /></ProtectedRoute>} />
           <Route path="/uploads"                       element={<ProtectedRoute><Uploads /></ProtectedRoute>} />
           <Route path="/campaigns"                     element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />

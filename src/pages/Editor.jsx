@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight, Settings, Eye, Sparkles, Youtube } from "lucide-react";
-import { api } from "../api/client";
+import { ArrowLeft, RefreshCw, Download, Upload, Loader2, ChevronLeft, ChevronRight, Settings, Eye, Sparkles, Youtube, Wand2, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { api, editorApi } from "../api/client";
+import StylePackCard from "../components/StylePackCard";
+import SyncedVideoPair from "../components/SyncedVideoPair";
 import LivePreview from "../components/LivePreview";
 import SEOPanel from "../components/SEOPanel";
 import PublishModal from "../components/PublishModal";
@@ -10,6 +12,21 @@ const FONTS = [
   "Ponnala-Regular.ttf", "NotoSansTelugu-Bold.ttf", "NotoSerifTelugu-Bold.ttf",
   "HindGuntur-Bold.ttf", "Gurajada-Regular.ttf", "Ramabhadra-Regular.ttf",
   "TenaliRamakrishna-Regular.ttf", "Timmana-Regular.ttf",
+];
+
+const PLATFORM_OPTIONS = [
+  { value: "youtube_short",  label: "YouTube Short" },
+  { value: "instagram_reel", label: "Instagram Reel" },
+  { value: "youtube_full",   label: "YouTube Full" },
+  { value: "tiktok",         label: "TikTok" },
+];
+
+const FALLBACK_STYLES = [
+  { name: "minimal",    label: "Minimal",    description: "Clean cuts, no distractions",  transition: "fade",         color_preset: "neutral",         motion: "static",      text_animation: "fade_in",    caption_animation: "simple" },
+  { name: "cinematic",  label: "Cinematic",  description: "Warm tones, cinematic depth",  transition: "cross_dissolve",color_preset: "cinematic_warm",  motion: "ken_burns_in",text_animation: "fade_up",    caption_animation: "word_pop" },
+  { name: "news_flash", label: "News Flash", description: "Bold, urgent energy",          transition: "wipe_right",    color_preset: "news_red",        motion: "zoom_in",     text_animation: "bounce_in",  caption_animation: "flash" },
+  { name: "vibrant",    label: "Vibrant",    description: "Pop colours, high energy",     transition: "slide_up",      color_preset: "vibrant_pop",     motion: "pan_left",    text_animation: "scale_pop",  caption_animation: "rainbow" },
+  { name: "calm",       label: "Calm",       description: "Soft, reassuring mood",        transition: "dissolve",      color_preset: "cool_blue",       motion: "slow_zoom",   text_animation: "gentle_fade",caption_animation: "typewriter" },
 ];
 
 function Label({ children }) {
@@ -56,6 +73,18 @@ export default function Editor() {
 
   // Right sidebar tab: "style" | "seo"
   const [rightTab, setRightTab] = useState("style");
+
+  // ── Effect preset panel (collapsed by default) ──────────
+  const [effectOpen,      setEffectOpen]      = useState(false);
+  const [betaStyles,      setBetaStyles]      = useState([]);
+  const [betaStylesLoaded,setBetaStylesLoaded]= useState(false);
+  const [selectedPack,    setSelectedPack]    = useState("cinematic");
+  const [hookText,        setHookText]        = useState("");
+  const [betaPlatform,    setBetaPlatform]    = useState("youtube_short");
+  const [betaRendering,   setBetaRendering]   = useState(false);
+  const [betaResult,      setBetaResult]      = useState(null);
+  const [betaCached,      setBetaCached]      = useState(null);
+  const [betaRenderError, setBetaRenderError] = useState("");
 
   // Editable fields
   const [text, setText]           = useState("");
@@ -156,6 +185,51 @@ export default function Editor() {
       setRendering(false);
     }
   }
+
+  // Load styles + cached beta render when the effect panel is first opened
+  useEffect(() => {
+    if (!effectOpen || betaStylesLoaded || !clip) return;
+    setBetaStylesLoaded(true);
+    Promise.all([
+      editorApi.listStyles().catch(() => []),
+      editorApi.getLastRender(clip.id).catch(() => null),
+    ]).then(([styles, cached]) => {
+      setBetaStyles(styles && styles.length ? styles : FALLBACK_STYLES);
+      if (cached) {
+        setBetaCached(cached);
+        if (cached.style_pack?.name) setSelectedPack(cached.style_pack.name);
+      }
+    });
+  }, [effectOpen, betaStylesLoaded, clip]);
+
+  // Reset loaded flag when clip changes so styles re-fetch for new clip
+  useEffect(() => {
+    setBetaStylesLoaded(false);
+    setBetaResult(null);
+    setBetaCached(null);
+    setBetaRenderError("");
+  }, [clip?.id]);
+
+  const handleBetaRender = useCallback(async () => {
+    if (betaRendering || !clip) return;
+    setBetaRendering(true);
+    setBetaRenderError("");
+    try {
+      const body = {
+        clip_id:    clip.id,
+        style_pack: selectedPack,
+        ...(hookText.trim() ? { hook_text: hookText.trim() } : {}),
+        platform:   betaPlatform,
+      };
+      const res = await editorApi.renderBeta(body);
+      setBetaResult(res);
+      setBetaCached(res);
+    } catch (e) {
+      setBetaRenderError(e.message || "Render failed — try again");
+    } finally {
+      setBetaRendering(false);
+    }
+  }, [clip, selectedPack, hookText, betaPlatform, betaRendering]);
 
   async function uploadImage(e) {
     const file = e.target.files[0];
@@ -381,17 +455,6 @@ export default function Editor() {
         <button onClick={doExport} disabled={exporting} className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs" title="Export rendered MP4">
           {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
         </button>
-        {clip && (
-          <Link
-            to={`/jobs/${jobId}/editor-beta/${clip.id}`}
-            className="btn btn-beta py-1 px-2 flex items-center gap-1 text-xs"
-            title="Try the animated effects editor"
-          >
-            <Sparkles size={12} />
-            Beta
-            <span className="beta-badge">NEW</span>
-          </Link>
-        )}
       </div>
 
       {tabsBar}
@@ -514,6 +577,141 @@ export default function Editor() {
             ? <><Loader2 size={14} className="animate-spin" /> Rendering&hellip;</>
             : <><RefreshCw size={14} /> Re-render Clip</>}
         </button>
+      </div>
+
+      {/* ── Effect preset panel ─────────────────────────────── */}
+      <div className="border-t border-border flex-shrink-0">
+        {/* Toggle header */}
+        <button
+          type="button"
+          onClick={() => setEffectOpen(o => !o)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+        >
+          {effectOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+          <Wand2 size={13} />
+          <span>Add animated effect preset (optional)</span>
+          <span className="beta-badge ml-auto">NEW</span>
+        </button>
+
+        {effectOpen && (
+          <div className="px-3 pb-4 flex flex-col gap-3">
+            {/* Info line */}
+            <p className="text-[11px] text-gray-500 leading-snug">
+              Apply a style pack to the current clip and preview the result side-by-side.
+              Does not replace your original render unless you click &ldquo;Use beta version&rdquo;.
+            </p>
+
+            {/* Style pack cards — horizontal scroll */}
+            <div className="overflow-x-auto -mx-1 px-1">
+              <div className="flex gap-2 pb-1" style={{ minWidth: "max-content" }}>
+                {(betaStyles.length ? betaStyles : FALLBACK_STYLES).map(pack => (
+                  <StylePackCard
+                    key={pack.name}
+                    pack={pack}
+                    selected={selectedPack === pack.name}
+                    onSelect={() => setSelectedPack(pack.name)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Hook text */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] text-gray-500">Hook text (optional)</label>
+              <input
+                type="text"
+                className="w-full bg-surface border border-border text-gray-200 text-xs p-1.5 rounded focus:outline-none focus:border-accent"
+                placeholder="Optional opening text overlay…"
+                value={hookText}
+                onChange={e => setHookText(e.target.value)}
+              />
+            </div>
+
+            {/* Platform */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] text-gray-500">Platform</label>
+              <select
+                className="w-full bg-surface border border-border text-gray-300 text-xs p-1.5 rounded focus:outline-none focus:border-accent"
+                value={betaPlatform}
+                onChange={e => setBetaPlatform(e.target.value)}
+              >
+                {PLATFORM_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Render error */}
+            {betaRenderError && (
+              <p className="text-red-400 text-[11px] flex items-center gap-1">
+                <AlertTriangle size={12} /> {betaRenderError}
+              </p>
+            )}
+
+            {/* Render preview button */}
+            <button
+              type="button"
+              onClick={handleBetaRender}
+              disabled={betaRendering}
+              className="btn btn-primary w-full flex items-center justify-center gap-2 text-xs py-2"
+            >
+              {betaRendering
+                ? <><Loader2 size={13} className="animate-spin" /> Rendering preview&hellip;</>
+                : <><Wand2 size={13} /> Render preview</>}
+            </button>
+
+            {betaCached && !betaResult && (
+              <p className="text-[11px] text-gray-600 text-center">
+                Showing last cached render. Click Render preview to refresh.
+              </p>
+            )}
+
+            {/* Side-by-side comparison */}
+            {(() => {
+              const active = betaResult || betaCached;
+              if (!active) return null;
+              const currentUrl = active.current_url ? api.mediaUrl(active.current_url) : null;
+              const betaUrl    = active.beta_url     ? api.mediaUrl(active.beta_url)    : null;
+              const effectsApplied = active.effects_applied || [];
+              const qaOk           = active.qa_ok;
+              const renderTimeS    = active.render_time_s;
+              const warnings       = active.warnings || [];
+              return (
+                <div className="flex flex-col gap-2 mt-1">
+                  <SyncedVideoPair
+                    leftSrc={currentUrl}
+                    rightSrc={betaUrl}
+                    leftLabel="CURRENT"
+                    rightLabel="BETA"
+                  />
+
+                  {/* Effects + QA chips */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    {effectsApplied.map(fx => (
+                      <span key={fx} className="effect-chip">{fx}</span>
+                    ))}
+                    {qaOk !== undefined && qaOk !== null && (
+                      <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium ${qaOk ? "bg-green-900/50 text-green-300" : "bg-yellow-900/50 text-yellow-300"}`}>
+                        {qaOk ? <CheckCircle size={10} /> : <AlertTriangle size={10} />}
+                        {qaOk ? "QA: ok" : "QA: issues"}
+                      </span>
+                    )}
+                    {renderTimeS != null && (
+                      <span className="text-[10px] text-gray-600">
+                        {Number(renderTimeS).toFixed(1)}s
+                      </span>
+                    )}
+                    {warnings.map((w, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-orange-900/50 text-orange-300">
+                        <AlertTriangle size={10} /> {w}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
     </div>
   );

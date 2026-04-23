@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
   Radar, Zap, User, LogOut, LogIn, UserPlus, Image as ImageIcon,
-  Settings as SettingsIcon, CreditCard, Sparkles,
+  Settings as SettingsIcon, CreditCard,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -36,7 +36,6 @@ export default function NavBar() {
     { to: "/",              icon: Home,        label: "Jobs" },
     { to: "/new",           icon: Plus,        label: "New Job" },
     { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
-    { to: "/studio-beta",   icon: Sparkles,    label: "Studio Beta", badge: "NEW" },
     { to: "/assets",        icon: ImageIcon,   label: "Assets" },
     { to: "/channels",      icon: Palette,     label: "Style Profiles" },
     { to: "/uploads",       icon: UploadCloud, label: "Uploads" },
