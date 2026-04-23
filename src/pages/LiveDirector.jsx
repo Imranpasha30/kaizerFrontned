@@ -249,11 +249,40 @@ export default function LiveDirector() {
   };
 
   // Phase 9 — mint a phone camera session and open the QR modal.
+  // If the dashboard was opened on `localhost`, the QR would be useless
+  // to the phone (localhost on the phone = the phone itself). We remember
+  // a user-supplied LAN host override in localStorage and rebuild the URL.
+  const LAN_HOST_KEY = "kaizer.phone.lanHost";
+  const [lanHostOverride, setLanHostOverride] = useState(() => {
+    try { return localStorage.getItem(LAN_HOST_KEY) || ""; } catch { return ""; }
+  });
+
+  const buildPhoneUrl = useCallback((phone_path) => {
+    const proto = window.location.protocol;
+    const port = window.location.port;
+    let host = window.location.hostname;
+    const isLocalhost = host === "localhost" || host === "127.0.0.1";
+    if (isLocalhost && lanHostOverride) host = lanHostOverride;
+    const portSuffix = port ? `:${port}` : "";
+    return `${proto}//${host}${portSuffix}${phone_path}`;
+  }, [lanHostOverride]);
+
+  const saveLanHostOverride = (v) => {
+    const clean = (v || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    setLanHostOverride(clean);
+    try {
+      if (clean) localStorage.setItem(LAN_HOST_KEY, clean);
+      else localStorage.removeItem(LAN_HOST_KEY);
+    } catch {}
+    // Rebuild the current session's absolute_url if the modal is open
+    setPhoneSession((s) => s ? { ...s, absolute_url: buildPhoneUrl(s.phone_url) } : s);
+  };
+
   const addPhoneCamera = async () => {
     if (!selectedId) return;
     try {
       const s = await liveApi.createPhoneSession(selectedId);
-      const absolute = `${window.location.origin}${s.phone_url}`;
+      const absolute = buildPhoneUrl(s.phone_url);
       setPhoneSession({ ...s, absolute_url: absolute });
       setPhoneCopied(false);
       await refreshDetail();
@@ -839,6 +868,40 @@ export default function LiveDirector() {
               streaming page — tap <span className="text-white">Start streaming</span> to
               appear in the camera grid. Keep this window open.
             </p>
+
+            {(window.location.hostname === "localhost" ||
+              window.location.hostname === "127.0.0.1") && (
+              <div className="mb-4 rounded-md border border-amber-900/40 bg-amber-950/20 p-3">
+                <p className="text-[11px] text-amber-200 mb-2">
+                  You opened the dashboard on <code>localhost</code> — your phone can't
+                  reach that. Enter your laptop's LAN IP (e.g. <code>192.168.1.5</code>)
+                  so the QR builds correctly:
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="e.g. 192.168.29.125"
+                    value={lanHostOverride}
+                    onChange={(e) => saveLanHostOverride(e.target.value)}
+                    className="flex-1 ui-input !py-1.5 !text-[12px]"
+                    autoFocus={!lanHostOverride}
+                  />
+                  {lanHostOverride && (
+                    <button
+                      onClick={() => saveLanHostOverride("")}
+                      className="text-[11px] text-gray-400 hover:text-white px-2"
+                      title="Clear override"
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Windows: run <code>ipconfig</code> → IPv4 under your WiFi adapter.
+                  Saved automatically; also open the dashboard on that IP for a permanent fix.
+                </p>
+              </div>
+            )}
 
             <div className="bg-white rounded-lg p-3 flex items-center justify-center mb-4">
               <img
