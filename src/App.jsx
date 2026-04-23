@@ -14,6 +14,7 @@ import QuickPublish from "./pages/QuickPublish";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Billing  from "./pages/Billing";
+import LiveDirector from "./pages/LiveDirector";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
 import AuthProvider from "./auth/AuthProvider";
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/performance"                   element={<ProtectedRoute><Performance /></ProtectedRoute>} />
           <Route path="/trending"                      element={<ProtectedRoute><Trending /></ProtectedRoute>} />
           <Route path="/billing"                       element={<ProtectedRoute><Billing /></ProtectedRoute>} />
+          <Route path="/live"                          element={<ProtectedRoute><LiveDirector /></ProtectedRoute>} />
         </Routes>
       </Shell>
     </AuthProvider>

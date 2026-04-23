@@ -331,3 +331,19 @@ export const editorApi = {
   renderBeta:    (body)     => req("POST", "/editor/render-beta", body),
   getLastRender: (clipId)   => req("GET",  `/editor/render-beta/${clipId}`),
 };
+
+// ── Phase 6 — Autonomous Live Director ─────────────────────────────────────
+export const liveApi = {
+  listEvents:  ()               => req("GET",  "/live/events"),
+  createEvent: (body)           => req("POST", "/live/events", body),
+  getEvent:    (id)             => req("GET",  `/live/events/${id}`),
+  addCamera:   (id, body)       => req("POST", `/live/events/${id}/cameras`, body),
+  start:       (id)             => req("POST", `/live/events/${id}/start`),
+  stop:        (id)             => req("POST", `/live/events/${id}/stop`),
+  pin:         (id, cam_id)     => req("POST", `/live/events/${id}/pin`, { cam_id }),
+  unpin:       (id)             => req("POST", `/live/events/${id}/unpin`),
+  blacklist:   (id, cam_id)     => req("POST", `/live/events/${id}/blacklist`, { cam_id }),
+  allow:       (id, cam_id)     => req("POST", `/live/events/${id}/allow`, { cam_id }),
+  forceCut:    (id, cam_id)     => req("POST", `/live/events/${id}/force-cut`, { cam_id }),
+  getLog:      (id, limit=200)  => req("GET",  `/live/events/${id}/log?limit=${limit}`),
+};
