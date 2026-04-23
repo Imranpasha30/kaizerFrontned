@@ -1,4 +1,4 @@
-import React from "react";
+import React, { forwardRef } from "react";
 
 /**
  * Button — the standard product button. Two looks + two sizes.
@@ -10,18 +10,21 @@ import React from "react";
  * When `as` is passed (e.g. "a", or a router Link), the element type is swapped
  * but the visual classes remain — makes link-styled buttons painless.
  */
-export default function Button({
-  variant = "primary",
-  size = "md",
-  leftIcon,
-  rightIcon,
-  className = "",
-  disabled,
-  loading,
-  children,
-  as: Comp = "button",
-  ...rest
-}) {
+const Button = forwardRef(function Button(
+  {
+    variant = "primary",
+    size = "md",
+    leftIcon,
+    rightIcon,
+    className = "",
+    disabled,
+    loading,
+    children,
+    as: Comp = "button",
+    ...rest
+  },
+  ref,
+) {
   const base =
     variant === "primary" ? "ui-btn-primary" :
     variant === "ghost"   ? "ui-btn-ghost"   :
@@ -37,6 +40,7 @@ export default function Button({
   return (
     <Comp
       {...rest}
+      ref={ref}
       disabled={disabled || loading}
       className={`${base} ${sizeClass} ${state} ${className}`.trim()}
     >
@@ -45,4 +49,6 @@ export default function Button({
       {rightIcon ? <span className="shrink-0">{rightIcon}</span> : null}
     </Comp>
   );
-}
+});
+
+export default Button;

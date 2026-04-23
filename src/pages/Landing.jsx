@@ -23,16 +23,39 @@ import {
   SectionHeader,
   LayoutPreview,
   DEFAULT_LAYOUT_OPTIONS,
+  ClipEnginePreview,
+  ParticleField,
+  Reveal,
+  Counter,
+  GlowButton,
+  MagneticButton,
+  Tilt3D,
+  TypewriterRotator,
+  AIStatusBar,
+  useActiveSection,
 } from "../components/ui";
 import { useAuth } from "../auth/AuthProvider";
 
 /* ------------------------------------------------------------------ */
 /*  Landing — public marketing page                                    */
 /* ------------------------------------------------------------------ */
+const LANDING_SECTIONS = [
+  { id: "hero",          label: "hero" },
+  { id: "product",       label: "two products" },
+  { id: "features",      label: "features" },
+  { id: "watch",         label: "the 90-second demo" },
+  { id: "live-director", label: "live director" },
+  { id: "pricing",       label: "pricing" },
+  { id: "social",        label: "testimonials" },
+];
+
 export default function Landing() {
   const { isAuthenticated } = useAuth();
+  const { activeSectionLabel } = useActiveSection(LANDING_SECTIONS);
 
-  // Smooth scroll for hash links (used by in-page nav)
+  // Smooth scroll for hash links (used by in-page nav). The CSS also sets
+  // `html { scroll-behavior: smooth }` under motion-safe, so this just
+  // bridges the button click → element id lookup.
   function scrollTo(id) {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -42,23 +65,37 @@ export default function Landing() {
     <div className="min-h-screen bg-dark text-ink-100 relative overflow-x-hidden">
       <TopNav isAuthenticated={isAuthenticated} scrollTo={scrollTo} />
 
-      <Hero scrollTo={scrollTo} />
+      <section id="hero">
+        <Hero scrollTo={scrollTo} />
+      </section>
 
-      <ProductSplit />
+      <section id="product">
+        <ProductSplit />
+      </section>
 
-      <FeaturesGrid />
+      <section id="features">
+        <FeaturesGrid />
+      </section>
 
-      <WatchSection />
+      <section id="watch">
+        <WatchSection />
+      </section>
 
       <LiveDirectorDeepDive />
 
-      <Pricing />
+      <section id="pricing">
+        <Pricing />
+      </section>
 
-      <SocialProof />
+      <section id="social">
+        <SocialProof />
+      </section>
 
       <FinalCTA />
 
       <Footer />
+
+      <AIStatusBar label={activeSectionLabel} />
     </div>
   );
 }
@@ -151,8 +188,9 @@ function Hero({ scrollTo }) {
       className="ui-section relative flex items-center"
       style={{ minHeight: "90vh" }}
     >
-      {/* decorative layers */}
+      {/* decorative layers — grid-bg (bottom), particles (middle), sheen (top) */}
       <div className="hero-grid-bg" aria-hidden="true" />
+      <ParticleField density={40} className="hero-particles" />
       <div
         className="absolute inset-0 bg-hero-sheen pointer-events-none"
         aria-hidden="true"
@@ -161,42 +199,82 @@ function Hero({ scrollTo }) {
       <div className="ui-section-inner relative grid lg:grid-cols-[1.05fr,1fr] gap-14 items-center w-full">
         {/* Copy column */}
         <div className="flex flex-col gap-7">
-          <span className="eyebrow animate-rise">AUTONOMOUS MEDIA ENGINE</span>
-          <h1 className="heading-hero text-4xl sm:text-5xl lg:text-[64px] animate-rise">
-            Go live with zero operators.
-            <br />
-            Clip your archive while you sleep.
-          </h1>
-          <p className="lede max-w-xl animate-rise">
-            One engine films your concerts live and turns recorded shows into
-            platform-ready clips. No editor, no switcher operator, no operator
-            period.
-          </p>
+          <Reveal>
+            <span className="eyebrow">AUTONOMOUS MEDIA ENGINE</span>
+          </Reveal>
+          <Reveal delay={80}>
+            <h1 className="heading-hero heading-hero--flow text-4xl sm:text-5xl lg:text-[64px]">
+              Go live with zero operators.
+              <br />
+              Clip your archive while you sleep.
+            </h1>
+          </Reveal>
+          <Reveal delay={160}>
+            <p className="lede max-w-xl">
+              One engine films your concerts live and turns recorded shows into
+              platform-ready clips. No editor, no switcher operator, no operator
+              period.
+            </p>
+          </Reveal>
 
-          <div className="flex flex-wrap gap-3 animate-rise">
-            <Button as={Link} to="/register" size="lg" rightIcon={<ArrowRight size={16} />}>
-              Start free — 14 days
-            </Button>
-            <Button
-              variant="ghost"
-              size="lg"
-              leftIcon={<Play size={16} />}
-              onClick={() => scrollTo("product")}
-            >
-              Watch 90-second demo
-            </Button>
-          </div>
+          <Reveal delay={240}>
+            <div className="flex flex-wrap gap-3">
+              <MagneticButton strength={0.25} range={120}>
+                <GlowButton
+                  as={Link}
+                  to="/register"
+                  size="lg"
+                  rightIcon={<ArrowRight size={16} />}
+                >
+                  Start free — 14 days
+                </GlowButton>
+              </MagneticButton>
+              <MagneticButton strength={0.2} range={100}>
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  leftIcon={<Play size={16} />}
+                  onClick={() => scrollTo("product")}
+                >
+                  Watch 90-second demo
+                </Button>
+              </MagneticButton>
+            </div>
+          </Reveal>
+
+          {/* Typewriter rotator — the site feels alive */}
+          <Reveal delay={300}>
+            <p className="text-sm text-ink-300 flex items-center gap-2 flex-wrap">
+              <span className="text-ink-400">Right now Kaizer is</span>
+              <TypewriterRotator
+                phrases={[
+                  "cutting on the beat.",
+                  "watching the crowd react.",
+                  "splitting stage + audience.",
+                  "bridging dead air.",
+                  "pushing to YouTube + Twitch.",
+                ]}
+                typeSpeed={45}
+                deleteSpeed={25}
+                holdDuration={1800}
+                className="text-accent2 font-semibold"
+              />
+            </p>
+          </Reveal>
 
           {/* Stat row */}
-          <div className="grid grid-cols-3 gap-6 pt-6 border-t border-ink-800 max-w-lg">
-            <Stat value="10+" label="Hours saved / event" />
-            <Stat value="6"   label="Social formats / clip" />
-            <Stat value="<1s" label="Auto-cut latency" />
-          </div>
+          <Reveal delay={320}>
+            <div className="grid grid-cols-3 gap-6 pt-6 border-t border-ink-800 max-w-lg">
+              <Stat target={10} suffix="+" label="Hours saved / event" />
+              <Stat target={6}             label="Social formats / clip" />
+              <Stat target="<1s"           label="Auto-cut latency" />
+            </div>
+          </Reveal>
         </div>
 
         {/* Video column */}
-        <div className="relative">
+        <Reveal delay={200} className="relative">
+          <Tilt3D max={5} glare scale={1.01}>
           <div className="glass-panel p-3 rounded-3xl shadow-elevated">
             <div className="relative rounded-2xl overflow-hidden aspect-video bg-black">
               <video
@@ -212,8 +290,31 @@ function Hero({ scrollTo }) {
                 <span className="ui-live-dot" />
                 LIVE · Program feed — auto-directed
               </div>
+
+              {/* Floating chips — bob gently, stagger so they don't sync */}
+              <FloatingChip
+                className="absolute top-4 right-4"
+                delay="0s"
+                dot
+              >
+                AUTO CUT · 00:04
+              </FloatingChip>
+              <FloatingChip
+                className="absolute top-1/2 -translate-y-1/2 right-2 hidden sm:inline-flex"
+                delay="1.2s"
+              >
+                SPLIT · joke_laugh
+              </FloatingChip>
+              <FloatingChip
+                className="absolute bottom-4 right-4"
+                delay="2.2s"
+                arrow
+              >
+                RELAY → 3 destinations
+              </FloatingChip>
             </div>
           </div>
+          </Tilt3D>
 
           {/* Decorative glow blob */}
           <div
@@ -224,18 +325,33 @@ function Hero({ scrollTo }) {
             }}
             aria-hidden="true"
           />
-        </div>
+        </Reveal>
       </div>
     </section>
   );
 }
 
-function Stat({ value, label }) {
+function Stat({ target, suffix, label }) {
   return (
     <div className="ui-stat">
-      <div className="ui-stat-value">{value}</div>
+      <div className="ui-stat-value">
+        <Counter target={target} suffix={suffix} />
+      </div>
       <div className="ui-stat-label">{label}</div>
     </div>
+  );
+}
+
+function FloatingChip({ children, className = "", delay = "0s", dot, arrow }) {
+  return (
+    <span
+      className={`float-chip ${className}`.trim()}
+      style={{ animationDelay: delay }}
+    >
+      {dot ? <span className="float-chip__dot" /> : null}
+      {arrow ? <span className="float-chip__arrow">→</span> : null}
+      <span>{children}</span>
+    </span>
   );
 }
 
@@ -247,106 +363,107 @@ function ProductSplit() {
     <section id="product" className="ui-section">
       <div className="ui-section-inner">
         <div className="ui-section-head">
-          <SectionHeader
-            eyebrow="TWO ENGINES · ONE PLATFORM"
-            title="Recorded or live — Kaizer runs the show."
-            lede="Drop in a recorded long-form show and it walks out as eight captioned clips. Plug in cameras and a mic and it directs your event in real time."
-          />
+          <Reveal>
+            <SectionHeader
+              eyebrow="TWO ENGINES · ONE PLATFORM"
+              title="Recorded or live — Kaizer runs the show."
+              lede="Drop in a recorded long-form show and it walks out as eight captioned clips. Plug in cameras and a mic and it directs your event in real time."
+            />
+          </Reveal>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-8 mt-4 animate-rise">
+        <div className="grid lg:grid-cols-2 gap-8 mt-4">
           {/* Card 1: Clip Engine */}
-          <div className="feature-card p-8 flex flex-col gap-6">
-            <div className="flex items-start gap-4">
-              <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background:
-                    "linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)",
-                }}
-              >
-                <Scissors size={22} className="text-white" />
+          <Reveal delay={80}>
+            <div className="feature-card p-8 flex flex-col gap-6 h-full">
+              <div className="flex items-start gap-4">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)",
+                  }}
+                >
+                  <Scissors size={22} className="text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-white leading-tight">
+                    AI Clip Engine
+                  </h3>
+                  <p className="text-ink-300 text-sm mt-1">
+                    Long-form recording → platform-ready clips.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-2xl font-bold text-white leading-tight">
-                  AI Clip Engine
-                </h3>
-                <p className="text-ink-300 text-sm mt-1">
-                  Long-form recording → platform-ready clips.
-                </p>
+
+              <p className="text-ink-200 text-[15px] leading-relaxed">
+                Drop a 90-minute show and Kaizer detects the hooks, trims the
+                dead air and exports a set of captioned, styled clips sized for
+                every feed you publish to.
+              </p>
+
+              <div className="rounded-xl overflow-hidden mt-2 bg-ink-950 border border-ink-800 p-3">
+                <ClipEnginePreview size="full" />
               </div>
-            </div>
-
-            <p className="text-ink-200 text-[15px] leading-relaxed">
-              Drop a 90-minute show and Kaizer detects the hooks, trims the
-              dead air and exports a set of captioned, styled clips sized for
-              every feed you publish to.
-            </p>
-
-            <div className="relative rounded-xl overflow-hidden aspect-video mt-2">
-              <img
-                src="/demo/showcase-1.jpeg"
-                alt="AI Clip Engine preview"
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-              <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-accent/90 text-white text-[11px] font-bold tracking-wider uppercase">
+              <div className="mt-1 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/15 border border-accent/30 text-[11px] font-bold tracking-wide uppercase text-accent2 self-start">
                 Long-form → 5× clips
               </div>
-            </div>
 
-            <a
-              href="#features"
-              className="text-accent2 text-sm font-semibold inline-flex items-center gap-1 hover:text-white transition-colors mt-auto"
-            >
-              Learn more
-              <ArrowRight size={14} />
-            </a>
-          </div>
+              <a
+                href="#features"
+                className="text-accent2 text-sm font-semibold inline-flex items-center gap-1 hover:text-white transition-colors mt-auto"
+              >
+                Learn more
+                <ArrowRight size={14} />
+              </a>
+            </div>
+          </Reveal>
 
           {/* Card 2: Live Director */}
-          <div className="feature-card p-8 flex flex-col gap-6">
-            <div className="flex items-start gap-4">
-              <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  background:
-                    "linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)",
-                }}
-              >
-                <Radio size={22} className="text-white" />
+          <Reveal delay={200}>
+            <div className="feature-card p-8 flex flex-col gap-6 h-full">
+              <div className="flex items-start gap-4">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)",
+                  }}
+                >
+                  <Radio size={22} className="text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-white leading-tight">
+                    Autonomous Live Director
+                  </h3>
+                  <p className="text-ink-300 text-sm mt-1">
+                    Cameras in. Broadcast out. Nobody behind the desk.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-2xl font-bold text-white leading-tight">
-                  Autonomous Live Director
-                </h3>
-                <p className="text-ink-300 text-sm mt-1">
-                  Cameras in. Broadcast out. Nobody behind the desk.
+
+              <p className="text-ink-200 text-[15px] leading-relaxed">
+                Kaizer listens to every camera, cuts on beats, splits on crowd
+                reactions and bridges dead air — then pushes the program feed to
+                YouTube, Twitch and Facebook at once.
+              </p>
+
+              <div className="rounded-xl p-5 bg-ink-950 border border-ink-800">
+                <LayoutPreview layout="split2_hstack" size="full" primary={0} />
+                <p className="text-center text-xs text-ink-400 mt-3">
+                  Real split decision — joke → crowd laugh.
                 </p>
               </div>
+
+              <a
+                href="#live-director"
+                className="text-accent2 text-sm font-semibold inline-flex items-center gap-1 hover:text-white transition-colors mt-auto"
+              >
+                Learn more
+                <ArrowRight size={14} />
+              </a>
             </div>
-
-            <p className="text-ink-200 text-[15px] leading-relaxed">
-              Kaizer listens to every camera, cuts on beats, splits on crowd
-              reactions and bridges dead air — then pushes the program feed to
-              YouTube, Twitch and Facebook at once.
-            </p>
-
-            <div className="rounded-xl p-5 bg-ink-950 border border-ink-800">
-              <LayoutPreview layout="split2_hstack" size="full" primary={0} />
-              <p className="text-center text-xs text-ink-400 mt-3">
-                Real split decision — joke → crowd laugh.
-              </p>
-            </div>
-
-            <a
-              href="#live-director"
-              className="text-accent2 text-sm font-semibold inline-flex items-center gap-1 hover:text-white transition-colors mt-auto"
-            >
-              Learn more
-              <ArrowRight size={14} />
-            </a>
-          </div>
+          </Reveal>
         </div>
       </div>
     </section>
@@ -388,6 +505,7 @@ function FeaturesGrid() {
       icon: Film,
       title: "Clip your archive",
       body: "A 90-minute recorded show becomes eight platform-ready clips — captioned, trimmed and styled.",
+      preview: <ClipEnginePreview size="full" />,
     },
   ];
 
@@ -395,16 +513,20 @@ function FeaturesGrid() {
     <section id="features" className="ui-section">
       <div className="ui-section-inner">
         <div className="ui-section-head">
-          <SectionHeader
-            eyebrow="WHAT KAIZER DOES"
-            title="One engine. Every format. Zero button-pressing."
-            lede="Every feature is designed around the same idea — remove the operator from the loop."
-          />
+          <Reveal>
+            <SectionHeader
+              eyebrow="WHAT KAIZER DOES"
+              title="One engine. Every format. Zero button-pressing."
+              lede="Every feature is designed around the same idea — remove the operator from the loop."
+            />
+          </Reveal>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {features.map((f, i) => (
-            <FeatureCard key={i} {...f} />
+            <Reveal key={i} delay={(i % 3) * 100}>
+              <FeatureCard {...f} />
+            </Reveal>
           ))}
         </div>
       </div>
@@ -414,7 +536,7 @@ function FeaturesGrid() {
 
 function FeatureCard({ icon: Icon, title, body, preview }) {
   return (
-    <article className="feature-card p-7 flex flex-col gap-4">
+    <article className="feature-card p-7 flex flex-col gap-4 h-full">
       <div
         className="w-10 h-10 rounded-xl flex items-center justify-center"
         style={{
@@ -451,22 +573,26 @@ function WatchSection() {
     <section className="ui-section">
       <div className="ui-section-inner">
         <div className="ui-section-head">
-          <SectionHeader
-            eyebrow="WATCH"
-            title="90 seconds inside a live show."
-            lede="Watch the director read the room and switch cameras, layouts and destinations in real time."
-          />
+          <Reveal>
+            <SectionHeader
+              eyebrow="WATCH"
+              title="90 seconds inside a live show."
+              lede="Watch the director read the room and switch cameras, layouts and destinations in real time."
+            />
+          </Reveal>
         </div>
 
         <div className="grid lg:grid-cols-[2fr,1fr] gap-8 items-start">
-          <div className="glass-panel p-3 rounded-3xl shadow-elevated">
-            <video
-              controls
-              poster="/demo/showcase-2.jpeg"
-              src="/demo/kaizer-demo.mp4"
-              className="w-full rounded-2xl aspect-video bg-black"
-            />
-          </div>
+          <Reveal>
+            <div className="glass-panel p-3 rounded-3xl shadow-elevated">
+              <video
+                controls
+                poster="/demo/showcase-2.jpeg"
+                src="/demo/kaizer-demo.mp4"
+                className="w-full rounded-2xl aspect-video bg-black"
+              />
+            </div>
+          </Reveal>
 
           <div className="flex flex-col gap-3">
             <h4 className="text-xs font-bold tracking-[0.18em] uppercase text-ink-400">
@@ -474,15 +600,14 @@ function WatchSection() {
             </h4>
             <ul className="flex flex-col gap-3">
               {highlights.map((h, i) => (
-                <li
-                  key={i}
-                  className="flex items-start gap-3 p-4 rounded-xl border border-ink-800 bg-ink-900/60"
-                >
-                  <span className="text-accent2 text-xs font-bold font-mono mt-0.5 min-w-[34px]">
-                    {h.t}
-                  </span>
-                  <span className="text-ink-200 text-sm">{h.label}</span>
-                </li>
+                <Reveal key={i} delay={i * 90} as="li">
+                  <div className="flex items-start gap-3 p-4 rounded-xl border border-ink-800 bg-ink-900/60">
+                    <span className="text-accent2 text-xs font-bold font-mono mt-0.5 min-w-[34px]">
+                      {h.t}
+                    </span>
+                    <span className="text-ink-200 text-sm">{h.label}</span>
+                  </div>
+                </Reveal>
               ))}
             </ul>
           </div>
@@ -500,27 +625,33 @@ function LiveDirectorDeepDive() {
     <section id="live-director" className="ui-section">
       <div className="ui-section-inner">
         <div className="ui-section-head">
-          <SectionHeader
-            eyebrow="LIVE"
-            title="Every layout the director can pick — visualised."
-            lede="Kaizer switches both camera and layout in real time, picking the composition that best tells the moment."
-          />
+          <Reveal>
+            <SectionHeader
+              eyebrow="LIVE"
+              title="Every layout the director can pick — visualised."
+              lede="Kaizer switches both camera and layout in real time, picking the composition that best tells the moment."
+            />
+          </Reveal>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {DEFAULT_LAYOUT_OPTIONS.map((opt) => (
-            <div key={opt.id} className="layout-tile">
-              <LayoutPreview layout={opt.id} size="full" />
-              <div className="layout-tile-label">
-                <span className="layout-tile-name">{opt.name}</span>
-                {opt.badge ? (
-                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-accent/15 text-accent2 border border-accent/30">
-                    {opt.badge}
-                  </span>
-                ) : null}
+          {DEFAULT_LAYOUT_OPTIONS.map((opt, i) => (
+            <Reveal key={opt.id} delay={(i % 3) * 90}>
+              <Tilt3D max={7} glare>
+              <div className="layout-tile" data-cursor="interactive">
+                <LayoutPreview layout={opt.id} size="full" />
+                <div className="layout-tile-label">
+                  <span className="layout-tile-name">{opt.name}</span>
+                  {opt.badge ? (
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-accent/15 text-accent2 border border-accent/30">
+                      {opt.badge}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="layout-tile-desc">{opt.desc}</p>
               </div>
-              <p className="layout-tile-desc">{opt.desc}</p>
-            </div>
+              </Tilt3D>
+            </Reveal>
           ))}
         </div>
       </div>
@@ -584,16 +715,20 @@ function Pricing() {
     <section id="pricing" className="ui-section">
       <div className="ui-section-inner">
         <div className="ui-section-head">
-          <SectionHeader
-            eyebrow="PRICING"
-            title="Simple, fair, no per-seat nonsense."
-            lede="Everything you need to go live and clip. Cancel any time."
-          />
+          <Reveal>
+            <SectionHeader
+              eyebrow="PRICING"
+              title="Simple, fair, no per-seat nonsense."
+              lede="Everything you need to go live and clip. Cancel any time."
+            />
+          </Reveal>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 items-stretch">
-          {plans.map((p) => (
-            <PricingCard key={p.name} plan={p} />
+          {plans.map((p, i) => (
+            <Reveal key={p.name} delay={i * 100}>
+              <PricingCard plan={p} />
+            </Reveal>
           ))}
         </div>
 
@@ -609,7 +744,7 @@ function PricingCard({ plan }) {
   const { name, price, tagline, features, cta, variant, popular } = plan;
   return (
     <div
-      className={`ui-card p-8 flex flex-col gap-6 relative ${
+      className={`ui-card p-8 flex flex-col gap-6 relative h-full ${
         popular ? "ui-card--selected" : ""
       }`}
     >
@@ -695,32 +830,35 @@ function SocialProof() {
     <section className="ui-section">
       <div className="ui-section-inner">
         <div className="ui-section-head">
-          <SectionHeader
-            eyebrow="TRUSTED BY"
-            title="The operators trust us because we replace them gracefully."
-            lede="Front-of-house engineers, tour managers and venue owners — running shows autonomously from day one."
-          />
+          <Reveal>
+            <SectionHeader
+              eyebrow="TRUSTED BY"
+              title="The operators trust us because we replace them gracefully."
+              lede="Front-of-house engineers, tour managers and venue owners — running shows autonomously from day one."
+            />
+          </Reveal>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
           {quotes.map((q, i) => (
-            <TestimonialCard key={i} q={q} />
+            <Reveal key={i} delay={i * 100}>
+              <TestimonialCard q={q} />
+            </Reveal>
           ))}
         </div>
 
         {/* Photo strip */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-12">
           {photos.map((src, i) => (
-            <div
-              key={i}
-              className="relative aspect-video rounded-xl overflow-hidden opacity-70 hover:opacity-100 transition-opacity border border-ink-800"
-            >
-              <img
-                src={src}
-                alt={`Kaizer customer show ${i + 1}`}
-                className="w-full h-full object-cover"
-              />
-            </div>
+            <Reveal key={i} delay={i * 70}>
+              <div className="relative aspect-video rounded-xl overflow-hidden opacity-70 hover:opacity-100 transition-opacity border border-ink-800">
+                <img
+                  src={src}
+                  alt={`Kaizer customer show ${i + 1}`}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            </Reveal>
           ))}
         </div>
       </div>
@@ -735,7 +873,7 @@ function TestimonialCard({ q }) {
     .slice(0, 2)
     .join("");
   return (
-    <div className="ui-card p-7 flex flex-col gap-5">
+    <div className="ui-card p-7 flex flex-col gap-5 h-full">
       <div className="flex gap-1">
         {Array.from({ length: 5 }).map((_, i) => (
           <Star key={i} size={14} className="text-accent3 fill-accent3" />
@@ -781,34 +919,40 @@ function FinalCTA() {
         >
           <div className="hero-grid-bg" aria-hidden="true" />
 
-          <div className="relative flex flex-col items-center gap-6 animate-rise">
-            <h2 className="heading-hero text-4xl sm:text-5xl lg:text-6xl max-w-3xl">
-              Your next show runs itself.
-            </h2>
-            <p className="lede max-w-xl">
-              Fourteen days on us. No card, no setup calls — plug in a camera
-              and a mic, and let Kaizer direct.
-            </p>
-            <div className="flex flex-wrap gap-3 justify-center pt-2">
-              <Button
-                as={Link}
-                to="/register"
-                size="lg"
-                rightIcon={<ArrowRight size={16} />}
-              >
-                Start your 14-day trial
-              </Button>
-              <Button
-                as="a"
-                href="mailto:hello@kaizer.news"
-                variant="ghost"
-                size="lg"
-                leftIcon={<Mail size={16} />}
-              >
-                Talk to us
-              </Button>
+          <Reveal>
+            <div className="relative flex flex-col items-center gap-6">
+              <h2 className="heading-hero heading-hero--flow text-4xl sm:text-5xl lg:text-6xl max-w-3xl">
+                Your next show runs itself.
+              </h2>
+              <p className="lede max-w-xl">
+                Fourteen days on us. No card, no setup calls — plug in a camera
+                and a mic, and let Kaizer direct.
+              </p>
+              <div className="flex flex-wrap gap-3 justify-center pt-2">
+                <MagneticButton strength={0.28} range={140}>
+                  <GlowButton
+                    as={Link}
+                    to="/register"
+                    size="lg"
+                    rightIcon={<ArrowRight size={16} />}
+                  >
+                    Start your 14-day trial
+                  </GlowButton>
+                </MagneticButton>
+                <MagneticButton strength={0.2} range={100}>
+                  <Button
+                    as="a"
+                    href="mailto:hello@kaizer.news"
+                    variant="ghost"
+                    size="lg"
+                    leftIcon={<Mail size={16} />}
+                  >
+                    Talk to us
+                  </Button>
+                </MagneticButton>
+              </div>
             </div>
-          </div>
+          </Reveal>
         </div>
       </div>
     </section>

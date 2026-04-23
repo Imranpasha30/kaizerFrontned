@@ -20,6 +20,7 @@ import Register from "./pages/Register";
 import Landing  from "./pages/Landing";
 import AuthProvider from "./auth/AuthProvider";
 import ProtectedRoute from "./auth/ProtectedRoute";
+import { CursorLayer } from "./components/ui";
 
 /**
  * NavBar is hidden on the auth pages for a full-bleed login experience,
@@ -42,6 +43,7 @@ function Shell({ children }) {
 export default function App() {
   return (
     <AuthProvider>
+      <CursorLayer />
       <Shell>
         <Routes>
           {/* Public marketing + auth routes */}
