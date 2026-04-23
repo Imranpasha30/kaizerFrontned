@@ -62,9 +62,11 @@ function PhoneCameraPreview({ eventId, camId }) {
       sb.addEventListener("updateend", flush);
     });
 
+    // Same-origin URL → Vite proxy forwards /api WebSockets to the backend
+    // (ws: true in the proxy config). Keeps HTTPS pages from tripping on
+    // mixed-content when the backend is plain http.
     const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.hostname;
-    const url = `${wsProto}//${host}:8000/api/live/ws/monitor/${encodeURIComponent(eventId)}/${encodeURIComponent(camId)}`;
+    const url = `${wsProto}//${window.location.host}/api/live/ws/monitor/${encodeURIComponent(eventId)}/${encodeURIComponent(camId)}`;
     try {
       ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";

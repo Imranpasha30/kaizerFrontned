@@ -72,6 +72,21 @@ export default function PhoneCamera() {
     setState("asking");
     setError("");
 
+    // getUserMedia is only exposed in secure contexts (https:// OR
+    // localhost). Over http://<lan-ip> the browser hides
+    // navigator.mediaDevices entirely, which surfaces as a confusing
+    // "Cannot read properties of undefined" crash. Detect + explain.
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setState("error");
+      setError(
+        "This browser blocks the camera because the page isn't served over HTTPS. " +
+        "Ask the director to open this page via the https:// URL shown in the QR modal, " +
+        "or (test only) enable chrome://flags/#unsafely-treat-insecure-origin-as-secure " +
+        "and add this origin."
+      );
+      return;
+    }
+
     let stream;
     try {
       // Prefer back camera on phone; mobile browsers honour facingMode.
@@ -121,13 +136,12 @@ export default function PhoneCamera() {
     }
     recorderRef.current = recorder;
 
-    // Build WS URL: phone is on the same LAN, but the Vite dev server (:3002)
-    // doesn't proxy WebSockets well across the LAN, so we hit the backend
-    // directly on :8000. If later deployed behind a reverse proxy at the same
-    // origin, the operator can change this URL construction to share origin.
+    // Build WS URL using the current origin (no hardcoded :8000). Vite's
+    // proxy forwards /api WebSockets to the backend (ws: true in the dev
+    // config). This keeps us same-origin so HTTPS pages don't get blocked
+    // for mixed content when hitting a ws:// backend directly.
     const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.hostname;
-    const url = `${wsProto}//${host}:8000/api/live/ws/ingest/${encodeURIComponent(eventId)}/${encodeURIComponent(camId)}?token=${encodeURIComponent(token)}`;
+    const url = `${wsProto}//${window.location.host}/api/live/ws/ingest/${encodeURIComponent(eventId)}/${encodeURIComponent(camId)}?token=${encodeURIComponent(token)}`;
 
     let ws;
     try {
