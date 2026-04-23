@@ -346,4 +346,21 @@ export const liveApi = {
   allow:       (id, cam_id)     => req("POST", `/live/events/${id}/allow`, { cam_id }),
   forceCut:    (id, cam_id)     => req("POST", `/live/events/${id}/force-cut`, { cam_id }),
   getLog:      (id, limit=200)  => req("GET",  `/live/events/${id}/log?limit=${limit}`),
+
+  // ── Phase 7 — Relay / Broadcast destinations ────────────────────────────
+  listRelayDestinations:  (eventId)            => req("GET",    `/live/events/${eventId}/relay/destinations`),
+  addRelayDestination:    (eventId, dest)      => req("POST",   `/live/events/${eventId}/relay/destinations`, dest),
+  removeRelayDestination: (eventId, destId)    => req("DELETE", `/live/events/${eventId}/relay/destinations/${destId}`),
+  startRelay:             (eventId)            => req("POST",   `/live/events/${eventId}/relay/start`),
+  stopRelay:              (eventId)            => req("POST",   `/live/events/${eventId}/relay/stop`),
+  getRelayStatus:         (eventId)            => req("GET",    `/live/events/${eventId}/relay/status`),
+
+  // ── Phase 7 — Per-camera chroma key ─────────────────────────────────────
+  setCameraChroma:        (eventId, camId, config) =>
+    req("PUT",    `/live/events/${eventId}/cameras/${camId}/chroma`, config),
+  removeCameraChroma:     (eventId, camId)     =>
+    req("DELETE", `/live/events/${eventId}/cameras/${camId}/chroma`),
+
+  // ── Phase 7 — Dead-air bridge ───────────────────────────────────────────
+  setBridge:              (eventId, config)    => req("PUT",    `/live/events/${eventId}/bridge`, config),
 };

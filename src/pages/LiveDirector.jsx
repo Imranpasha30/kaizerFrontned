@@ -5,6 +5,9 @@ import {
   CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle,
 } from "lucide-react";
 import { liveApi } from "../api/client";
+import BroadcastPanel from "../components/live/BroadcastPanel";
+import ChromaPanel from "../components/live/ChromaPanel";
+import BridgePanel from "../components/live/BridgePanel";
 
 /**
  * LiveDirector — Autonomous Live Director control surface.
@@ -60,6 +63,17 @@ export default function LiveDirector() {
     liveApi.getEvent(selectedId)
       .then(setDetail)
       .catch((e) => setErr(e.message || String(e)));
+  }, [selectedId]);
+
+  // Re-fetch the event detail — used by child panels that mutate config_json.
+  const refreshDetail = useCallback(async () => {
+    if (!selectedId) return;
+    try {
+      const d = await liveApi.getEvent(selectedId);
+      setDetail(d);
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
   }, [selectedId]);
 
   // open/close WebSocket when detail says it's live
@@ -373,6 +387,32 @@ export default function LiveDirector() {
           )}
         </section>
       </div>
+
+      {/* Phase 7.8 — autonomous broadcast control panels */}
+      {detail && (
+        <div className="mt-6">
+          <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
+            Autonomous broadcast controls
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+            <BroadcastPanel
+              eventId={detail.id}
+              isLive={isLive}
+            />
+            <ChromaPanel
+              eventId={detail.id}
+              cameras={detail.cameras}
+              detail={detail}
+              onDetailRefresh={refreshDetail}
+            />
+            <BridgePanel
+              eventId={detail.id}
+              detail={detail}
+              onDetailRefresh={refreshDetail}
+            />
+          </div>
+        </div>
+      )}
 
       <p className="text-center text-[10px] text-gray-600 mt-6">
         Phase 6 Autonomous Live Director · See <Link to="/" className="text-accent2 hover:underline">docs</Link> for RTMP setup.
