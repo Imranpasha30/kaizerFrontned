@@ -15,6 +15,7 @@ import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Billing  from "./pages/Billing";
 import LiveDirector from "./pages/LiveDirector";
+import PhoneCamera from "./pages/PhoneCamera";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
 import Landing  from "./pages/Landing";
@@ -31,7 +32,8 @@ function Shell({ children }) {
   const hideChrome =
     loc.pathname === "/login" ||
     loc.pathname === "/register" ||
-    loc.pathname === "/";
+    loc.pathname === "/" ||
+    loc.pathname.startsWith("/phone/");
   return (
     <div className="flex flex-col min-h-screen">
       {!hideChrome && <NavBar />}
@@ -50,6 +52,10 @@ export default function App() {
           <Route path="/"         element={<Landing />} />
           <Route path="/login"    element={<Login />} />
           <Route path="/register" element={<Register />} />
+
+          {/* Phase 9 — phone-as-camera public route (scanned via QR). No auth;
+              the token in the URL authorises the ingest WebSocket. */}
+          <Route path="/phone/:eventId/:camId" element={<PhoneCamera />} />
 
           {/* App routes — ProtectedRoute redirects to /login when auth is required */}
           <Route path="/app"                           element={<ProtectedRoute><Home /></ProtectedRoute>} />

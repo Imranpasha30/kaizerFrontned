@@ -349,6 +349,13 @@ export const liveApi = {
   forceCut:    (id, cam_id)     => req("POST", `/live/events/${id}/force-cut`, { cam_id }),
   getLog:      (id, limit=200)  => req("GET",  `/live/events/${id}/log?limit=${limit}`),
 
+  // ── Phase 9 — phone-as-camera test mode ─────────────────────────────────
+  // Mints a one-shot ingest session for a phone browser to push webm over
+  // WebSocket. Returns {cam_id, token, phone_url, ingest_ws_url} — the
+  // frontend prepends window.location.origin to phone_url for the QR code.
+  createPhoneSession: (eventId) =>
+    req("POST", `/live/events/${eventId}/phone-sessions`),
+
   // ── Phase 7 — Relay / Broadcast destinations ────────────────────────────
   listRelayDestinations:  (eventId)            => req("GET",    `/live/events/${eventId}/relay/destinations`),
   addRelayDestination:    (eventId, dest)      => req("POST",   `/live/events/${eventId}/relay/destinations`, dest),

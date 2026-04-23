@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Camera, Radio, PlayCircle, StopCircle, Pin, PinOff, Ban,
   CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle, Lock, Trash2,
+  Smartphone, Copy, X,
 } from "lucide-react";
 import { liveApi } from "../api/client";
 import BroadcastPanel from "../components/live/BroadcastPanel";
@@ -17,6 +18,81 @@ import {
   LayoutPicker,
   DEFAULT_LAYOUT_OPTIONS,
 } from "../components/ui";
+
+/**
+ * PhoneCameraPreview — tiny MediaSource-backed video element that connects
+ * to /api/live/ws/monitor/{eventId}/{camId} and plays the webm chunks the
+ * phone ingest WebSocket is fanning out. Used inside each phone camera tile.
+ */
+function PhoneCameraPreview({ eventId, camId }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || typeof window === "undefined") return;
+    if (!("MediaSource" in window)) return;
+
+    const ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+
+    let sb = null;
+    let ws = null;
+    let cancelled = false;
+    const queue = [];
+
+    const flush = () => {
+      if (!sb || sb.updating || queue.length === 0) return;
+      try {
+        sb.appendBuffer(queue.shift());
+      } catch { /* SourceBuffer may have been removed */ }
+    };
+
+    ms.addEventListener("sourceopen", () => {
+      if (cancelled) return;
+      try {
+        sb = ms.addSourceBuffer('video/webm; codecs="vp9,opus"');
+      } catch {
+        try {
+          sb = ms.addSourceBuffer('video/webm; codecs="vp8,opus"');
+        } catch {
+          return;
+        }
+      }
+      sb.mode = "sequence";
+      sb.addEventListener("updateend", flush);
+    });
+
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.hostname;
+    const url = `${wsProto}//${host}:8000/api/live/ws/monitor/${encodeURIComponent(eventId)}/${encodeURIComponent(camId)}`;
+    try {
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (e) => {
+        if (cancelled) return;
+        queue.push(e.data);
+        flush();
+      };
+    } catch { /* noop */ }
+
+    return () => {
+      cancelled = true;
+      try { if (ws) ws.close(); } catch { /* noop */ }
+      try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* noop */ }
+    };
+  }, [eventId, camId]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      muted
+      playsInline
+      className="w-full aspect-video bg-black rounded object-contain mb-2"
+    />
+  );
+}
+
 
 /**
  * LiveDirector — Autonomous Live Director control surface.
@@ -61,6 +137,11 @@ export default function LiveDirector() {
   const [pickerLayout, setPickerLayout] = useState("single");
   const [lockStatus, setLockStatus] = useState({ saving: false, note: "", error: "" });
 
+  // Phase 9 — phone-as-camera session modal state. `phoneSession` is
+  // {cam_id, token, phone_url, ingest_ws_url, absolute_url} when open.
+  const [phoneSession, setPhoneSession] = useState(null);
+  const [phoneCopied, setPhoneCopied] = useState(false);
+
   // initial load
   const reload = useCallback(() => {
     setLoading(true);
@@ -80,7 +161,16 @@ export default function LiveDirector() {
     if (!selectedId) return;
     liveApi.getEvent(selectedId)
       .then(setDetail)
-      .catch((e) => setErr(e.message || String(e)));
+      .catch((e) => {
+        setErr(e.message || String(e));
+        // Self-heal: the event was deleted server-side but still lingers in
+        // the list. Drop it and reload so the picker matches reality.
+        if (/Event not found|404/i.test(String(e?.message || e))) {
+          setEvents((list) => list.filter((ev) => ev.id !== selectedId));
+          setSelectedId(null);
+          setDetail(null);
+        }
+      });
   }, [selectedId]);
 
   // Re-fetch the event detail — used by child panels that mutate config_json.
@@ -156,6 +246,41 @@ export default function LiveDirector() {
       const d = await liveApi.getEvent(selectedId);
       setDetail(d);
     } catch (e) { setErr(e.message || String(e)); }
+  };
+
+  // Phase 9 — mint a phone camera session and open the QR modal.
+  const addPhoneCamera = async () => {
+    if (!selectedId) return;
+    try {
+      const s = await liveApi.createPhoneSession(selectedId);
+      const absolute = `${window.location.origin}${s.phone_url}`;
+      setPhoneSession({ ...s, absolute_url: absolute });
+      setPhoneCopied(false);
+      await refreshDetail();
+    } catch (e) { setErr(e.message || String(e)); }
+  };
+
+  // Poll the detail every 3s while the phone modal is open so the newly
+  // registered camera tile (and its live preview) appear without the user
+  // having to hit Refresh.
+  useEffect(() => {
+    if (!phoneSession || !selectedId) return undefined;
+    const id = setInterval(() => {
+      refreshDetail();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [phoneSession, selectedId, refreshDetail]);
+
+  const copyPhoneUrl = async () => {
+    if (!phoneSession?.absolute_url) return;
+    try {
+      await navigator.clipboard.writeText(phoneSession.absolute_url);
+      setPhoneCopied(true);
+      setTimeout(() => setPhoneCopied(false), 1800);
+    } catch {
+      // Fallback: select the text and let the user copy manually
+      setPhoneCopied(false);
+    }
   };
 
   const startLive = async () => {
@@ -476,16 +601,24 @@ export default function LiveDirector() {
                     Add at least one camera before going live.
                   </p>
                 )}
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 mb-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2 mb-3 max-h-[60vh] overflow-y-auto pr-1">
                   {detail.cameras.map((c) => {
                     const active = c.cam_id === activeCam;
+                    const isPhone = Array.isArray(c.role_hints) && c.role_hints.includes("phone");
                     return (
                       <div key={c.cam_id}
-                        className={`p-3 rounded-md border transition-colors
+                        className={`p-3 rounded-md border transition-colors min-h-[96px] flex flex-col
                           ${active ? "border-accent bg-accent/10"
                                    : "border-border bg-black/30"}`}>
+                        {isPhone && (
+                          <PhoneCameraPreview eventId={selectedId} camId={c.cam_id} />
+                        )}
                         <div className="flex items-center gap-2 mb-2">
-                          <Camera size={13} className={active ? "text-accent" : "text-gray-500"} />
+                          {isPhone ? (
+                            <Smartphone size={13} className={active ? "text-accent" : "text-accent2"} />
+                          ) : (
+                            <Camera size={13} className={active ? "text-accent" : "text-gray-500"} />
+                          )}
                           <span className="text-xs font-medium text-white truncate">
                             {c.label || c.cam_id}
                           </span>
@@ -495,7 +628,7 @@ export default function LiveDirector() {
                             </span>
                           )}
                         </div>
-                        <div className="text-[10px] text-gray-600 font-mono mb-2">{c.cam_id}</div>
+                        <div className="text-[10px] text-gray-600 font-mono mb-2 truncate">{c.cam_id}</div>
                         {isLive ? (
                           <div className="flex gap-1 flex-wrap">
                             <button className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-gray-300"
@@ -540,15 +673,15 @@ export default function LiveDirector() {
               {!isLive && (
                 <div className="border-t border-border pt-3 mb-4">
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Add camera</div>
-                  <div className="flex gap-2 items-end">
+                  <div className="flex gap-2 items-end flex-wrap">
                     <Input
-                      className="flex-1"
+                      className="flex-1 min-w-[140px]"
                       placeholder="cam_id (e.g. cam_stage)"
                       value={camId}
                       onChange={(e) => setCamId(e.target.value)}
                     />
                     <Input
-                      className="flex-1"
+                      className="flex-1 min-w-[140px]"
                       placeholder="Label (Stage Left)"
                       value={camLabel}
                       onChange={(e) => setCamLabel(e.target.value)}
@@ -561,9 +694,21 @@ export default function LiveDirector() {
                     >
                       Add
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<Smartphone size={14} />}
+                      onClick={addPhoneCamera}
+                      title="Use a phone on the same WiFi as a camera"
+                    >
+                      Add phone camera
+                    </Button>
                   </div>
                   <p className="text-[10px] text-gray-600 mt-1">
                     RTMP push URL after start: <code className="text-accent2">rtmp://localhost:1935/live/{detail.id}/&lt;cam_id&gt;</code>
+                  </p>
+                  <p className="text-[10px] text-gray-600 mt-1">
+                    Or tap <span className="text-accent2">Add phone camera</span> to scan a QR with your phone — no app install, just your browser.
                   </p>
                 </div>
               )}
@@ -664,6 +809,73 @@ export default function LiveDirector() {
       <p className="text-center text-[10px] text-gray-600 mt-6">
         Phase 6 Autonomous Live Director · See <Link to="/" className="text-accent2 hover:underline">docs</Link> for RTMP setup.
       </p>
+
+      {/* Phase 9 — phone-as-camera QR modal */}
+      {phoneSession && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPhoneSession(null);
+          }}
+        >
+          <div className="bg-bg-panel border border-border rounded-xl max-w-md w-full p-6 relative">
+            <button
+              onClick={() => setPhoneSession(null)}
+              className="absolute top-3 right-3 text-gray-400 hover:text-white"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-2 mb-3">
+              <Smartphone size={18} className="text-accent2" />
+              <h3 className="text-base font-bold text-white">Scan with your phone</h3>
+            </div>
+
+            <p className="text-[12px] text-gray-400 mb-4">
+              Open this QR on your phone camera (same WiFi). Your phone will load a
+              streaming page — tap <span className="text-white">Start streaming</span> to
+              appear in the camera grid. Keep this window open.
+            </p>
+
+            <div className="bg-white rounded-lg p-3 flex items-center justify-center mb-4">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(phoneSession.absolute_url)}`}
+                alt="Phone camera QR code"
+                width={260}
+                height={260}
+                className="block"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 bg-black/40 border border-border rounded px-2 py-1.5 mb-3">
+              <code className="text-[11px] text-accent2 truncate flex-1" title={phoneSession.absolute_url}>
+                {phoneSession.absolute_url}
+              </code>
+              <button
+                onClick={copyPhoneUrl}
+                className="text-[10px] text-gray-300 hover:text-white inline-flex items-center gap-1 shrink-0"
+                title="Copy link"
+              >
+                {phoneCopied ? <CheckCircle2 size={12} className="text-green-400" /> : <Copy size={12} />}
+                {phoneCopied ? "Copied" : "Copy"}
+              </button>
+            </div>
+
+            <div className="text-[11px] text-gray-500 mb-4">
+              Camera id: <code className="text-accent2">{phoneSession.cam_id}</code>
+            </div>
+
+            <div className="flex justify-end">
+              <Button variant="ghost" size="sm" onClick={() => setPhoneSession(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
