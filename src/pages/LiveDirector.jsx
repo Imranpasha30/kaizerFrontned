@@ -9,6 +9,7 @@ import { liveApi } from "../api/client";
 import BroadcastPanel from "../components/live/BroadcastPanel";
 import ChromaPanel from "../components/live/ChromaPanel";
 import BridgePanel from "../components/live/BridgePanel";
+import ProgramPreview from "../components/live/ProgramPreview";
 import {
   Button,
   Card,
@@ -755,15 +756,17 @@ export default function LiveDirector() {
                         <span className="text-[10px] font-mono">{layoutMeta.name}</span>
                       </span>
                     </div>
-                    <video
-                      className="w-full bg-black rounded border border-border"
-                      controls autoPlay muted playsInline
-                      src={`/media/live/${detail.id}/program.m3u8`}>
-                      Program HLS stream
-                    </video>
+                    <ProgramPreview
+                      eventId={detail.id}
+                      cameras={detail.cameras}
+                      layout={activeLayout}
+                      primary={activeCam || detail.cameras[0]?.cam_id}
+                      layoutCams={activeLayoutCams}
+                    />
                     <p className="text-[10px] text-gray-600 mt-1">
-                      HLS stream at <code>/media/live/{detail.id}/program.m3u8</code>.
-                      Some browsers need hls.js to play m3u8.
+                      Browser-composited preview (phone-camera test mode).
+                      Production deploys render this server-side via FFmpeg and
+                      serve HLS at <code>/media/live/{detail.id}/program.m3u8</code>.
                     </p>
                   </div>
                   <div>
