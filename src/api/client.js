@@ -363,4 +363,13 @@ export const liveApi = {
 
   // ── Phase 7 — Dead-air bridge ───────────────────────────────────────────
   setBridge:              (eventId, config)    => req("PUT",    `/live/events/${eventId}/bridge`, config),
+
+  // ── Phase 8 — Layout lock (forward-looking: endpoint may not exist yet) ──
+  // When the user picks a layout tile in the LiveDirector and hits "Lock",
+  // we POST here. If the backend hasn't shipped the endpoint yet, a 404 is
+  // caught by the caller and surfaced as "Layout locking coming soon".
+  setLockedLayout:        (eventId, body)      =>
+    req("POST", `/live/events/${eventId}/lock-layout`, body),
+  releaseLockedLayout:    (eventId)            =>
+    req("POST", `/live/events/${eventId}/lock-layout`, { layout: null }),
 };

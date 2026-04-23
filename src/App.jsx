@@ -17,13 +17,20 @@ import Billing  from "./pages/Billing";
 import LiveDirector from "./pages/LiveDirector";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
+import Landing  from "./pages/Landing";
 import AuthProvider from "./auth/AuthProvider";
 import ProtectedRoute from "./auth/ProtectedRoute";
 
-/** NavBar is hidden on the auth pages for a full-bleed login experience. */
+/**
+ * NavBar is hidden on the auth pages for a full-bleed login experience,
+ * and on the public Landing page (which has its own bar).
+ */
 function Shell({ children }) {
   const loc = useLocation();
-  const hideChrome = loc.pathname === "/login" || loc.pathname === "/register";
+  const hideChrome =
+    loc.pathname === "/login" ||
+    loc.pathname === "/register" ||
+    loc.pathname === "/";
   return (
     <div className="flex flex-col min-h-screen">
       {!hideChrome && <NavBar />}
@@ -37,12 +44,13 @@ export default function App() {
     <AuthProvider>
       <Shell>
         <Routes>
-          {/* Public auth routes */}
+          {/* Public marketing + auth routes */}
+          <Route path="/"         element={<Landing />} />
           <Route path="/login"    element={<Login />} />
           <Route path="/register" element={<Register />} />
 
           {/* App routes — ProtectedRoute redirects to /login when auth is required */}
-          <Route path="/"                              element={<ProtectedRoute><Home /></ProtectedRoute>} />
+          <Route path="/app"                           element={<ProtectedRoute><Home /></ProtectedRoute>} />
           <Route path="/new"                           element={<ProtectedRoute><NewJob /></ProtectedRoute>} />
           <Route path="/quick-publish"                 element={<ProtectedRoute><QuickPublish /></ProtectedRoute>} />
           <Route path="/assets"                        element={<ProtectedRoute><Assets /></ProtectedRoute>} />

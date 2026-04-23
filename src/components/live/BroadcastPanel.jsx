@@ -3,6 +3,7 @@ import {
   Radio, Plus, Trash2, PlayCircle, StopCircle, AlertTriangle, Loader2, X,
 } from "lucide-react";
 import { liveApi } from "../../api/client";
+import { Button, Card, Input, PasswordInput } from "../ui";
 
 const PRESETS = [
   { label: "YouTube Live",   url: "rtmp://a.rtmp.youtube.com/live2/" },
@@ -46,8 +47,10 @@ export default function BroadcastPanel({ eventId, isLive }) {
   const [busy, setBusy]         = useState(false);
   const [err, setErr]           = useState("");
   const [addOpen, setAddOpen]   = useState(false);
+  // The form stores base_url + stream_key separately so the stream key can be
+  // masked behind a PasswordInput. They are joined on submit.
   const [form, setForm]         = useState({
-    id: "", name: "", rtmp_url: "", enabled: true, reconnect_max_attempts: 5,
+    id: "", name: "", base_url: "", stream_key: "", enabled: true, reconnect_max_attempts: 5,
   });
   const [saving, setSaving]     = useState(false);
 
@@ -104,18 +107,21 @@ export default function BroadcastPanel({ eventId, isLive }) {
   }, [status]);
 
   const resetForm = () => setForm({
-    id: "", name: "", rtmp_url: "", enabled: true, reconnect_max_attempts: 5,
+    id: "", name: "", base_url: "", stream_key: "", enabled: true, reconnect_max_attempts: 5,
   });
 
   const submitAdd = async (e) => {
     e?.preventDefault?.();
-    if (!form.id.trim() || !form.name.trim() || !form.rtmp_url.trim()) return;
+    const base = (form.base_url || "").trim();
+    const key  = (form.stream_key || "").trim();
+    if (!form.id.trim() || !form.name.trim() || !base || !key) return;
+    const rtmp_url = `${base.replace(/\/$/, "")}/${key}`;
     setSaving(true); setErr("");
     try {
       await liveApi.addRelayDestination(eventId, {
         id: form.id.trim(),
         name: form.name.trim(),
-        rtmp_url: form.rtmp_url.trim(),
+        rtmp_url,
         enabled: !!form.enabled,
         reconnect_max_attempts: Number(form.reconnect_max_attempts) || 5,
       });
@@ -166,24 +172,31 @@ export default function BroadcastPanel({ eventId, isLive }) {
   const isRunning = !!status?.is_running;
 
   return (
-    <section className="card p-4 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Radio size={14} className="text-accent2" />
-          Broadcast
-          {isRunning && (
-            <span className="inline-flex items-center gap-1 text-[10px] bg-red-600/80 text-white px-1.5 py-0.5 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              ON AIR
-            </span>
-          )}
-        </h3>
-        <button
-          className="btn btn-secondary text-[11px] px-2 py-1 flex items-center gap-1"
+    <Card className="p-4 h-full flex flex-col">
+      <div className="flex items-start justify-between mb-3 gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+            Phase 7 · relay
+          </span>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <Radio size={16} className="text-accent2" />
+            Broadcast
+            {isRunning && (
+              <span className="inline-flex items-center gap-1 text-[10px] bg-red-600/80 text-white px-1.5 py-0.5 rounded-full">
+                <span className="ui-live-dot" aria-hidden="true" />
+                ON AIR
+              </span>
+            )}
+          </h3>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          leftIcon={<Plus size={12} />}
           onClick={() => { setAddOpen(true); setErr(""); }}
         >
-          <Plus size={12} /> Add
-        </button>
+          Add
+        </Button>
       </div>
 
       {err && (
@@ -246,24 +259,28 @@ export default function BroadcastPanel({ eventId, isLive }) {
 
       <div className="border-t border-border pt-3 flex items-center gap-2">
         {!isRunning ? (
-          <button
-            className="btn btn-green text-xs flex items-center gap-1 flex-1 justify-center"
+          <Button
+            variant="primary"
+            size="sm"
+            className="flex-1 justify-center"
+            leftIcon={busy ? <Loader2 size={12} className="animate-spin" /> : <PlayCircle size={12} />}
             onClick={startBroadcast}
             disabled={busy || !isLive || destinations.length === 0}
             title={!isLive ? "Event must be live before broadcasting" : ""}
           >
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <PlayCircle size={12} />}
             Start broadcasting
-          </button>
+          </Button>
         ) : (
-          <button
-            className="btn text-xs flex items-center gap-1 flex-1 justify-center bg-red-900/80 border-red-700/60 text-red-200 hover:bg-red-800"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 justify-center !text-red-400 !border-red-900/40 hover:!bg-red-950/30"
+            leftIcon={busy ? <Loader2 size={12} className="animate-spin" /> : <StopCircle size={12} />}
             onClick={stopBroadcast}
             disabled={busy}
           >
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <StopCircle size={12} />}
             Stop broadcasting
-          </button>
+          </Button>
         )}
         {isRunning && (
           <div className="text-[11px] text-gray-400 font-mono px-2 py-1 rounded bg-black/40 border border-border">
@@ -286,7 +303,7 @@ export default function BroadcastPanel({ eventId, isLive }) {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md bg-surface border border-border rounded-lg shadow-2xl">
+          <Card className="w-full max-w-md !p-0 shadow-2xl">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <h4 className="text-sm font-semibold text-white">Add broadcast destination</h4>
               <button
@@ -308,7 +325,7 @@ export default function BroadcastPanel({ eventId, isLive }) {
                       key={p.label}
                       type="button"
                       className="text-[11px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-gray-300"
-                      onClick={() => setForm((f) => ({ ...f, rtmp_url: p.url }))}
+                      onClick={() => setForm((f) => ({ ...f, base_url: p.url }))}
                     >
                       {p.label}
                     </button>
@@ -316,44 +333,39 @@ export default function BroadcastPanel({ eventId, isLive }) {
                 </div>
               </div>
 
-              <div>
-                <label className="text-[11px] text-gray-500 uppercase tracking-wider">
-                  ID (machine name)
-                </label>
-                <input
-                  required
-                  className="w-full px-2 py-1.5 rounded bg-black/40 border border-border text-sm mt-1"
-                  placeholder="youtube_main"
-                  value={form.id}
-                  onChange={(e) => setForm((f) => ({ ...f, id: e.target.value }))}
-                />
-              </div>
+              <Input
+                required
+                label="ID (machine name)"
+                placeholder="youtube_main"
+                value={form.id}
+                onChange={(e) => setForm((f) => ({ ...f, id: e.target.value }))}
+              />
 
-              <div>
-                <label className="text-[11px] text-gray-500 uppercase tracking-wider">
-                  Display name
-                </label>
-                <input
-                  required
-                  className="w-full px-2 py-1.5 rounded bg-black/40 border border-border text-sm mt-1"
-                  placeholder="YouTube Main Channel"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                />
-              </div>
+              <Input
+                required
+                label="Display name"
+                placeholder="YouTube Main Channel"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
 
-              <div>
-                <label className="text-[11px] text-gray-500 uppercase tracking-wider">
-                  RTMP URL (append your stream key)
-                </label>
-                <input
-                  required
-                  className="w-full px-2 py-1.5 rounded bg-black/40 border border-border text-sm font-mono mt-1"
-                  placeholder="rtmp://a.rtmp.youtube.com/live2/xxxx-xxxx"
-                  value={form.rtmp_url}
-                  onChange={(e) => setForm((f) => ({ ...f, rtmp_url: e.target.value }))}
-                />
-              </div>
+              <Input
+                required
+                label="Base URL"
+                hint="The public RTMP endpoint. Pick a preset above, or paste manually."
+                placeholder="rtmp://a.rtmp.youtube.com/live2/"
+                value={form.base_url}
+                onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
+              />
+
+              <PasswordInput
+                label="Stream key"
+                hint="Kept private. Never shown in plain text after saving."
+                autoComplete="new-password"
+                placeholder="xxxx-xxxx-xxxx-xxxx"
+                value={form.stream_key}
+                onChange={(e) => setForm((f) => ({ ...f, stream_key: e.target.value }))}
+              />
 
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-2 text-xs text-gray-300">
@@ -378,26 +390,34 @@ export default function BroadcastPanel({ eventId, isLive }) {
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary text-xs"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setAddOpen(false)}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="btn btn-primary text-xs flex items-center gap-1"
-                  disabled={saving || !form.id.trim() || !form.name.trim() || !form.rtmp_url.trim()}
+                  variant="primary"
+                  size="sm"
+                  leftIcon={saving ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                  disabled={
+                    saving
+                    || !form.id.trim()
+                    || !form.name.trim()
+                    || !form.base_url.trim()
+                    || !form.stream_key.trim()
+                  }
                 >
-                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
                   Save destination
-                </button>
+                </Button>
               </div>
             </form>
-          </div>
+          </Card>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

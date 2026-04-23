@@ -33,7 +33,7 @@ export default function NavBar() {
       : "text-gray-400 hover:text-gray-200";
 
   const navLinks = [
-    { to: "/",              icon: Home,        label: "Jobs" },
+    { to: "/app",           icon: Home,        label: "Jobs" },
     { to: "/new",           icon: Plus,        label: "New Job" },
     { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
     { to: "/live",          icon: Radio,       label: "Live",    badge: "NEW" },
@@ -57,8 +57,8 @@ export default function NavBar() {
   return (
     <header className="bg-[#0a0a0a] border-b-2 border-accent flex-shrink-0 relative z-50">
       <div className="max-w-8xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
-        {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 flex-shrink-0">
+        {/* Logo — links to the authenticated dashboard */}
+        <Link to="/app" className="flex items-center gap-2 flex-shrink-0">
           <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
             KAIZER
           </div>

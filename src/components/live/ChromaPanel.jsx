@@ -3,6 +3,7 @@ import {
   Image as ImageIcon, Camera, Save, Trash2, Loader2, AlertTriangle, X, CheckCircle2,
 } from "lucide-react";
 import { liveApi } from "../../api/client";
+import { Button, Card, Input } from "../ui";
 
 const DEFAULT_CFG = {
   enabled: false,
@@ -88,13 +89,20 @@ export default function ChromaPanel({ eventId, cameras, detail, onDetailRefresh 
   };
 
   return (
-    <section className="card p-4 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <ImageIcon size={14} className="text-accent2" />
-          Chroma Key (Green Screen)
-        </h3>
-        <span className="text-[10px] text-gray-500">{camList.length} cam{camList.length === 1 ? "" : "s"}</span>
+    <Card className="p-4 h-full flex flex-col">
+      <div className="flex items-start justify-between mb-3 gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+            Phase 7 · compositor
+          </span>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <ImageIcon size={16} className="text-accent2" />
+            Chroma Key
+          </h3>
+        </div>
+        <span className="text-[10px] text-gray-500 mt-1">
+          {camList.length} cam{camList.length === 1 ? "" : "s"}
+        </span>
       </div>
 
       {panelErr && (
@@ -157,15 +165,12 @@ export default function ChromaPanel({ eventId, cameras, detail, onDetailRefresh 
                         onChange={(e) => updateCfg(c.cam_id, { color: e.target.value })}
                       />
                     </label>
-                    <label className="block">
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider">Hex</span>
-                      <input
-                        type="text"
-                        className="w-full px-2 py-1 mt-1 rounded bg-black/40 border border-border text-[11px] font-mono"
-                        value={cfg.color || ""}
-                        onChange={(e) => updateCfg(c.cam_id, { color: e.target.value })}
-                      />
-                    </label>
+                    <Input
+                      label="Hex"
+                      className="[&>input]:font-mono"
+                      value={cfg.color || ""}
+                      onChange={(e) => updateCfg(c.cam_id, { color: e.target.value })}
+                    />
                   </div>
 
                   <label className="block">
@@ -200,18 +205,13 @@ export default function ChromaPanel({ eventId, cameras, detail, onDetailRefresh 
                     />
                   </label>
 
-                  <label className="block">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                      Background asset path
-                    </span>
-                    <input
-                      type="text"
-                      className="w-full px-2 py-1.5 mt-1 rounded bg-black/40 border border-border text-xs font-mono"
-                      placeholder="/path/to/bg.png  or  /path/to/loop.mp4"
-                      value={cfg.bg_asset_path || ""}
-                      onChange={(e) => updateCfg(c.cam_id, { bg_asset_path: e.target.value })}
-                    />
-                  </label>
+                  <Input
+                    label="Background asset path"
+                    hint="Image or looping video on the backend host."
+                    placeholder="/path/to/bg.png  or  /path/to/loop.mp4"
+                    value={cfg.bg_asset_path || ""}
+                    onChange={(e) => updateCfg(c.cam_id, { bg_asset_path: e.target.value })}
+                  />
 
                   <div className="grid grid-cols-2 gap-2">
                     <label className="block">
@@ -261,23 +261,27 @@ export default function ChromaPanel({ eventId, cameras, detail, onDetailRefresh 
                   )}
 
                   <div className="flex justify-end gap-2 pt-1">
-                    <button
+                    <Button
                       type="button"
-                      className="btn btn-secondary text-[11px] px-2 py-1 flex items-center gap-1"
+                      variant="ghost"
+                      size="sm"
+                      className="!text-red-400 !border-red-900/40 hover:!bg-red-950/30"
+                      leftIcon={<Trash2 size={11} />}
                       onClick={() => remove(c.cam_id)}
                       disabled={st.saving}
                     >
-                      <Trash2 size={11} /> Remove
-                    </button>
-                    <button
+                      Remove
+                    </Button>
+                    <Button
                       type="button"
-                      className="btn btn-primary text-[11px] px-2 py-1 flex items-center gap-1"
+                      variant="primary"
+                      size="sm"
+                      leftIcon={st.saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                       onClick={() => save(c.cam_id)}
                       disabled={st.saving}
                     >
-                      {st.saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                       Save
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -290,6 +294,6 @@ export default function ChromaPanel({ eventId, cameras, detail, onDetailRefresh 
         Asset paths resolve on the backend host. Changes apply live when the event is running;
         otherwise they kick in on the next Go Live.
       </p>
-    </section>
+    </Card>
   );
 }

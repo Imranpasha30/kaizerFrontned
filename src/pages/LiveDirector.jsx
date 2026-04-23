@@ -1,18 +1,29 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Camera, Radio, PlayCircle, StopCircle, Pin, PinOff, Ban,
-  CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle,
+  CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle, Lock,
 } from "lucide-react";
 import { liveApi } from "../api/client";
 import BroadcastPanel from "../components/live/BroadcastPanel";
 import ChromaPanel from "../components/live/ChromaPanel";
 import BridgePanel from "../components/live/BridgePanel";
+import {
+  Button,
+  Card,
+  Input,
+  SectionHeader,
+  LayoutPreview,
+  LayoutPicker,
+  DEFAULT_LAYOUT_OPTIONS,
+} from "../components/ui";
 
 /**
  * LiveDirector — Autonomous Live Director control surface.
  *
  *  ┌─ Header: event picker / create / start / stop ────────────────────┐
+ *  │                                                                   │
+ *  ├─ Program layout picker (LayoutPicker tiles — Canva-style) ───────┤
  *  │                                                                   │
  *  ├─ Multi-cam preview grid (active cam highlighted) ────────────────┤
  *  │                                                                   │
@@ -41,7 +52,14 @@ export default function LiveDirector() {
   // decisions stream from WS
   const [decisions, setDecisions] = useState([]);
   const [activeCam, setActiveCam] = useState(null);
+  const [activeLayout, setActiveLayout] = useState("single");
+  const [activeLayoutCams, setActiveLayoutCams] = useState([]);
+  const [activeReason, setActiveReason] = useState("");
   const wsRef = useRef(null);
+
+  // layout picker + lock state
+  const [pickerLayout, setPickerLayout] = useState("single");
+  const [lockStatus, setLockStatus] = useState({ saving: false, note: "", error: "" });
 
   // initial load
   const reload = useCallback(() => {
@@ -90,8 +108,19 @@ export default function LiveDirector() {
         const msg = JSON.parse(ev.data);
         if (msg.type === "selection") {
           setActiveCam(msg.cam_id);
+          if (msg.layout) setActiveLayout(msg.layout);
+          if (Array.isArray(msg.layout_cams)) setActiveLayoutCams(msg.layout_cams);
+          if (msg.reason) setActiveReason(msg.reason);
           setDecisions((prev) => [
-            { t: msg.t, cam_id: msg.cam_id, reason: msg.reason, confidence: msg.confidence },
+            {
+              t: msg.t,
+              cam_id: msg.cam_id,
+              reason: msg.reason,
+              confidence: msg.confidence,
+              layout: msg.layout || "single",
+              layout_cams: Array.isArray(msg.layout_cams) ? msg.layout_cams : [],
+              transition: msg.transition,
+            },
             ...prev,
           ].slice(0, 60));
         }
@@ -100,6 +129,12 @@ export default function LiveDirector() {
     ws.onerror = () => setErr("Director stream disconnected. Refresh to re-open.");
     return () => { try { ws.close(); } catch {} };
   }, [detail?.id, detail?.is_live_in_process]);
+
+  // Keep the picker in sync with the current on-air layout when the user
+  // hasn't explicitly touched the picker yet.
+  useEffect(() => {
+    setPickerLayout(activeLayout);
+  }, [detail?.id]);
 
   const createEvent = async () => {
     if (!newName.trim()) return;
@@ -147,6 +182,46 @@ export default function LiveDirector() {
   const allow = async (c) => { try { await liveApi.allow(selectedId, c); } catch (e) { setErr(e.message); } };
   const forceCut = async (c) => { try { await liveApi.forceCut(selectedId, c); } catch (e) { setErr(e.message); } };
 
+  const lockLayout = async () => {
+    if (!selectedId) return;
+    setLockStatus({ saving: true, note: "", error: "" });
+    try {
+      await liveApi.setLockedLayout(selectedId, {
+        layout: pickerLayout,
+        layout_cams: activeLayoutCams,
+      });
+      setLockStatus({ saving: false, note: "Layout locked.", error: "" });
+    } catch (ex) {
+      const msg = String(ex?.message || ex);
+      // If the endpoint isn't wired yet, surface a friendly message.
+      const friendly = /404|not.?found/i.test(msg)
+        ? "Layout locking coming soon — the director is choosing automatically for now."
+        : msg;
+      setLockStatus({ saving: false, note: "", error: friendly });
+    }
+  };
+
+  const releaseLock = async () => {
+    if (!selectedId) return;
+    setLockStatus({ saving: true, note: "", error: "" });
+    try {
+      await liveApi.releaseLockedLayout(selectedId);
+      setLockStatus({ saving: false, note: "Back to auto — director is choosing.", error: "" });
+    } catch (ex) {
+      const msg = String(ex?.message || ex);
+      const friendly = /404|not.?found/i.test(msg)
+        ? "Layout locking coming soon — the director is choosing automatically for now."
+        : msg;
+      setLockStatus({ saving: false, note: "", error: friendly });
+    }
+  };
+
+  // Pretty labels for the on-air tile.
+  const layoutMeta = useMemo(() => {
+    const found = DEFAULT_LAYOUT_OPTIONS.find((o) => o.id === activeLayout);
+    return found || DEFAULT_LAYOUT_OPTIONS[0];
+  }, [activeLayout]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-600">
@@ -180,9 +255,15 @@ export default function LiveDirector() {
             </p>
           </div>
         </div>
-        <button className="btn btn-secondary text-xs" onClick={reload} title="Refresh events">
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <Button
+          variant="ghost"
+          size="sm"
+          leftIcon={<RefreshCw size={14} />}
+          onClick={reload}
+          title="Refresh events"
+        >
+          Refresh
+        </Button>
       </div>
 
       {err && (
@@ -194,8 +275,8 @@ export default function LiveDirector() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* LEFT — event picker + create */}
-        <section className="card p-4">
-          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+        <Card className="p-4">
+          <h2 className="text-[11px] font-semibold text-gray-300 uppercase tracking-wider mb-3">
             Events
           </h2>
           <div className="space-y-1 mb-4 max-h-64 overflow-y-auto">
@@ -218,25 +299,33 @@ export default function LiveDirector() {
             ))}
           </div>
 
-          <div className="border-t border-border pt-3">
-            <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Create event</div>
-            <input className="w-full mb-2 px-2 py-1.5 rounded bg-black/40 border border-border text-sm"
+          <div className="border-t border-border pt-3 space-y-2">
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider">Create event</div>
+            <Input
               placeholder="Event name (e.g. Spring Tour Hyderabad)"
-              value={newName} onChange={(e) => setNewName(e.target.value)} />
-            <input className="w-full mb-2 px-2 py-1.5 rounded bg-black/40 border border-border text-sm"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            <Input
               placeholder="Venue (optional)"
-              value={newVenue} onChange={(e) => setNewVenue(e.target.value)} />
-            <button className="w-full btn btn-primary text-sm"
+              value={newVenue}
+              onChange={(e) => setNewVenue(e.target.value)}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              className="w-full justify-center"
+              leftIcon={creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
               disabled={creating || !newName.trim()}
-              onClick={createEvent}>
-              {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              onClick={createEvent}
+            >
               Create
-            </button>
+            </Button>
           </div>
-        </section>
+        </Card>
 
         {/* MIDDLE — cameras + start/stop */}
-        <section className="card p-4 md:col-span-2">
+        <Card className="p-4 md:col-span-2">
           {!detail ? (
             <p className="text-gray-600 text-sm">Select an event on the left.</p>
           ) : (
@@ -248,21 +337,105 @@ export default function LiveDirector() {
                 </div>
                 <div className="flex gap-2">
                   {!isLive ? (
-                    <button className="btn btn-primary text-sm flex items-center gap-1"
-                      onClick={startLive} disabled={detail.cameras.length === 0}>
-                      <PlayCircle size={14} /> Go live
-                    </button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      leftIcon={<PlayCircle size={14} />}
+                      onClick={startLive}
+                      disabled={detail.cameras.length === 0}
+                    >
+                      Go live
+                    </Button>
                   ) : (
-                    <button className="btn btn-secondary text-sm flex items-center gap-1"
-                      onClick={stopLive}>
-                      <StopCircle size={14} /> Stop
-                    </button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<StopCircle size={14} />}
+                      onClick={stopLive}
+                    >
+                      Stop
+                    </Button>
                   )}
                 </div>
               </div>
 
+              {/* Program layout — Canva-style tile picker */}
+              <div className="mb-5 border-t border-border pt-4">
+                <div className="mb-3">
+                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">
+                    Program layout
+                  </div>
+                  <p className="text-[13px] text-gray-400 mt-1">
+                    The director switches layouts automatically based on the scene.
+                    Lock one here when you want to override.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-5 items-start">
+                  {/* Left — current ON AIR layout */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="ui-live-dot" aria-hidden="true" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-white">
+                        {isLive ? "On air" : "Preview"}
+                      </span>
+                      <span className="text-[11px] text-gray-400 font-mono">
+                        · {layoutMeta.name}
+                      </span>
+                    </div>
+                    <LayoutPreview layout={activeLayout} size="lg" />
+                    <div className="text-[11px] text-gray-500 font-mono max-w-[220px] truncate">
+                      {activeLayoutCams.length
+                        ? activeLayoutCams.join(" + ")
+                        : activeCam || "—"}
+                    </div>
+                    {activeReason && (
+                      <div className="text-[11px] text-gray-500 max-w-[220px] truncate" title={activeReason}>
+                        {activeReason}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right — picker */}
+                  <div>
+                    <LayoutPicker
+                      value={pickerLayout}
+                      onChange={setPickerLayout}
+                      options={DEFAULT_LAYOUT_OPTIONS}
+                      size="md"
+                    />
+
+                    <div className="flex items-center gap-2 flex-wrap mt-3">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        leftIcon={lockStatus.saving ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+                        onClick={lockLayout}
+                        disabled={lockStatus.saving || !pickerLayout}
+                      >
+                        Lock layout
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={releaseLock}
+                        disabled={lockStatus.saving}
+                      >
+                        Release auto
+                      </Button>
+                      {lockStatus.note && (
+                        <span className="text-[11px] text-green-400">{lockStatus.note}</span>
+                      )}
+                      {lockStatus.error && (
+                        <span className="text-[11px] text-gray-400">{lockStatus.error}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Cameras */}
-              <div className="mb-4">
+              <div className="mb-4 border-t border-border pt-4">
                 <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
                   Cameras ({detail.cameras.length})
                 </div>
@@ -327,16 +500,27 @@ export default function LiveDirector() {
               {!isLive && (
                 <div className="border-t border-border pt-3 mb-4">
                   <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Add camera</div>
-                  <div className="flex gap-2">
-                    <input className="flex-1 px-2 py-1.5 rounded bg-black/40 border border-border text-sm"
+                  <div className="flex gap-2 items-end">
+                    <Input
+                      className="flex-1"
                       placeholder="cam_id (e.g. cam_stage)"
-                      value={camId} onChange={(e) => setCamId(e.target.value)} />
-                    <input className="flex-1 px-2 py-1.5 rounded bg-black/40 border border-border text-sm"
+                      value={camId}
+                      onChange={(e) => setCamId(e.target.value)}
+                    />
+                    <Input
+                      className="flex-1"
                       placeholder="Label (Stage Left)"
-                      value={camLabel} onChange={(e) => setCamLabel(e.target.value)} />
-                    <button className="btn btn-secondary text-xs" onClick={addCamera} disabled={!camId.trim()}>
+                      value={camLabel}
+                      onChange={(e) => setCamLabel(e.target.value)}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={addCamera}
+                      disabled={!camId.trim()}
+                    >
                       Add
-                    </button>
+                    </Button>
                   </div>
                   <p className="text-[10px] text-gray-600 mt-1">
                     RTMP push URL after start: <code className="text-accent2">rtmp://localhost:1935/live/{detail.id}/&lt;cam_id&gt;</code>
@@ -348,7 +532,13 @@ export default function LiveDirector() {
               {isLive && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border-t border-border pt-4">
                   <div>
-                    <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Program output</div>
+                    <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <span>Program output</span>
+                      <span className="ml-auto inline-flex items-center gap-1.5 normal-case tracking-normal text-gray-400">
+                        <LayoutPreview layout={activeLayout} size="sm" />
+                        <span className="text-[10px] font-mono">{layoutMeta.name}</span>
+                      </span>
+                    </div>
                     <video
                       className="w-full bg-black rounded border border-border"
                       controls autoPlay muted playsInline
@@ -364,19 +554,36 @@ export default function LiveDirector() {
                     <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
                       Director decisions
                     </div>
-                    <div className="bg-black/60 rounded border border-border font-mono text-[11px] max-h-72 overflow-y-auto">
+                    <div className="bg-black/60 rounded border border-border max-h-72 overflow-y-auto">
                       {decisions.length === 0 ? (
-                        <div className="px-3 py-2 text-gray-600 italic">
+                        <div className="px-3 py-2 text-gray-600 italic text-[11px]">
                           Waiting for first decision…
                         </div>
                       ) : decisions.map((d, i) => (
-                        <div key={i} className="px-3 py-1.5 border-b border-border/50 flex justify-between gap-2">
-                          <span className="text-gray-500">{d.t.toFixed(1)}s</span>
-                          <span className="text-accent2 font-semibold">{d.cam_id}</span>
-                          <span className="text-gray-400 flex-1 truncate" title={d.reason}>
-                            {d.reason}
-                          </span>
-                          <span className="text-gray-600">{(d.confidence * 100).toFixed(0)}%</span>
+                        <div
+                          key={i}
+                          className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-white/[0.02] border-b border-border/50 last:border-b-0"
+                        >
+                          <LayoutPreview layout={d.layout || "single"} size="sm" />
+                          <div className="flex-1 min-w-0 font-mono text-[11px]">
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-500 w-12 shrink-0">
+                                {(d.t || 0).toFixed(1)}s
+                              </span>
+                              <span className="text-accent2 font-semibold truncate">
+                                {d.cam_id}
+                              </span>
+                              <span className="ml-auto text-gray-500 shrink-0">
+                                {((d.confidence || 0) * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                            <div
+                              className="text-gray-400 truncate mt-0.5"
+                              title={d.reason}
+                            >
+                              {d.reason || "—"}
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -385,7 +592,7 @@ export default function LiveDirector() {
               )}
             </>
           )}
-        </section>
+        </Card>
       </div>
 
       {/* Phase 7.8 — autonomous broadcast control panels */}
