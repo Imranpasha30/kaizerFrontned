@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom";
 import {
   Camera, Radio, PlayCircle, StopCircle, Pin, PinOff, Ban,
-  CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle, Lock,
+  CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle, Lock, Trash2,
 } from "lucide-react";
 import { liveApi } from "../api/client";
 import BroadcastPanel from "../components/live/BroadcastPanel";
@@ -182,6 +182,26 @@ export default function LiveDirector() {
   const allow = async (c) => { try { await liveApi.allow(selectedId, c); } catch (e) { setErr(e.message); } };
   const forceCut = async (c) => { try { await liveApi.forceCut(selectedId, c); } catch (e) { setErr(e.message); } };
 
+  const deleteCamera = async (c) => {
+    if (!selectedId) return;
+    if (!window.confirm(`Remove camera "${c}" from this event?`)) return;
+    try {
+      await liveApi.deleteCamera(selectedId, c);
+      await refreshDetail();
+    } catch (e) { setErr(e.message || String(e)); }
+  };
+
+  const deleteEvent = async () => {
+    if (!selectedId) return;
+    if (!window.confirm("Delete this event and all its cameras + logs? This cannot be undone.")) return;
+    try {
+      await liveApi.deleteEvent(selectedId);
+      setSelectedId(null);
+      setDetail(null);
+      reload();
+    } catch (e) { setErr(e.message || String(e)); }
+  };
+
   const lockLayout = async () => {
     if (!selectedId) return;
     setLockStatus({ saving: true, note: "", error: "" });
@@ -337,15 +357,27 @@ export default function LiveDirector() {
                 </div>
                 <div className="flex gap-2">
                   {!isLive ? (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      leftIcon={<PlayCircle size={14} />}
-                      onClick={startLive}
-                      disabled={detail.cameras.length === 0}
-                    >
-                      Go live
-                    </Button>
+                    <>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        leftIcon={<PlayCircle size={14} />}
+                        onClick={startLive}
+                        disabled={detail.cameras.length === 0}
+                      >
+                        Go live
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Trash2 size={14} />}
+                        onClick={deleteEvent}
+                        className="!text-red-400 !border-red-900/40 hover:!bg-red-950/30"
+                        title="Delete this event and all its cameras"
+                      >
+                        Delete
+                      </Button>
+                    </>
                   ) : (
                     <Button
                       variant="ghost"
@@ -464,7 +496,7 @@ export default function LiveDirector() {
                           )}
                         </div>
                         <div className="text-[10px] text-gray-600 font-mono mb-2">{c.cam_id}</div>
-                        {isLive && (
+                        {isLive ? (
                           <div className="flex gap-1 flex-wrap">
                             <button className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-gray-300"
                               onClick={() => pin(c.cam_id)} title="Pin this camera">
@@ -483,6 +515,14 @@ export default function LiveDirector() {
                               <CheckCircle2 size={10} /> Allow
                             </button>
                           </div>
+                        ) : (
+                          <button
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-red-900/30 hover:text-red-300 text-gray-400 inline-flex items-center gap-1"
+                            onClick={() => deleteCamera(c.cam_id)}
+                            title="Remove this camera from the event"
+                          >
+                            <Trash2 size={10} /> Remove
+                          </button>
                         )}
                       </div>
                     );
