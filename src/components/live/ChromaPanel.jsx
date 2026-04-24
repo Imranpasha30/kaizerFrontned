@@ -3,7 +3,7 @@ import {
   Image as ImageIcon, Camera, Save, Trash2, Loader2, AlertTriangle, X, CheckCircle2,
 } from "lucide-react";
 import { liveApi } from "../../api/client";
-import { Button, Card, Input } from "../ui";
+import { Button, Card, Input, AssetPicker } from "../ui";
 
 const DEFAULT_CFG = {
   enabled: false,
@@ -205,12 +205,11 @@ export default function ChromaPanel({ eventId, cameras, detail, onDetailRefresh 
                     />
                   </label>
 
-                  <Input
-                    label="Background asset path"
-                    hint="Image or looping video on the backend host."
-                    placeholder="/path/to/bg.png  or  /path/to/loop.mp4"
+                  <AssetPicker
+                    kind="any"
+                    label="Background asset (image or looping video)"
                     value={cfg.bg_asset_path || ""}
-                    onChange={(e) => updateCfg(c.cam_id, { bg_asset_path: e.target.value })}
+                    onChange={(url) => updateCfg(c.cam_id, { bg_asset_path: url })}
                   />
 
                   <div className="grid grid-cols-2 gap-2">

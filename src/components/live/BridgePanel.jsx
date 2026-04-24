@@ -3,7 +3,7 @@ import {
   MonitorOff, Save, Loader2, AlertTriangle, CheckCircle2, X,
 } from "lucide-react";
 import { liveApi } from "../../api/client";
-import { Button, Card, Input, LayoutPreview } from "../ui";
+import { Button, Card, Input, LayoutPreview, AssetPicker } from "../ui";
 
 const DEFAULT_CFG = {
   asset_url: "",
@@ -96,11 +96,11 @@ export default function BridgePanel({ eventId, detail, onDetailRefresh }) {
       )}
 
       <form onSubmit={save} className="space-y-3 flex-1">
-        <Input
-          label="Asset URL / path"
-          placeholder="/path/to/holding_card.mp4  or  /path/to/slate.png"
+        <AssetPicker
+          kind="any"
+          label="Bridge asset (image or looping video)"
           value={cfg.asset_url}
-          onChange={(e) => setCfg((c) => ({ ...c, asset_url: e.target.value }))}
+          onChange={(url) => setCfg((c) => ({ ...c, asset_url: url }))}
         />
 
         <Input

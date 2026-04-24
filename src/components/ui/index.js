@@ -18,3 +18,4 @@ export { default as MagneticButton } from "./MagneticButton";
 export { default as Tilt3D } from "./Tilt3D";
 export { default as TypewriterRotator } from "./TypewriterRotator";
 export { default as AIStatusBar, useActiveSection } from "./SectionWatcher";
+export { default as AssetPicker } from "./AssetPicker";
