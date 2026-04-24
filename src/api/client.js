@@ -325,6 +325,28 @@ export const api = {
   }),
 };
 
+// ── Phase 12 — Admin panel ──────────────────────────────────────────────────
+export const adminApi = {
+  system:       ()                          => req("GET",  "/admin/system"),
+  listUsers:    (q = "", limit = 50, offset = 0) =>
+    req("GET", `/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
+  getUser:      (id)                        => req("GET",  `/admin/users/${id}`),
+  toggleAdmin:  (id)                        => req("POST", `/admin/users/${id}/toggle-admin`),
+  listJobs:     (filters = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") params.set(k, v);
+    });
+    const q = params.toString();
+    return req("GET", `/admin/jobs${q ? `?${q}` : ""}`);
+  },
+  getJob:       (id)                        => req("GET",  `/admin/jobs/${id}`),
+  geminiUsage:  (days = 30, userId = null)  =>
+    req("GET", `/admin/gemini-usage?days=${days}${userId ? `&user_id=${userId}` : ""}`),
+  liveEvents:   ()                          => req("GET",  "/admin/live-events"),
+  audit:        ()                          => req("GET",  "/admin/audit"),
+};
+
 // ── Wave 2 — editor beta ────────────────────────────────────────────────────
 export const editorApi = {
   listStyles:    ()         => req("GET",  "/editor/styles"),

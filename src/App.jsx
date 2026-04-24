@@ -22,6 +22,8 @@ import Register from "./pages/Register";
 import Landing  from "./pages/Landing";
 import AuthProvider from "./auth/AuthProvider";
 import ProtectedRoute from "./auth/ProtectedRoute";
+import AdminRoute from "./auth/AdminRoute";
+import Admin from "./pages/Admin";
 import { CursorLayer } from "./components/ui";
 
 /**
@@ -35,7 +37,8 @@ function Shell({ children }) {
     loc.pathname === "/register" ||
     loc.pathname === "/" ||
     loc.pathname.startsWith("/phone/") ||
-    loc.pathname.startsWith("/program/");
+    loc.pathname.startsWith("/program/") ||
+    loc.pathname.startsWith("/admin");
   return (
     <div className="flex flex-col min-h-screen">
       {!hideChrome && <NavBar />}
@@ -76,6 +79,9 @@ export default function App() {
           <Route path="/billing"                       element={<ProtectedRoute><Billing /></ProtectedRoute>} />
           <Route path="/live"                          element={<ProtectedRoute><LiveDirector /></ProtectedRoute>} />
           <Route path="/program/:eventId"              element={<ProtectedRoute><ProgramMonitor /></ProtectedRoute>} />
+
+          {/* Admin console — nested /admin/<tab>. AdminRoute enforces is_admin. */}
+          <Route path="/admin/*"                        element={<AdminRoute><Admin /></AdminRoute>} />
         </Routes>
       </Shell>
     </AuthProvider>

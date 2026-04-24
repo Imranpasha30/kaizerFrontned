@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
   Radar, Zap, User, LogOut, LogIn, UserPlus, Image as ImageIcon,
-  Settings as SettingsIcon, CreditCard, Radio,
+  Settings as SettingsIcon, CreditCard, Radio, Shield,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -27,10 +27,15 @@ export default function NavBar() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [userMenuOpen]);
 
-  const active = (path) =>
-    loc.pathname === path
+  const active = (path) => {
+    // /admin should stay highlighted for any nested /admin/* tab.
+    const match = path === "/admin"
+      ? loc.pathname.startsWith("/admin")
+      : loc.pathname === path;
+    return match
       ? "text-accent2 border-b-2 border-accent2"
       : "text-gray-400 hover:text-gray-200";
+  };
 
   const navLinks = [
     { to: "/app",           icon: Home,        label: "Jobs" },
@@ -43,6 +48,9 @@ export default function NavBar() {
     { to: "/campaigns",     icon: Megaphone,   label: "Campaigns" },
     { to: "/performance",   icon: BarChart3,   label: "Performance" },
     { to: "/trending",      icon: Radar,       label: "Trending" },
+    // Admin link — appears last in the nav row (immediately before the
+    // user-menu cluster on the right). Rendered only for admins.
+    ...(user?.is_admin ? [{ to: "/admin", icon: Shield, label: "Admin", adminOnly: true }] : []),
   ];
 
   const displayName = user?.name?.trim() || user?.email?.split("@")[0] || "Account";
