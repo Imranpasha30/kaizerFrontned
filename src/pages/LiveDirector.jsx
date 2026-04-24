@@ -10,6 +10,7 @@ import BroadcastPanel from "../components/live/BroadcastPanel";
 import ChromaPanel from "../components/live/ChromaPanel";
 import BridgePanel from "../components/live/BridgePanel";
 import ProgramPreview from "../components/live/ProgramPreview";
+import DebugPanel from "../components/live/DebugPanel";
 import {
   Button,
   Card,
@@ -850,6 +851,13 @@ export default function LiveDirector() {
             />
           </div>
         </div>
+      )}
+
+      {/* Phase 10.1 — live debug surface: worker stats, ring health,
+          analyzer liveness, decisions count, issues list. Polls every 2s.
+          Collapsible; stays quiet when healthy. */}
+      {detail && (
+        <DebugPanel eventId={detail.id} isLive={isLive} />
       )}
 
       <p className="text-center text-[10px] text-gray-600 mt-6">

@@ -337,6 +337,7 @@ export const liveApi = {
   listEvents:  ()               => req("GET",  "/live/events"),
   createEvent: (body)           => req("POST", "/live/events", body),
   getEvent:    (id)             => req("GET",  `/live/events/${id}`),
+  getDebug:    (id)             => req("GET",  `/live/events/${id}/debug`),
   deleteEvent: (id)             => req("DELETE", `/live/events/${id}`),
   addCamera:   (id, body)       => req("POST", `/live/events/${id}/cameras`, body),
   deleteCamera:(id, cam_id)     => req("DELETE", `/live/events/${id}/cameras/${cam_id}`),
