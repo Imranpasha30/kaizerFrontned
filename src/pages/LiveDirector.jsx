@@ -751,7 +751,18 @@ export default function LiveDirector() {
                   <div>
                     <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
                       <span>Program output</span>
-                      <span className="ml-auto inline-flex items-center gap-1.5 normal-case tracking-normal text-gray-400">
+                      <button
+                        onClick={() => window.open(
+                          `/program/${detail.id}`,
+                          `kaizer-program-${detail.id}`,
+                          "width=1280,height=720,noopener=no",
+                        )}
+                        className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded border border-accent/40 text-accent2 hover:bg-accent/10 normal-case"
+                        title="Open the program feed in its own window — drag to a second monitor"
+                      >
+                        Pop-out monitor →
+                      </button>
+                      <span className="inline-flex items-center gap-1.5 normal-case tracking-normal text-gray-400">
                         <LayoutPreview layout={activeLayout} size="sm" />
                         <span className="text-[10px] font-mono">{layoutMeta.name}</span>
                       </span>
@@ -764,9 +775,10 @@ export default function LiveDirector() {
                       layoutCams={activeLayoutCams}
                     />
                     <p className="text-[10px] text-gray-600 mt-1">
-                      Browser-composited preview (phone-camera test mode).
-                      Production deploys render this server-side via FFmpeg and
-                      serve HLS at <code>/media/live/{detail.id}/program.m3u8</code>.
+                      Browser-composited preview (phone-camera test mode). Click
+                      <span className="text-accent2"> Pop-out monitor</span> to
+                      open a full-screen program window you can drag to a
+                      second display.
                     </p>
                   </div>
                   <div>

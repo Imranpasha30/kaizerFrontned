@@ -15,6 +15,7 @@ import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Billing  from "./pages/Billing";
 import LiveDirector from "./pages/LiveDirector";
+import ProgramMonitor from "./pages/ProgramMonitor";
 import PhoneCamera from "./pages/PhoneCamera";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
@@ -33,7 +34,8 @@ function Shell({ children }) {
     loc.pathname === "/login" ||
     loc.pathname === "/register" ||
     loc.pathname === "/" ||
-    loc.pathname.startsWith("/phone/");
+    loc.pathname.startsWith("/phone/") ||
+    loc.pathname.startsWith("/program/");
   return (
     <div className="flex flex-col min-h-screen">
       {!hideChrome && <NavBar />}
@@ -73,6 +75,7 @@ export default function App() {
           <Route path="/trending"                      element={<ProtectedRoute><Trending /></ProtectedRoute>} />
           <Route path="/billing"                       element={<ProtectedRoute><Billing /></ProtectedRoute>} />
           <Route path="/live"                          element={<ProtectedRoute><LiveDirector /></ProtectedRoute>} />
+          <Route path="/program/:eventId"              element={<ProtectedRoute><ProgramMonitor /></ProtectedRoute>} />
         </Routes>
       </Shell>
     </AuthProvider>
