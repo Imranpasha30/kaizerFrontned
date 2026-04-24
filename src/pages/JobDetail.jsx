@@ -1,9 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
-import { Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock } from "lucide-react";
+import { useNavigate, useParams, Link } from "react-router-dom";
+import {
+  Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock,
+  Clapperboard, CheckSquare, Square,
+} from "lucide-react";
 import { api } from "../api/client";
 import ProgressLog from "../components/ProgressLog";
 import ClipCard from "../components/ClipCard";
+import BulkPublishModal from "../components/BulkPublishModal";
 
 const PLATFORM_LABEL = {
   instagram_reel: "Instagram Reel",
@@ -19,12 +23,18 @@ const LANG_LABEL = {
 
 export default function JobDetail() {
   const { jobId } = useParams();
+  const navigate = useNavigate();
   const [job, setJob]           = useState(null);
   const [status, setStatus]     = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportDone, setExportDone] = useState(null);
   const [reimporting, setReimporting] = useState(false);
   const [reimportError, setReimportError] = useState("");
+  // Bulk-publish selection state: Set of clip_ids that are currently ticked.
+  // Clicking a clip checkbox toggles membership; the header "Publish N" button
+  // opens BulkPublishModal with those clips (in original order).
+  const [selectedClipIds, setSelectedClipIds] = useState(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const loadJob = useCallback(() =>
     api.getJob(jobId).then(setJob), [jobId]);
@@ -158,13 +168,70 @@ export default function JobDetail() {
       {/* Clips */}
       {isDone && job.clips?.length > 0 && (
         <div>
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
-            Clips ({job.clips.length})
-          </h2>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+              Clips ({job.clips.length})
+            </h2>
+            {/* Bulk-select controls: select all / none + "Publish N clips" */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const allIds = job.clips.map((c) => c.id);
+                  const allSelected = allIds.every((id) => selectedClipIds.has(id));
+                  setSelectedClipIds(new Set(allSelected ? [] : allIds));
+                }}
+                className="text-[11px] text-gray-400 hover:text-white inline-flex items-center gap-1.5"
+                title="Toggle select all clips"
+              >
+                {job.clips.every((c) => selectedClipIds.has(c.id)) && job.clips.length > 0
+                  ? <CheckSquare size={13} className="text-accent2" />
+                  : <Square size={13} />}
+                Select all
+              </button>
+              <button
+                type="button"
+                disabled={selectedClipIds.size === 0}
+                onClick={() => setBulkOpen(true)}
+                className="btn btn-primary text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Publish every selected clip, in order"
+              >
+                <Clapperboard size={13} />
+                Publish {selectedClipIds.size || ""} selected
+              </button>
+            </div>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4">
-            {job.clips.map((clip, i) => (
-              <ClipCard key={clip.id} clip={clip} jobId={jobId} index={i} />
-            ))}
+            {job.clips.map((clip, i) => {
+              const isSelected = selectedClipIds.has(clip.id);
+              return (
+                <div key={clip.id} className="relative">
+                  {/* Selection checkbox — sits on top-left of the card. */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedClipIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(clip.id)) next.delete(clip.id);
+                        else next.add(clip.id);
+                        return next;
+                      });
+                    }}
+                    className={`absolute top-2 left-2 z-10 w-6 h-6 rounded border flex items-center justify-center transition-colors ${
+                      isSelected
+                        ? "bg-accent2 border-accent2 text-white"
+                        : "bg-black/70 border-white/20 text-white/60 hover:border-white/40"
+                    }`}
+                    aria-label={isSelected ? "Deselect clip" : "Select clip"}
+                    title={isSelected ? "Deselect" : "Select for bulk publish"}
+                  >
+                    {isSelected ? <CheckSquare size={13} /> : <Square size={13} />}
+                  </button>
+                  <ClipCard clip={clip} jobId={jobId} index={i} />
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -206,6 +273,31 @@ export default function JobDetail() {
           </div>
         </div>
       )}
+
+      {/* Bulk-publish modal — opened from the "Publish N selected" header
+          button. Clips are passed in job-order so scheduled publishes go
+          out in the order the editor sees them. */}
+      <BulkPublishModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        clips={(job?.clips || []).filter((c) => selectedClipIds.has(c.id))}
+        jobId={jobId}
+        onDone={(results) => {
+          // Clear only the clips that succeeded so the user can still
+          // retry failures from the same selection.
+          if (results?.ok?.length) {
+            setSelectedClipIds((prev) => {
+              const next = new Set(prev);
+              for (const r of results.ok) next.delete(r.clipId);
+              return next;
+            });
+          }
+          // Optimistic nav to /uploads when everything succeeded.
+          if (results?.failed?.length === 0 && results?.ok?.length > 0) {
+            setTimeout(() => navigate("/uploads"), 1300);
+          }
+        }}
+      />
     </div>
   );
 }
