@@ -284,20 +284,36 @@ export default function LiveDirector() {
 
   const addLocalCamera = async () => {
     if (!selectedId) return;
-    // Prompt for the device source:
-    //   0, 1, 2, ... for USB/built-in cameras (HDMI capture cards usually
-    //     show up as the second or third index on Windows)
-    //   rtsp://user:pass@host/stream  for IP cameras
-    const input = window.prompt(
-      "Camera source (0 = built-in webcam, 1 = USB capture card / second cam, or an RTSP URL)",
-      "0",
-    );
+    // First, ask the backend which cameras OpenCV can actually see.
+    // If we can't reach the backend or nothing enumerates, fall back to a
+    // free-form prompt so the user can still type an index / RTSP URL.
+    let devices = [];
+    let hint = "";
+    try {
+      const res = await liveApi.enumerateDevices();
+      devices = res.devices || [];
+      hint = res.hint || "";
+    } catch (e) {
+      setErr(`Could not enumerate cameras: ${e.message}`);
+    }
+
+    // Present the list (+ an escape hatch for RTSP / index override)
+    const lines = devices.length
+      ? devices.map((d) => `  [${d.index}] ${d.width}×${d.height} (${d.backend})`).join("\n")
+      : "  (no cameras detected — check USB / Windows Device Manager)";
+    const msg =
+      `Pick a camera source:\n\n${lines}\n\n` +
+      `Type the index (0/1/2/...) or paste an RTSP URL, then OK.\n\n` +
+      (hint ? `Hint: ${hint}` : "");
+    const input = window.prompt(msg, devices[0]?.index ?? "0");
     if (input === null) return;
-    const trimmed = input.trim();
+    const trimmed = String(input).trim();
     if (!trimmed) return;
     const source = /^-?\d+$/.test(trimmed) ? parseInt(trimmed, 10) : trimmed;
+    const picked = devices.find((d) => d.index === source);
     const label = typeof source === "number"
-      ? `Camera (device ${source})`
+      ? (picked ? `Camera (device ${source} · ${picked.width}×${picked.height})`
+                : `Camera (device ${source})`)
       : "IP camera";
     try {
       await liveApi.addLocalCamera(selectedId, source, label);
