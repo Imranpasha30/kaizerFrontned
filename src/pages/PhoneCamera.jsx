@@ -23,6 +23,7 @@ export default function PhoneCamera() {
 
   const [state, setState] = useState("idle"); // idle|asking|connecting|live|error
   const [error, setError] = useState("");
+  const [negotiatedMime, setNegotiatedMime] = useState("");
 
   // Clean up stream + recorder + ws on unmount.
   const cleanup = useCallback(() => {
@@ -136,6 +137,14 @@ export default function PhoneCamera() {
     }
     recorderRef.current = recorder;
 
+    // Log the actual negotiated mime type — on Brave/Android we've seen
+    // MediaRecorder silently use an unexpected codec. Put it on screen
+    // + ship it to the backend as the first WS text message so the
+    // Debug panel can show it.
+    const actualMime = recorder.mimeType || mimeType;
+    setNegotiatedMime(actualMime);
+    try { console.info("[phone-camera] MediaRecorder mimeType =", actualMime); } catch {}
+
     // Build WS URL using the current origin (no hardcoded :8000). Vite's
     // proxy forwards /api WebSockets to the backend (ws: true in the dev
     // config). This keeps us same-origin so HTTPS pages don't get blocked
@@ -155,6 +164,17 @@ export default function PhoneCamera() {
 
     ws.onopen = () => {
       setState("live");
+      // Ship the negotiated mime + resolved width/height to backend so the
+      // Debug panel / server logs can show it. Helps diagnose codec issues.
+      try {
+        ws.send(JSON.stringify({
+          type: "meta",
+          mime: actualMime,
+          width:  videoRef.current?.videoWidth || 0,
+          height: videoRef.current?.videoHeight || 0,
+          userAgent: navigator.userAgent,
+        }));
+      } catch { /* noop */ }
       recorder.ondataavailable = async (e) => {
         if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
           try {
@@ -200,6 +220,11 @@ export default function PhoneCamera() {
           <p className="text-[10px] text-white/50 truncate">
             Event {eventId} · {camId}
           </p>
+          {negotiatedMime ? (
+            <p className="text-[10px] text-accent2/80 truncate font-mono">
+              {negotiatedMime}
+            </p>
+          ) : null}
         </div>
         {state === "live" && <span className="ui-live-dot" />}
       </header>

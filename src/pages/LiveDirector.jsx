@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Camera, Radio, PlayCircle, StopCircle, Pin, PinOff, Ban,
   CheckCircle2, Zap, Loader2, Plus, RefreshCw, AlertTriangle, Lock, Trash2,
-  Smartphone, Copy, X,
+  Smartphone, Copy, X, Video,
 } from "lucide-react";
 import { liveApi } from "../api/client";
 import BroadcastPanel from "../components/live/BroadcastPanel";
@@ -280,6 +280,29 @@ export default function LiveDirector() {
     } catch {}
     // Rebuild the current session's absolute_url if the modal is open
     setPhoneSession((s) => s ? { ...s, absolute_url: buildPhoneUrl(s.phone_url) } : s);
+  };
+
+  const addLocalCamera = async () => {
+    if (!selectedId) return;
+    // Prompt for the device source:
+    //   0, 1, 2, ... for USB/built-in cameras (HDMI capture cards usually
+    //     show up as the second or third index on Windows)
+    //   rtsp://user:pass@host/stream  for IP cameras
+    const input = window.prompt(
+      "Camera source (0 = built-in webcam, 1 = USB capture card / second cam, or an RTSP URL)",
+      "0",
+    );
+    if (input === null) return;
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    const source = /^-?\d+$/.test(trimmed) ? parseInt(trimmed, 10) : trimmed;
+    const label = typeof source === "number"
+      ? `Camera (device ${source})`
+      : "IP camera";
+    try {
+      await liveApi.addLocalCamera(selectedId, source, label);
+      await refreshDetail();
+    } catch (e) { setErr(e.message || String(e)); }
   };
 
   const addPhoneCamera = async () => {
@@ -736,12 +759,21 @@ export default function LiveDirector() {
                     >
                       Add phone camera
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<Video size={14} />}
+                      onClick={addLocalCamera}
+                      title="Use this laptop's webcam / any USB camera"
+                    >
+                      Add laptop camera
+                    </Button>
                   </div>
                   <p className="text-[10px] text-gray-600 mt-1">
                     RTMP push URL after start: <code className="text-accent2">rtmp://localhost:1935/live/{detail.id}/&lt;cam_id&gt;</code>
                   </p>
                   <p className="text-[10px] text-gray-600 mt-1">
-                    Or tap <span className="text-accent2">Add phone camera</span> to scan a QR with your phone — no app install, just your browser.
+                    <span className="text-accent2">Add laptop camera</span> uses this machine's webcam directly (OpenCV). <span className="text-accent2">Add phone camera</span> generates a QR for a phone on the same WiFi.
                   </p>
                 </div>
               )}

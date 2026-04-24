@@ -341,6 +341,8 @@ export const liveApi = {
   deleteEvent: (id)             => req("DELETE", `/live/events/${id}`),
   addCamera:   (id, body)       => req("POST", `/live/events/${id}/cameras`, body),
   deleteCamera:(id, cam_id)     => req("DELETE", `/live/events/${id}/cameras/${cam_id}`),
+  addLocalCamera: (id, source=0, label="Laptop camera") =>
+    req("POST", `/live/events/${id}/local-cameras`, { source, label }),
   start:       (id)             => req("POST", `/live/events/${id}/start`),
   stop:        (id)             => req("POST", `/live/events/${id}/stop`),
   pin:         (id, cam_id)     => req("POST", `/live/events/${id}/pin`, { cam_id }),
