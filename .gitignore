@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 *.log
+
+# Large demo asset — too big for GitHub (>100 MB hard limit). Keep on disk only.
+public/demo/kaizer-demo.mp4
