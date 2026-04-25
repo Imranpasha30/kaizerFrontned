@@ -8,11 +8,14 @@ import LivePreview from "../components/LivePreview";
 import SEOPanel from "../components/SEOPanel";
 import PublishModal from "../components/PublishModal";
 
+// NotoSansTelugu-Bold is the project default — strong, legible at the
+// 80px headline size we ship with. Other fonts kept for variety.
 const FONTS = [
-  "Ponnala-Regular.ttf", "NotoSansTelugu-Bold.ttf", "NotoSerifTelugu-Bold.ttf",
+  "NotoSansTelugu-Bold.ttf", "Ponnala-Regular.ttf", "NotoSerifTelugu-Bold.ttf",
   "HindGuntur-Bold.ttf", "Gurajada-Regular.ttf", "Ramabhadra-Regular.ttf",
   "TenaliRamakrishna-Regular.ttf", "Timmana-Regular.ttf",
 ];
+const DEFAULT_FONT_SIZE = 80;
 
 const PLATFORM_OPTIONS = [
   { value: "youtube_short",  label: "YouTube Short" },
@@ -88,7 +91,7 @@ export default function Editor() {
 
   // Editable fields
   const [text, setText]           = useState("");
-  const [fontSize, setFontSize]   = useState(52);
+  const [fontSize, setFontSize]   = useState(DEFAULT_FONT_SIZE);
   const [textColor, setTextColor] = useState("#ffffff");
   const [fontFile, setFontFile]   = useState(FONTS[0]);
   const [secVideo, setSecVideo]   = useState(46.19);
@@ -128,7 +131,7 @@ export default function Editor() {
     if (!c) return;
     setClip(c);
     setText(c.text || "");
-    setFontSize(c.card_params?.font_size || 52);
+    setFontSize(c.card_params?.font_size || DEFAULT_FONT_SIZE);
     setTextColor(c.card_params?.text_color || "#ffffff");
     setFontFile(c.card_params?.font_file || FONTS[0]);
 

@@ -108,18 +108,35 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
     .map((key) => profileByDest[key])
     .filter((id) => id != null);
 
-  const clipsWithSeo = useMemo(() => clips?.filter((c) => c?.seo?.title) || [], [clips]);
-  const someSkipped = clips && clipsWithSeo.length < clips.length;
+  // SEO inheritance: if at least one clip in the selection has its own SEO,
+  // use it as the "donor" for siblings that don't. Each clip publishes either
+  // with its OWN SEO (preferred) or with the donor's SEO via the backend's
+  // `seo_source_clip_id` parameter. Channel-related variant logic is left to
+  // the backend's per-destination defaults — we just pick the donor here.
+  const seoDonor = useMemo(
+    () => clips?.find((c) => c?.seo?.title) || null,
+    [clips]
+  );
+  // The set of clips we'll actually publish. Every clip publishes when at
+  // least one sibling has SEO; otherwise the old "skip" behaviour applies.
+  const publishableClips = useMemo(() => {
+    if (!clips) return [];
+    return seoDonor ? clips : [];
+  }, [clips, seoDonor]);
+  const inheritedClips = useMemo(
+    () => publishableClips.filter((c) => !c?.seo?.title && seoDonor),
+    [publishableClips, seoDonor]
+  );
 
   // Estimated last publish time for the summary line
   const estimatedLast = useMemo(() => {
     if (scheduleMode !== "staggered" || !firstPublishAt) return null;
     try {
       const first = new Date(firstPublishAt);
-      const last = new Date(first.getTime() + (clipsWithSeo.length - 1) * gapMinutes * 60_000);
+      const last = new Date(first.getTime() + (publishableClips.length - 1) * gapMinutes * 60_000);
       return last;
     } catch { return null; }
-  }, [scheduleMode, firstPublishAt, gapMinutes, clipsWithSeo.length]);
+  }, [scheduleMode, firstPublishAt, gapMinutes, publishableClips.length]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -128,8 +145,8 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
       setError("Pick at least one YouTube destination.");
       return;
     }
-    if (clipsWithSeo.length === 0) {
-      setError("None of the selected clips have SEO generated yet.");
+    if (publishableClips.length === 0) {
+      setError("None of the selected clips have SEO generated. Generate SEO on at least one clip in this job and try again.");
       return;
     }
     if (scheduleMode === "staggered" && privacy !== "private") {
@@ -138,7 +155,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
     }
 
     setSubmitting(true);
-    setProgress({ done: 0, total: clipsWithSeo.length, failed: [] });
+    setProgress({ done: 0, total: publishableClips.length, failed: [] });
 
     // Compute per-clip publish_at (null = immediate).
     const baseTime = scheduleMode === "staggered" ? new Date(firstPublishAt) : null;
@@ -146,14 +163,21 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
 
     // Serial so per-clip publish_at offsets are deterministic + backend
     // DB sees predictable ordering. Also kinder to YouTube API quota.
-    for (let i = 0; i < clipsWithSeo.length; i++) {
-      const clip = clipsWithSeo[i];
+    for (let i = 0; i < publishableClips.length; i++) {
+      const clip = publishableClips[i];
+      const ownsSeo = !!clip?.seo?.title;
       const payload = {
         channel_ids:    channelIdsForSubmit.map(Number),
         privacy_status: privacy,
         use_seo:        useSeo,
         publish_kind:   publishKind,
       };
+      // For clips without their own SEO, ask the backend to read SEO from
+      // the donor sibling. The clip's own SEO still wins server-side when
+      // present, so this only fires for inheritors.
+      if (!ownsSeo && seoDonor && seoDonor.id !== clip.id) {
+        payload.seo_source_clip_id = seoDonor.id;
+      }
       if (baseTime) {
         const t = new Date(baseTime.getTime() + i * gapMinutes * 60_000);
         payload.publish_at = t.toISOString();
@@ -166,7 +190,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
       }
       setProgress((prev) => ({
         done:   prev.done + 1,
-        total:  clipsWithSeo.length,
+        total:  publishableClips.length,
         failed: results.failed.slice(),
       }));
     }
@@ -182,8 +206,12 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
 
   if (!clips?.length) return null;
 
+  const donorIdx = seoDonor
+    ? clips.findIndex((c) => c.id === seoDonor.id)
+    : -1;
+
   return (
-    <Modal open={open} onClose={onClose} title={`Publish ${clipsWithSeo.length} clips to YouTube`} size="md">
+    <Modal open={open} onClose={onClose} title={`Publish ${publishableClips.length} clips to YouTube`} size="md">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
         {/* Clip ordering */}
@@ -194,26 +222,46 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
           <ol className="text-xs space-y-1 max-h-40 overflow-y-auto pr-1">
             {clips.map((c, i) => {
               const hasSeo = !!c?.seo?.title;
+              const inheritsFromDonor = !hasSeo && !!seoDonor;
+              const isPublishing = hasSeo || inheritsFromDonor;
               return (
                 <li
                   key={c.id}
-                  className={`flex items-baseline gap-2 ${hasSeo ? "text-gray-200" : "text-gray-600 italic"}`}
+                  className={`flex items-baseline gap-2 ${isPublishing ? "text-gray-200" : "text-gray-600 italic"}`}
                 >
                   <span className="font-mono text-[10px] w-5 text-right">{i + 1}.</span>
                   <span className="flex-1 truncate" title={c?.seo?.title || c.filename}>
                     {c?.seo?.title || c.filename || `Clip ${c.id}`}
                   </span>
-                  {!hasSeo && (
+                  {hasSeo && (
+                    <span className="text-[10px] text-green-400/80 flex-shrink-0">own SEO</span>
+                  )}
+                  {inheritsFromDonor && (
+                    <span
+                      className="text-[10px] text-accent2/80 flex-shrink-0"
+                      title={`Will use SEO from clip #${donorIdx + 1}: ${seoDonor?.seo?.title || ""}`}
+                    >
+                      uses SEO from clip {donorIdx + 1}
+                    </span>
+                  )}
+                  {!hasSeo && !seoDonor && (
                     <span className="text-[10px] text-amber-400 flex-shrink-0">skipped — no SEO</span>
                   )}
                 </li>
               );
             })}
           </ol>
-          {someSkipped && (
+          {seoDonor && inheritedClips.length > 0 && (
+            <p className="mt-2 text-[11px] text-accent2/80 flex items-start gap-1.5">
+              <CheckCircle2 size={11} className="mt-0.5 flex-shrink-0" />
+              {inheritedClips.length} clip{inheritedClips.length > 1 ? "s" : ""} will inherit SEO from clip #{donorIdx + 1}.
+              Generate SEO on a specific clip to give it its own metadata.
+            </p>
+          )}
+          {!seoDonor && (
             <p className="mt-2 text-[11px] text-amber-300/80 flex items-start gap-1.5">
               <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
-              Clips without SEO are skipped. Generate SEO on them first to include.
+              No clip in this selection has SEO. Generate SEO on at least one — every other clip can then share it.
             </p>
           )}
         </section>
@@ -356,7 +404,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
               {estimatedLast && (
                 <p className="col-span-2 text-[11px] text-gray-500">
                   Last clip publishes at <span className="text-accent2">{estimatedLast.toLocaleString()}</span>
-                  {" "}({clipsWithSeo.length} clips × {gapMinutes} min gap).
+                  {" "}({publishableClips.length} clips × {gapMinutes} min gap).
                 </p>
               )}
             </div>
@@ -421,10 +469,10 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
           <button
             type="submit"
             className="btn btn-primary text-xs inline-flex items-center gap-1.5"
-            disabled={submitting || loadingCh || clipsWithSeo.length === 0}
+            disabled={submitting || loadingCh || publishableClips.length === 0}
           >
             {submitting ? <Loader2 size={12} className="animate-spin" /> : <Clapperboard size={12} />}
-            Publish {clipsWithSeo.length} clip{clipsWithSeo.length > 1 ? "s" : ""}
+            Publish {publishableClips.length} clip{publishableClips.length > 1 ? "s" : ""}
           </button>
         </div>
       </form>
