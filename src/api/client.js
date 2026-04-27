@@ -292,8 +292,15 @@ export const api = {
   // File URL — points to backend for serving pipeline output files
   fileUrl: (path) => path ? `${ORIGIN}/api/file/?path=${encodeURIComponent(path)}` : "",
 
-  // Prefix backend origin to a relative API URL (e.g. /api/file/?path=...)
-  mediaUrl: (relUrl) => relUrl ? `${ORIGIN}${relUrl}` : "",
+  // Resolve a URL the backend handed us. Absolute (http/https) URLs pass
+  // through unchanged — that's the R2 path (public CDN URL or 1-hour
+  // signed URL). Relative URLs (legacy /api/file/?path=...) get the
+  // backend origin prepended so they resolve cross-origin in dev.
+  mediaUrl: (relUrl) => {
+    if (!relUrl) return "";
+    if (/^https?:\/\//i.test(relUrl)) return relUrl;
+    return `${ORIGIN}${relUrl}`;
+  },
 
   // Cross-origin download via XHR + blob with progress callback
   downloadFile: (url, filename, onProgress) => new Promise((resolve, reject) => {
