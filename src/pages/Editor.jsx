@@ -7,6 +7,7 @@ import SyncedVideoPair from "../components/SyncedVideoPair";
 import LivePreview from "../components/LivePreview";
 import SEOPanel from "../components/SEOPanel";
 import PublishModal from "../components/PublishModal";
+import DownloadModal from "../components/DownloadModal";
 
 // NotoSansTelugu-Bold is the project default — strong, legible at the
 // 80px headline size we ship with. Other fonts kept for variety.
@@ -72,6 +73,7 @@ export default function Editor() {
   // Publish-to-YouTube modal state.  Clip ID comes from the currently-selected
   // clip so the button on any clip works without extra navigation.
   const [publishOpen, setPublishOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const navigate = useNavigate();
 
   // Right sidebar tab: "style" | "seo"
@@ -366,21 +368,10 @@ export default function Editor() {
         </button>
         {videoUrl && (
           <button
-            onClick={async () => {
-              setDlPct(0);
-              try {
-                await api.downloadFile(videoUrl, clip?.filename || `clip_${curIdx + 1}.mp4`, pct => setDlPct(pct));
-              } catch {
-                setError("Download failed \u2014 file may have expired after redeploy");
-              } finally {
-                setDlPct(null);
-              }
-            }}
-            disabled={dlPct !== null}
-            className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs ml-2">
-            {dlPct !== null
-              ? <><Loader2 size={14} className="animate-spin" /> {dlPct >= 0 ? `${dlPct}%` : "Preparing\u2026"}</>
-              : <><Download size={14} /> Download</>}
+            onClick={() => setDownloadOpen(true)}
+            className="btn btn-green py-1 px-2 flex items-center gap-1 text-xs ml-2"
+            title="Download with channel logo">
+            <Download size={14} /> Download
           </button>
         )}
       </div>
@@ -822,6 +813,11 @@ export default function Editor() {
           setPublishOpen(false);
           navigate("/uploads");
         }}
+      />
+      <DownloadModal
+        open={downloadOpen}
+        onClose={() => setDownloadOpen(false)}
+        clip={clip}
       />
     </>
   );
