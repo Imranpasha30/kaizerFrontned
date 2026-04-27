@@ -340,6 +340,45 @@ export const api = {
     xhr.onerror = () => reject(new Error("Download failed — network error"));
     xhr.send();
   }),
+
+  // POST /api/clips/{id}/download-with-logo/ — streams a branded copy of
+  // the clip with the chosen channel's logo overlaid. Browser save
+  // dialog is triggered automatically.
+  downloadWithLogo: (clipId, channelId, filename, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/clips/${clipId}/download-with-logo/`);
+    const tok = getToken();
+    if (tok) xhr.setRequestHeader("Authorization", `Bearer ${tok}`);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.responseType = "blob";
+    if (onProgress) {
+      xhr.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        else onProgress(-1);
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const blob = xhr.response;
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename || `clip_${clipId}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        resolve();
+      } else {
+        let msg = "Download failed";
+        try {
+          const txt = xhr.response && xhr.response.text ? xhr.response : null;
+          if (txt) msg = txt.toString();
+        } catch {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Download failed — network error"));
+    xhr.send(JSON.stringify({ channel_id: channelId }));
+  }),
 };
 
 // ── Phase 12 — Admin panel ──────────────────────────────────────────────────
