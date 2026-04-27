@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import PublishModal from "./PublishModal";
 
 export default function ClipCard({ clip, jobId, index }) {
-  const thumbUrl = clip.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + Date.now() : "";
+  const thumbUrl = clip.thumb_url ? api.bustCache(api.mediaUrl(clip.thumb_url)) : "";
   const videoUrl = clip.video_url ? api.mediaUrl(clip.video_url) : "";
   const [dlPct, setDlPct] = useState(null);
   const [showPublish, setShowPublish] = useState(false);

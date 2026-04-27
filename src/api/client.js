@@ -302,6 +302,16 @@ export const api = {
     return `${ORIGIN}${relUrl}`;
   },
 
+  // Append a cache-busting timestamp without breaking the URL. Picks `?`
+  // or `&` based on whether the URL already has a query string. Critical
+  // for R2 URLs (no `?`) — without this, naive concat produces
+  // ".../02.mp4&t=..." which the CDN treats as a literal path and 404s.
+  bustCache: (url, ts) => {
+    if (!url) return "";
+    const sep = url.indexOf("?") === -1 ? "?" : "&";
+    return `${url}${sep}t=${ts || Date.now()}`;
+  },
+
   // Cross-origin download via XHR + blob with progress callback
   downloadFile: (url, filename, onProgress) => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();

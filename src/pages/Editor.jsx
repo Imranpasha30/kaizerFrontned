@@ -261,8 +261,8 @@ export default function Editor() {
     }
   }
 
-  const thumbUrl = clip?.thumb_url ? api.mediaUrl(clip.thumb_url) + "&t=" + imgTs : "";
-  const videoUrl = clip?.video_url ? api.mediaUrl(clip.video_url) + "&t=" + vidTs : "";
+  const thumbUrl = clip?.thumb_url ? api.bustCache(api.mediaUrl(clip.thumb_url), imgTs) : "";
+  const videoUrl = clip?.video_url ? api.bustCache(api.mediaUrl(clip.video_url), vidTs) : "";
   const isTorn   = clip?.frame_type === "torn_card";
   const isFollow = clip?.frame_type === "follow_bar";
 
@@ -287,7 +287,7 @@ export default function Editor() {
             ${i === curIdx ? "border-accent" : "border-transparent hover:border-gray-600"}`}
         >
           {c.thumb_url ? (
-            <img src={api.mediaUrl(c.thumb_url) + "&t=" + imgTs} alt="" className="w-full aspect-[9/16] object-cover block" />
+            <img src={api.bustCache(api.mediaUrl(c.thumb_url), imgTs)} alt="" className="w-full aspect-[9/16] object-cover block" />
           ) : (
             <div className="w-full aspect-[9/16] bg-surface flex items-center justify-center text-gray-600 text-xs">
               {i + 1}
