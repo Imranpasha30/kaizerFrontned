@@ -51,6 +51,10 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   const [variantByDest, setVariantByDest] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // SEO inheritance: pick a sibling clip in the same job whose SEO will
+  // be used for this upload. Empty string = use this clip's own SEO.
+  const [siblings, setSiblings] = useState([]);
+  const [donorClipId, setDonorClipId] = useState("");
 
   // Publish presets: "global" | "individual" | "<group_id>"
   // - global   = every connected YT account auto-selected (default)
@@ -91,6 +95,20 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     // Load the user's named publish presets — shows up as preset buttons.
     api.listChannelGroups().then(setGroups).catch(() => setGroups([]));
     setPreset("global");
+
+    // Load sibling clips so user can borrow another clip's SEO.
+    setDonorClipId("");
+    setSiblings([]);
+    if (jobId) {
+      api.getJob(jobId)
+        .then((job) => {
+          const others = (job?.clips || []).filter(
+            (c) => c.id !== clip?.id && c?.seo && c.seo.title
+          );
+          setSiblings(others);
+        })
+        .catch(() => setSiblings([]));
+    }
 
     setLoadingCh(true);
     api.listChannels()
@@ -256,18 +274,23 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
         return;
       }
     }
-    if (!useSeo && !hasSeo) {
-      // No SEO on the clip and user opted out — we'd have no title at all.
-      setError("No SEO on this clip and 'Use AI SEO' is off. Generate SEO first.");
+    if (!useSeo && !hasSeo && !donorClipId) {
+      // No SEO on the clip, no donor picked, user opted out — would
+      // have no title at all.
+      setError("No SEO on this clip and 'Use AI SEO' is off. Generate SEO or pick another clip's SEO.");
       return;
     }
 
     const payload = {
       channel_ids: ids.map(Number),
       privacy_status: effectivePrivacy,
-      use_seo: useSeo && hasSeo,
+      // Donor wins: when user picks a sibling's SEO we always use it.
+      use_seo: donorClipId ? true : (useSeo && hasSeo),
       publish_kind: publishKind,
     };
+    if (donorClipId) {
+      payload.seo_source_clip_id = Number(donorClipId);
+    }
     if (seoVariantOverride && seoVariantOverride !== "auto") {
       payload.seo_variant_override = Number(seoVariantOverride);
     }
@@ -646,7 +669,7 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
                   </RLink>
                 </span>
               )}
-              {hasSeo && useSeo && (
+              {hasSeo && useSeo && !donorClipId && (
                 <span className="text-[11px] text-gray-400 block mt-1 truncate" title={clip.seo.title}>
                   Title preview: <span className="text-gray-300">{clip.seo.title}</span>
                 </span>
@@ -654,6 +677,50 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
             </span>
           </label>
         </div>
+
+        {/* Use SEO from another clip in this job — explicit donor picker.
+            Wins over use-own-SEO; lets the user pick once on any clip and
+            re-use the same title/description/tags across siblings without
+            re-generating. */}
+        {siblings.length > 0 && (
+          <div className="bg-surface border border-border rounded p-3 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={13} className="text-accent2" />
+              <span className="text-sm font-medium text-gray-200">
+                Use SEO from another clip in this job
+              </span>
+            </div>
+            <select
+              value={donorClipId}
+              onChange={(e) => setDonorClipId(e.target.value)}
+              className="bg-[#0c0c0c] border border-border rounded px-2 py-1.5 text-sm text-gray-200"
+            >
+              <option value="">— Use this clip&apos;s own SEO —</option>
+              {siblings.map((s) => {
+                const idx = (s.clip_index ?? 0) + 1;
+                const title = (s.seo?.title || "").slice(0, 60);
+                return (
+                  <option key={s.id} value={s.id}>
+                    Clip #{idx}{title ? ` — ${title}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+            {donorClipId && (
+              <span className="text-[11px] text-accent2/90">
+                This clip will publish with the picked sibling&apos;s title,
+                description, tags, and hashtags. Channel-related fields stay
+                per-destination.
+              </span>
+            )}
+            {!donorClipId && !hasSeo && (
+              <span className="text-[11px] text-yellow-400 flex items-center gap-1">
+                <AlertCircle size={11} /> This clip has no SEO yet. Pick a
+                sibling above, or generate SEO from the editor.
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
