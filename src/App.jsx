@@ -25,6 +25,7 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import AdminRoute from "./auth/AdminRoute";
 import Admin from "./pages/Admin";
 import { CursorLayer } from "./components/ui";
+import { ThemeProvider } from "./theme/ThemeProvider";
 
 /**
  * NavBar is hidden on the auth pages for a full-bleed login experience,
@@ -49,9 +50,10 @@ function Shell({ children }) {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <CursorLayer />
-      <Shell>
+    <ThemeProvider>
+      <AuthProvider>
+        <CursorLayer />
+        <Shell>
         <Routes>
           {/* Public marketing + auth routes */}
           <Route path="/"         element={<Landing />} />
@@ -83,7 +85,8 @@ export default function App() {
           {/* Admin console — nested /admin/<tab>. AdminRoute enforces is_admin. */}
           <Route path="/admin/*"                        element={<AdminRoute><Admin /></AdminRoute>} />
         </Routes>
-      </Shell>
-    </AuthProvider>
+        </Shell>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

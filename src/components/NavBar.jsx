@@ -6,6 +6,7 @@ import {
   Settings as SettingsIcon, CreditCard, Radio, Shield,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
+import ThemeToggle from "./ThemeToggle";
 
 export default function NavBar() {
   const loc  = useLocation();
@@ -85,8 +86,9 @@ export default function NavBar() {
           ))}
         </nav>
 
-        {/* Right cluster: user menu + mobile toggle */}
+        {/* Right cluster: theme toggle + user menu + mobile toggle */}
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           {isAuthenticated ? (
             <div ref={userMenuRef} className="relative">
               <button

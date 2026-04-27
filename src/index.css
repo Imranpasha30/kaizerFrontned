@@ -6,14 +6,99 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
-  background: #080808;
-  color: #ddd;
+  background: var(--app-bg, #080808);
+  color: var(--app-fg, #ddd);
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   margin: 0;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ─── Light theme ──────────────────────────────────────────────────
+   Activated by adding `class="light"` on <html> via ThemeProvider.
+   Strategy: keep the dark Tailwind tokens compiled in, then overlay
+   light values for the most-visible surfaces. Most components keep
+   their existing classes (bg-dark, bg-panel, text-ink-100, etc.) —
+   we just remap what those classes resolve to via a thin selector
+   layer. Some components (the landing page hero, gradients) stay
+   dark on purpose because the brand chose dark for visual identity.
+   ────────────────────────────────────────────────────────────────── */
+html.light {
+  --app-bg: #ffffff;
+  --app-fg: #1a1a1a;
+}
+
+/* Background surfaces */
+html.light body                 { background: #ffffff; color: #1a1a1a; }
+html.light .bg-dark             { background-color: #ffffff !important; }
+html.light .bg-panel            { background-color: #f5f5f5 !important; }
+html.light .bg-panel-hover      { background-color: #ececec !important; }
+html.light .bg-surface          { background-color: #fafafa !important; }
+html.light .bg-\[\#0a0a0a\]     { background-color: #ffffff !important; }
+html.light .bg-\[\#0c0c0c\]     { background-color: #ffffff !important; }
+html.light .bg-\[\#0e0e0e\]     { background-color: #f5f5f5 !important; }
+html.light .bg-\[\#111111\]     { background-color: #f5f5f5 !important; }
+
+/* Text colors */
+html.light .text-ink-50         { color: #0c0c0c !important; }
+html.light .text-ink-100        { color: #181818 !important; }
+html.light .text-ink-200        { color: #2a2a2a !important; }
+html.light .text-ink-300        { color: #3f3f3f !important; }
+html.light .text-ink-400        { color: #5c5c5c !important; }
+html.light .text-gray-100,
+html.light .text-gray-200,
+html.light .text-gray-300       { color: #1a1a1a !important; }
+html.light .text-gray-400       { color: #555 !important; }
+html.light .text-gray-500       { color: #777 !important; }
+html.light .text-white          { color: #1a1a1a !important; }
+
+/* Borders */
+html.light .border-border       { border-color: #d8d8d8 !important; }
+html.light .border-border-hover { border-color: #b8b8b8 !important; }
+html.light .border-\[\#1a1a1a\] { border-color: #d8d8d8 !important; }
+
+/* Cards / panels (component classes from this file) */
+html.light .card                { background: #f5f5f5; border-color: #d8d8d8; }
+html.light .ui-card             { background: linear-gradient(180deg,#ffffff 0%,#f5f5f5 100%);
+                                   border-color: #d8d8d8;
+                                   box-shadow: 0 1px 0 rgba(0,0,0,0.04) inset, 0 12px 24px -16px rgba(0,0,0,0.18); }
+html.light .ui-card--interactive:hover { border-color: #c0c0c0;
+                                         box-shadow: 0 16px 32px -18px rgba(0,0,0,0.18); }
+html.light .glass-panel         { background: linear-gradient(180deg, rgba(255,255,255,0.85) 0%, rgba(245,245,245,0.85) 100%);
+                                   border-color: rgba(0,0,0,0.08); }
+html.light .feature-card        { background: linear-gradient(180deg,#ffffff 0%,#f5f5f5 100%);
+                                   border-color: #d8d8d8; }
+html.light .feature-card:hover  { border-color: #b8b8b8; }
+
+/* Buttons that hardcoded a dark token */
+html.light .btn-secondary       { color: #333; }
+html.light .btn-secondary:hover { color: #111; background: rgba(0,0,0,0.04); }
+html.light .ui-btn-ghost        { color: #1a1a1a; background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.1); }
+html.light .ui-btn-ghost:hover  { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.18); color: #000; }
+
+/* Inputs */
+html.light .ui-input            { background: #ffffff; border-color: #d8d8d8; color: #1a1a1a; }
+html.light .ui-input::placeholder { color: #999; }
+html.light .ui-input:hover      { border-color: #b8b8b8; }
+html.light .eb-input,
+html.light .eb-select           { background: #ffffff; border-color: #d8d8d8; color: #1a1a1a; }
+html.light .svp-controls        { background: #f5f5f5; border-color: #d8d8d8; }
+html.light .svp-ctrl-btn        { background: #ffffff; border-color: #d8d8d8; color: #555; }
+
+/* Headings that used the white→gray gradient — give them a dark
+   gradient so they read on white */
+html.light .heading-hero,
+html.light .heading-hero--flow {
+  background: linear-gradient(180deg,#1a1a1a 0%,#5c5c5c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Scrollbar — light-friendly */
+html.light ::-webkit-scrollbar-thumb        { background: #d0d0d0; }
+html.light ::-webkit-scrollbar-thumb:hover  { background: #b0b0b0; }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
