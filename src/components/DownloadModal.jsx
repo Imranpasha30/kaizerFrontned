@@ -30,11 +30,26 @@ export default function DownloadModal({ open, onClose, clip }) {
     setLoadingCh(true);
     api.listChannels()
       .then((rows) => {
-        const list = (rows || []).filter((c) => c.connected !== false);
+        const all = rows || [];
+        // Only owned/connected YouTube destinations — i.e. accounts the
+        // user has actually authenticated with via OAuth. Style profiles
+        // without a connected token aren't valid download targets.
+        const connected = all.filter((c) => c.connected === true);
+
+        // Multiple style profiles can share one YT account (same OAuth
+        // token). Dedupe so a single YT destination appears once,
+        // labelled by its real YouTube channel title.
+        const seen = new Map();
+        for (const c of connected) {
+          const key = c.youtube_channel_id || c.youtube_channel_title || `c${c.id}`;
+          if (!seen.has(key)) seen.set(key, c);
+        }
+        const list = [...seen.values()];
         setChannels(list);
-        // Default selection: every channel that actually has a logo.
-        const withLogo = list.filter((c) => c.logo_asset_id || c.logo_url);
-        setSelectedIds(new Set(withLogo.map((c) => c.id)));
+
+        // Default selection: every connected destination — server falls
+        // back to a clean copy if no logo is configured for that account.
+        setSelectedIds(new Set(list.map((c) => c.id)));
       })
       .catch((e) => setTopError(e.message))
       .finally(() => setLoadingCh(false));
@@ -104,9 +119,9 @@ export default function DownloadModal({ open, onClose, clip }) {
         )}
 
         <p className="text-xs text-gray-400">
-          Pick the channel(s) you want to download a branded copy for.
-          Each variant will have that channel&apos;s logo overlaid in the
-          top-right (same look as the publish flow). Channels without a
+          Pick the YouTube account(s) you want a branded copy for. Each
+          variant will have that account&apos;s logo overlaid in the
+          top-right (same look as the publish flow). Accounts without a
           configured logo will produce an unbranded copy.
         </p>
 
@@ -116,8 +131,8 @@ export default function DownloadModal({ open, onClose, clip }) {
           </div>
         ) : channels.length === 0 ? (
           <div className="text-center text-xs text-gray-500 py-6">
-            You don&apos;t have any channels yet.
-            Add one from the Style Profiles page.
+            You haven&apos;t connected a YouTube account yet.
+            Authenticate one from the Style Profiles page first.
           </div>
         ) : (
           <div className="max-h-72 overflow-y-auto -mx-1 px-1 space-y-1">
@@ -142,7 +157,9 @@ export default function DownloadModal({ open, onClose, clip }) {
                     className="accent-accent2"
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-gray-200 truncate">{c.name || `Channel ${c.id}`}</div>
+                    <div className="text-sm text-gray-200 truncate">
+                      {c.youtube_channel_title || c.name || `Channel ${c.id}`}
+                    </div>
                     <div className="text-[11px] text-gray-500 truncate">
                       {hasLogo ? "logo configured" : "no logo — clean copy"}
                     </div>
