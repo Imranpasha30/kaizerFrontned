@@ -12,6 +12,26 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Static fallback footer with legal links — present in the raw HTML
+      so crawlers (including Google's OAuth consent-screen verifier)
+      that don't fully execute the React SPA can still find a link to
+      the privacy policy. React mounts inside #root above and renders
+      its own footer; this block stays hidden visually but remains in
+      the DOM for any non-JS reader. Style is inline so it doesn't
+      depend on the Tailwind bundle being parsed first.
+    -->
+    <noscript>
+      <p style="padding:24px;color:#222;font-family:sans-serif;">
+        Kaizer News requires JavaScript. Read our
+        <a href="/privacy">Privacy Policy</a> and
+        <a href="/terms">Terms of Service</a>.
+      </p>
+    </noscript>
+    <footer aria-hidden="true" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+    </footer>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
