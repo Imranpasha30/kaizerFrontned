@@ -974,10 +974,12 @@ function Footer() {
     { label: "Changelog", href: "#" },
     { label: "Careers",   href: "#" },
   ];
+  // Real privacy / terms targets — Google's OAuth verifier crawls this
+  // page and rejects if these links 404 or anchor to "#".
   const legal = [
-    { label: "Privacy",  href: "#" },
-    { label: "Terms",    href: "#" },
-    { label: "Security", href: "#" },
+    { label: "Privacy",  href: "/privacy" },
+    { label: "Terms",    href: "/terms" },
+    { label: "Security", href: "/privacy#6-how-we-store-and-protect-your-data" },
   ];
 
   return (
