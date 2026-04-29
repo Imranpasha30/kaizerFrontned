@@ -20,6 +20,8 @@ import PhoneCamera from "./pages/PhoneCamera";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
 import Landing  from "./pages/Landing";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 import AuthProvider from "./auth/AuthProvider";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import AdminRoute from "./auth/AdminRoute";
@@ -37,6 +39,8 @@ function Shell({ children }) {
     loc.pathname === "/login" ||
     loc.pathname === "/register" ||
     loc.pathname === "/" ||
+    loc.pathname === "/privacy" ||
+    loc.pathname === "/terms" ||
     loc.pathname.startsWith("/phone/") ||
     loc.pathname.startsWith("/program/") ||
     loc.pathname.startsWith("/admin");
@@ -59,6 +63,12 @@ export default function App() {
           <Route path="/"         element={<Landing />} />
           <Route path="/login"    element={<Login />} />
           <Route path="/register" element={<Register />} />
+
+          {/* Public legal pages — required by Google for the YouTube
+              API quota review. Must be reachable without authentication
+              so the reviewer can verify them. */}
+          <Route path="/privacy"  element={<PrivacyPolicy />} />
+          <Route path="/terms"    element={<TermsOfService />} />
 
           {/* Phase 9 — phone-as-camera public route (scanned via QR). No auth;
               the token in the URL authorises the ingest WebSocket. */}
