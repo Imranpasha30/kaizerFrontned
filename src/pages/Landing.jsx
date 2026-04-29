@@ -81,6 +81,13 @@ export default function Landing() {
         <WatchSection />
       </section>
 
+      {/* Data-usage transparency — required by Google's homepage
+          compliance check ("Explain with transparency the purpose for
+          which your app requests user data"). Visible without login. */}
+      <section id="data-usage">
+        <DataUsageSection />
+      </section>
+
       <LiveDirectorDeepDive />
 
       <section id="pricing">
@@ -611,6 +618,111 @@ function WatchSection() {
               ))}
             </ul>
           </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────── */
+/*  5b. How we use your YouTube data — required by Google's homepage    */
+/*      compliance check (data-purpose transparency). Public, visible   */
+/*      without login, names every OAuth scope we request and what      */
+/*      each one unlocks.                                               */
+/* ──────────────────────────────────────────────────────────────────── */
+function DataUsageSection() {
+  const scopes = [
+    {
+      name: "youtube.upload",
+      title: "Upload videos to your channel",
+      desc:
+        "We use this to upload the clips you generate in Kaizer News directly to the YouTube channel(s) you connect. Without it, the entire publishing flow doesn't work.",
+    },
+    {
+      name: "youtube.readonly",
+      title: "Read your channel name and ID",
+      desc:
+        "After you click Allow on Google's consent screen, we fetch your channel's title and ID once so we can show you which account is connected (e.g. \"Connected as Auto Wala\"). We don't read viewer data, comments, subscribers, or analytics.",
+    },
+    {
+      name: "youtube",
+      title: "Set custom thumbnails + edit metadata",
+      desc:
+        "Lets us attach the auto-generated 9:16 thumbnail to each upload and edit the title or description if you correct a typo from our editor. We never modify videos uploaded outside of Kaizer News.",
+    },
+  ];
+
+  return (
+    <section id="data-usage" className="ui-section">
+      <div className="ui-section-inner">
+        <div className="ui-section-head">
+          <span className="eyebrow">Transparency</span>
+          <h2 className="heading-hero text-3xl sm:text-4xl lg:text-5xl max-w-3xl">
+            How we use your YouTube data
+          </h2>
+          <p className="lede max-w-2xl">
+            Kaizer News uses Google&rsquo;s standard OAuth 2.0 consent flow to
+            connect your YouTube channel. We only request the permissions we
+            actually need, and only act on data that you explicitly hand us.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto">
+          {scopes.map((s) => (
+            <div key={s.name} className="ui-card p-6 flex flex-col gap-3">
+              <code className="text-[11px] text-accent2 font-mono break-all">
+                {s.name}
+              </code>
+              <h3 className="text-lg font-bold text-ink-100">{s.title}</h3>
+              <p className="text-sm text-ink-300 leading-relaxed">{s.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="max-w-3xl mx-auto mt-12 ui-card p-6 flex flex-col gap-3">
+          <h3 className="text-base font-bold text-ink-100">
+            What we don&rsquo;t do
+          </h3>
+          <ul className="text-sm text-ink-300 leading-relaxed space-y-2 list-disc pl-5">
+            <li>
+              We <strong>do not</strong> sell, rent, or share your YouTube data
+              with advertisers or any third party.
+            </li>
+            <li>
+              We <strong>do not</strong> train AI models on your videos or
+              channel content.
+            </li>
+            <li>
+              We <strong>do not</strong> access subscribers, comments, view
+              data, or analytics for any of your videos.
+            </li>
+            <li>
+              We <strong>do not</strong> upload to channels you have not
+              explicitly authorised — every OAuth grant is for one specific
+              channel and is revocable at any time.
+            </li>
+          </ul>
+        </div>
+
+        <div className="text-center mt-10 text-sm text-ink-300">
+          You can revoke our access at any time via{" "}
+          <a
+            href="https://myaccount.google.com/permissions"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent2 hover:text-accent underline"
+          >
+            myaccount.google.com/permissions
+          </a>
+          . Read our full{" "}
+          <Link to="/privacy" className="text-accent2 hover:text-accent underline">
+            Privacy Policy
+          </Link>{" "}
+          and{" "}
+          <Link to="/terms" className="text-accent2 hover:text-accent underline">
+            Terms of Service
+          </Link>
+          .
         </div>
       </div>
     </section>
