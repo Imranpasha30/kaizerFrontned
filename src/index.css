@@ -6,14 +6,25 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
-  background: var(--app-bg, #080808);
-  color: var(--app-fg, #ddd);
+  /* Default to LIGHT so the first paint (before ThemeProvider applies
+     the html.light class) shows white. Dark mode is opt-in via the
+     NavBar toggle and overrides via the html.dark / html.light
+     selector blocks below. */
+  background: var(--app-bg, #ffffff);
+  color: var(--app-fg, #1a1a1a);
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   margin: 0;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── Dark-theme block ──────────────────────────────────────────
+   Now opt-in (was the default). Activated by ThemeProvider adding
+   `class="dark"` on <html>. Restores the original dark appearance
+   for users who toggle via the NavBar sun/moon button. */
+html.dark body                  { background: #080808; color: #ddd; }
+html.dark                       { color-scheme: dark; }
 
 /* ─── Light theme ──────────────────────────────────────────────────
    Activated by adding `class="light"` on <html> via ThemeProvider.
@@ -217,6 +228,147 @@ html.light ::-webkit-scrollbar-thumb:hover  { background: #b0b0b0; }
 
 /* Selection pop */
 html.light ::selection            { background: rgba(192,57,43,0.18); color: #1a1a1a; }
+
+/* ── SaaS-quality polish for light mode ─────────────────────────────
+   Beyond the dark→light token mapping above, these rules sharpen the
+   visual identity so the app reads as a professional SaaS product
+   (not a dark-theme app with a flag flipped). Soft shadows, cleaner
+   panel separation, refined hover states.
+   ──────────────────────────────────────────────────────────────── */
+
+/* Page shell — subtle linear background for depth */
+html.light body {
+  background: linear-gradient(180deg, #fafbfc 0%, #ffffff 100%);
+}
+
+/* Top nav — soft drop shadow, white surface, brand red accent line */
+html.light header.bg-\[\#0a0a0a\] {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+html.light header.border-b-2.border-accent {
+  border-bottom: 2px solid #e74c3c !important;
+}
+
+/* Card surfaces — refined shadow stack */
+html.light .card,
+html.light .ui-card,
+html.light .feature-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: box-shadow 200ms ease, border-color 160ms ease, transform 160ms ease;
+}
+html.light .card:hover,
+html.light .ui-card--interactive:hover,
+html.light .feature-card:hover {
+  border-color: #d1d5db;
+  box-shadow:
+    0 4px 6px -1px rgba(15, 23, 42, 0.06),
+    0 10px 15px -3px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+/* Primary buttons — keep brand red, refine the shadow + hover */
+html.light .ui-btn-primary {
+  box-shadow:
+    0 1px 2px rgba(231, 76, 60, 0.12),
+    0 4px 12px -4px rgba(231, 76, 60, 0.32);
+}
+html.light .ui-btn-primary:hover {
+  box-shadow:
+    0 2px 4px rgba(231, 76, 60, 0.18),
+    0 8px 20px -6px rgba(231, 76, 60, 0.42);
+}
+html.light .btn-primary {
+  box-shadow:
+    0 1px 2px rgba(231, 76, 60, 0.10),
+    0 2px 8px -2px rgba(231, 76, 60, 0.22);
+}
+
+/* Inputs — subtle focus ring rather than the dark glow */
+html.light input,
+html.light select,
+html.light textarea,
+html.light .ui-input,
+html.light .eb-input,
+html.light .eb-select {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  color: #1a1a1a;
+}
+html.light input:focus,
+html.light select:focus,
+html.light textarea:focus,
+html.light .ui-input:focus,
+html.light .eb-input:focus,
+html.light .eb-select:focus {
+  outline: none;
+  border-color: #e74c3c;
+  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.12);
+}
+
+/* Disabled controls */
+html.light input:disabled,
+html.light select:disabled,
+html.light textarea:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+}
+
+/* Modal scrim — softer in light mode */
+html.light .modal-backdrop,
+html.light [class*="bg-black/50"],
+html.light [class*="bg-black/60"],
+html.light [class*="bg-black/70"] {
+  background-color: rgba(15, 23, 42, 0.4) !important;
+}
+
+/* Sidebar / aside — soft surface, not stark white-on-white */
+html.light aside.bg-\[\#0a0a0a\] {
+  background-color: #f9fafb !important;
+  border-right: 1px solid #e5e7eb !important;
+}
+
+/* Beta badge + brand pulses — slightly softer in light mode */
+html.light .beta-badge {
+  background: #f59e0b;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(245, 158, 11, 0.25);
+}
+
+/* Table rows */
+html.light table thead {
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+html.light table tbody tr {
+  border-bottom: 1px solid #f3f4f6;
+}
+html.light table tbody tr:hover {
+  background: #f9fafb;
+}
+
+/* Code blocks — subtle gray background */
+html.light pre, html.light code {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+html.light pre {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+/* Brand-tinted sticky headers (Trending, Campaigns, Uploads) — keep
+   the brand red but as a soft tint rather than dark blood-red */
+html.light .bg-\[\#1a0f0f\]\/95 {
+  background-color: rgba(231, 76, 60, 0.06) !important;
+  border-color: rgba(231, 76, 60, 0.18) !important;
+}
 
 /* ── Scrollbar ──────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
