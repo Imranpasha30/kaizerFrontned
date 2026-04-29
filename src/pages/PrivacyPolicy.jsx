@@ -31,7 +31,7 @@ export default function PrivacyPolicy() {
             (&ldquo;<strong>Kaizer</strong>&rdquo;, &ldquo;<strong>we</strong>&rdquo;,
             &ldquo;<strong>us</strong>&rdquo;, &ldquo;<strong>our</strong>&rdquo;) collects, uses,
             stores, and discloses information when you use our SaaS
-            platform at <strong>kaizerfrontned-production.up.railway.app</strong> and the related
+            platform at <strong>kaizerx.com</strong> and the related
             services (the &ldquo;<strong>Service</strong>&rdquo;).
           </p>
 
