@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Youtube, Plus, CheckCircle2, Loader2, RefreshCw, AlertCircle, Users,
-  Image as ImageIcon, X,
+  Image as ImageIcon, X, Unlink, Trash2,
 } from "lucide-react";
 import { api } from "../api/client";
 import LogoPicker from "./LogoPicker";
@@ -23,6 +23,9 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
   const [notice, setNotice] = useState("");
   // Per-account refresh spinner: { [google_channel_id]: true } while pulling
   const [refreshingIds, setRefreshingIds] = useState({});
+  // Per-account disconnect spinner: { [primary_profile_id]: true } while
+  // calling DELETE /api/youtube/oauth/{id}
+  const [disconnectingIds, setDisconnectingIds] = useState({});
   // Logo editor modal state — which YT account is being edited
   const [logoAcc, setLogoAcc]     = useState(null);        // the acc object or null
   const [logoValue, setLogoValue] = useState(null);        // pending asset id (or null)
@@ -67,6 +70,35 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
       setError(e.message || "Refresh failed");
     } finally {
       setRefreshingIds((m) => { const n = { ...m }; delete n[key]; return n; });
+    }
+  }
+
+  async function handleDisconnect(acc) {
+    if (!acc?.primary_profile_id) return;
+    const channelTitle = acc.youtube_channel_title || "this YouTube account";
+    const confirmed = window.confirm(
+      `Disconnect ${channelTitle}?\n\n` +
+      `Kaizer News will stop being able to upload to this channel. ` +
+      `Pending or scheduled uploads to it will fail until you re-authorise. ` +
+      `For complete revocation, also remove access at ` +
+      `https://myaccount.google.com/permissions.\n\n` +
+      `Continue?`
+    );
+    if (!confirmed) return;
+
+    const id = acc.primary_profile_id;
+    setDisconnectingIds((m) => ({ ...m, [id]: true }));
+    setError("");
+    setNotice("");
+    try {
+      await api.disconnectYtAccount(id);
+      setNotice(`Disconnected ${channelTitle}. Refresh token revoked.`);
+      await load();
+      onRefresh?.();
+    } catch (e) {
+      setError(e.message || "Disconnect failed");
+    } finally {
+      setDisconnectingIds((m) => { const n = { ...m }; delete n[id]; return n; });
     }
   }
 
@@ -293,7 +325,7 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                       </span>
                     ))}
                   </div>
-                  <div className="text-[10px] text-gray-600 mt-2 flex items-center gap-2">
+                  <div className="text-[10px] text-gray-600 mt-2 flex items-center gap-2 flex-wrap">
                     {acc.connected_at && (
                       <span>Linked {new Date(acc.connected_at).toLocaleDateString()}</span>
                     )}
@@ -303,6 +335,23 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                       </span>
                     )}
                   </div>
+                  {/* Disconnect — required by Google's policy that users
+                      can withdraw OAuth access in-app. Calls
+                      DELETE /api/youtube/oauth/{channel_id} which clears
+                      our refresh_token_enc so we can no longer mint
+                      access tokens. Confirm dialog warns that pending
+                      uploads will fail. */}
+                  <button
+                    type="button"
+                    onClick={() => handleDisconnect(acc)}
+                    disabled={!!disconnectingIds[acc.primary_profile_id] || !acc.primary_profile_id}
+                    title="Revoke Kaizer's access to this YouTube account"
+                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-500/5 border border-red-900/40 hover:border-red-800/60 rounded-md py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {disconnectingIds[acc.primary_profile_id]
+                      ? <><Loader2 size={11} className="animate-spin" /> Disconnecting…</>
+                      : <><Unlink size={11} /> Disconnect</>}
+                  </button>
                 </div>
               </div>
             );

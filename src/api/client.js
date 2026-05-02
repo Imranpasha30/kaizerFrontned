@@ -146,6 +146,11 @@ export const api = {
   // to hit YouTube again for normal page loads.
   refreshYtAccount: (channelId)  => req("POST",   `/youtube/oauth/accounts/${channelId}/refresh`),
   setYtAccountLogo: (channelId, logo_asset_id) => req("POST", `/youtube/oauth/accounts/${channelId}/logo`, { logo_asset_id }),
+  // Revokes our refresh token for this YT account. Caller MUST confirm
+  // — this is destructive: any pending uploads to that channel fail
+  // until the user re-authorises. Also satisfies Google's policy
+  // requirement that users can withdraw OAuth access in-app.
+  disconnectYtAccount: (channelId) => req("DELETE", `/youtube/oauth/${channelId}`),
 
   // Channel groups — one-click presets for publish fan-out (e.g. "English",
   // "Telugu").  Stored per-user; each group holds a list of google_channel_ids.
