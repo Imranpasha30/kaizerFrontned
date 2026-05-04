@@ -3,8 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>KAIZER NEWS — Autonomous Live Director & AI Clips</title>
-    <meta name="description" content="One engine that films your concerts live and clips your archive into social-ready posts — no editor, no operator." />
+    <title>Kaizer News — AI video automation for YouTube creators</title>
+    <meta name="description" content="Kaizer News is an AI video automation platform that turns long-form recordings into multiple short-form clips and publishes them to creators' YouTube channels on their behalf." />
+    <meta property="og:title" content="Kaizer News" />
+    <meta property="og:description" content="AI video automation platform that turns long-form recordings into YouTube Shorts and publishes them to creators' channels with their consent." />
+    <meta property="og:url" content="https://kaizerx.com" />
+    <meta property="og:type" content="website" />
+    <!--
+      JSON-LD structured data so Google's OAuth verifier can read the
+      application identity programmatically. The app name MUST match
+      the OAuth consent screen exactly ("Kaizer News").
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Kaizer News",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web",
+        "url": "https://kaizerx.com",
+        "description": "Kaizer News is an AI video automation platform that turns long-form recordings into multiple short-form clips and publishes them to creators' YouTube channels on their behalf.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23c0392b'/><text x='4' y='24' font-size='22' font-weight='bold' fill='white'>K</text></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,12 +46,30 @@
       is genuinely visible (no off-screen / aria-hidden tricks that
       could trip cloaking detection).
     -->
+    <!--
+      Static product description present in the raw HTML so Google's
+      OAuth verifier can read the app name + purpose without executing
+      the React bundle. The React Landing page renders the same info
+      visibly above the fold after hydration; this block is a fallback
+      for crawlers / no-JS browsers.
+    -->
     <noscript>
-      <p style="padding:24px;color:#222;font-family:sans-serif;">
-        Kaizer News requires JavaScript to run. Read our
-        <a href="/privacy">Privacy Policy</a> and
-        <a href="/terms">Terms of Service</a>.
-      </p>
+      <main style="padding:32px 24px;color:#1a1a1a;font-family:Inter,system-ui,sans-serif;max-width:720px;margin:0 auto;">
+        <h1 style="font-size:28px;font-weight:900;margin:0 0 12px 0;">Kaizer News</h1>
+        <p style="font-size:16px;line-height:1.6;color:#333;margin:0 0 18px 0;">
+          Kaizer News is an AI video automation platform that turns
+          long-form recordings into multiple short-form clips and
+          publishes them to creators' YouTube channels on their behalf
+          using the YouTube Data API with the creator's explicit
+          consent.
+        </p>
+        <p style="font-size:14px;color:#555;margin:0 0 18px 0;">
+          The full app requires JavaScript. Read our
+          <a href="/privacy" style="color:#c0392b;">Privacy Policy</a>
+          and
+          <a href="/terms" style="color:#c0392b;">Terms of Service</a>.
+        </p>
+      </main>
     </noscript>
     <footer style="text-align:center;padding:12px 16px;font-size:12px;color:#9ca3af;font-family:Inter,system-ui,sans-serif;">
       <a href="/privacy" style="color:inherit;text-decoration:underline;margin-right:14px;">Privacy Policy</a>

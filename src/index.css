@@ -229,6 +229,409 @@ html.light ::-webkit-scrollbar-thumb:hover  { background: #b0b0b0; }
 /* Selection pop */
 html.light ::selection            { background: rgba(192,57,43,0.18); color: #1a1a1a; }
 
+/* ═══════════════════════════════════════════════════════════════════
+   Landing-page animation system
+   Used by src/pages/Landing.jsx. Self-contained — no JS deps beyond
+   IntersectionObserver. Honours prefers-reduced-motion.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Liquid gradient blobs (hero background) ──────────────────── */
+.kx-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.55;
+  pointer-events: none;
+  will-change: transform;
+}
+.kx-blob--a { background: radial-gradient(circle at 30% 30%, #ef4444 0%, #dc2626 60%, transparent 100%); animation: kx-blob-a 18s ease-in-out infinite; }
+.kx-blob--b { background: radial-gradient(circle at 70% 30%, #fb923c 0%, #f59e0b 60%, transparent 100%); animation: kx-blob-b 22s ease-in-out infinite; }
+.kx-blob--c { background: radial-gradient(circle at 50% 70%, #f43f5e 0%, #e11d48 60%, transparent 100%); animation: kx-blob-c 26s ease-in-out infinite; }
+@keyframes kx-blob-a {
+  0%,100% { transform: translate(0,0)    scale(1); }
+  33%     { transform: translate(60px,-40px) scale(1.15); }
+  66%     { transform: translate(-40px,30px) scale(0.9); }
+}
+@keyframes kx-blob-b {
+  0%,100% { transform: translate(0,0)    scale(1); }
+  33%     { transform: translate(-80px,40px) scale(0.85); }
+  66%     { transform: translate(50px,-30px) scale(1.2); }
+}
+@keyframes kx-blob-c {
+  0%,100% { transform: translate(0,0)    scale(1); }
+  33%     { transform: translate(40px,60px)  scale(1.1); }
+  66%     { transform: translate(-60px,-20px) scale(0.95); }
+}
+
+/* ── Animated grid background (geometric texture) ─────────────── */
+.kx-grid-bg {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(220,38,38,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(220,38,38,0.06) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black 30%, transparent 80%);
+  pointer-events: none;
+  animation: kx-grid-drift 30s linear infinite;
+}
+@keyframes kx-grid-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 56px 56px; }
+}
+
+/* ── Aurora hero accent (top-of-hero color wash) ──────────────── */
+.kx-aurora {
+  position: absolute;
+  inset: -20% 0 0 0;
+  height: 80%;
+  background:
+    radial-gradient(50% 40% at 20% 30%, rgba(239,68,68,0.18) 0%, transparent 60%),
+    radial-gradient(45% 35% at 80% 25%, rgba(245,158,11,0.15) 0%, transparent 60%),
+    radial-gradient(40% 30% at 50% 60%, rgba(244,63,94,0.10) 0%, transparent 60%);
+  pointer-events: none;
+  filter: saturate(1.1);
+}
+
+/* ── Reveal-on-scroll ─────────────────────────────────────────── */
+.kx-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 700ms cubic-bezier(0.2,0.7,0.1,1),
+              transform 700ms cubic-bezier(0.2,0.7,0.1,1);
+}
+.kx-reveal.in-view {
+  opacity: 1;
+  transform: translateY(0);
+}
+.kx-reveal-stagger > * { transition-delay: var(--kx-stagger, 0ms); }
+
+/* ── Floating chips around hero ───────────────────────────────── */
+.kx-float-chip {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(220,38,38,0.18);
+  color: #b91c1c;
+  box-shadow: 0 10px 30px -10px rgba(220,38,38,0.25);
+  white-space: nowrap;
+  animation: kx-float-bob 5s ease-in-out infinite;
+  pointer-events: none;
+}
+.kx-float-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #dc2626;
+  box-shadow: 0 0 10px rgba(220,38,38,0.8);
+  animation: kx-pulse 1.6s ease-in-out infinite;
+}
+@keyframes kx-float-bob {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-12px); }
+}
+@keyframes kx-pulse {
+  0%,100% { opacity: 1;   transform: scale(1); }
+  50%     { opacity: 0.5; transform: scale(1.4); }
+}
+
+/* ── Magnetic-style card hover lift ───────────────────────────── */
+.kx-card {
+  background: #ffffff;
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 18px;
+  transition:
+    transform 350ms cubic-bezier(0.2,0.7,0.1,1),
+    box-shadow 350ms ease,
+    border-color 250ms ease;
+  position: relative;
+  overflow: hidden;
+}
+.kx-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    300px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(220,38,38,0.10),
+    transparent 40%
+  );
+  opacity: 0;
+  transition: opacity 250ms ease;
+  pointer-events: none;
+}
+.kx-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(220,38,38,0.30);
+  box-shadow:
+    0 1px 3px rgba(15,23,42,0.06),
+    0 20px 40px -16px rgba(220,38,38,0.18);
+}
+.kx-card:hover::before { opacity: 1; }
+
+/* ── Glow button (CTA) ─────────────────────────────────────────── */
+.kx-glow-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.kx-glow-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 30%,
+    rgba(255,255,255,0.35) 50%,
+    transparent 70%);
+  transform: translateX(-100%);
+  transition: transform 700ms ease;
+}
+.kx-glow-btn:hover::after { transform: translateX(100%); }
+
+/* ── Marquee (logo ticker) ───────────────────────────────────── */
+.kx-marquee {
+  display: flex;
+  gap: 60px;
+  animation: kx-marquee 30s linear infinite;
+}
+@keyframes kx-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* ── Animated number counter shimmer ──────────────────────────── */
+.kx-stat-num {
+  background: linear-gradient(135deg, #dc2626 0%, #f43f5e 50%, #f59e0b 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: kx-gradient-shift 4s ease-in-out infinite;
+}
+@keyframes kx-gradient-shift {
+  0%,100% { background-position: 0% 50%; }
+  50%     { background-position: 100% 50%; }
+}
+
+/* ── Liquid section divider (SVG-free) ────────────────────────── */
+.kx-divider-liquid {
+  height: 80px;
+  background:
+    radial-gradient(80% 100% at 50% 0%, rgba(220,38,38,0.06) 0%, transparent 70%);
+}
+
+/* ── Hover tilt effect for feature icons ──────────────────────── */
+.kx-icon-tilt {
+  transition: transform 350ms cubic-bezier(0.2,0.7,0.1,1);
+}
+.kx-card:hover .kx-icon-tilt {
+  transform: rotate(-6deg) scale(1.1);
+}
+
+/* ── Pricing-card "most popular" pulse ────────────────────────── */
+.kx-popular-glow {
+  position: relative;
+}
+.kx-popular-glow::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(135deg, #dc2626, #f59e0b, #f43f5e, #dc2626);
+  background-size: 300% 300%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: kx-gradient-shift 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── Reduced motion: disable everything heavy ─────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .kx-blob, .kx-grid-bg, .kx-float-chip, .kx-stat-num,
+  .kx-popular-glow::before, .kx-marquee {
+    animation: none !important;
+  }
+  .kx-reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Cinematic landing additions
+   Slow, dramatic motion. Story-mode pacing.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Full-screen cinematic scene wrapper */
+.kx-scene {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 120px 24px;
+  overflow: hidden;
+}
+.kx-scene--tight { min-height: 80vh; }
+
+/* Word-by-word fade-in for headlines */
+.kx-words > span {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 700ms cubic-bezier(0.2,0.7,0.1,1),
+              transform 700ms cubic-bezier(0.2,0.7,0.1,1);
+  transition-delay: var(--w-delay, 0ms);
+  will-change: transform, opacity;
+}
+.kx-words.in-view > span {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Slow camera-pan background gradient */
+.kx-camera-pan {
+  position: absolute;
+  inset: -25%;
+  background:
+    radial-gradient(45% 35% at 25% 30%, rgba(220,38,38,0.16) 0%, transparent 60%),
+    radial-gradient(40% 30% at 75% 30%, rgba(245,158,11,0.14) 0%, transparent 60%),
+    radial-gradient(50% 40% at 50% 80%, rgba(244,63,94,0.12) 0%, transparent 60%);
+  filter: saturate(1.2) blur(20px);
+  animation: kx-camera-pan 60s linear infinite;
+  pointer-events: none;
+}
+@keyframes kx-camera-pan {
+  0%   { transform: translate(0,    0)    rotate(0deg)   scale(1); }
+  50%  { transform: translate(-3%, 2%)    rotate(180deg) scale(1.1); }
+  100% { transform: translate(0,    0)    rotate(360deg) scale(1); }
+}
+
+/* Vignette / dramatic edge darkening */
+.kx-vignette::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(15,23,42,0.04) 100%);
+  pointer-events: none;
+}
+
+/* Scene number / chapter label */
+.kx-chapter {
+  font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.kx-chapter::before,
+.kx-chapter::after {
+  content: "";
+  width: 32px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #94a3b8, transparent);
+}
+
+/* Big cinematic display headline */
+.kx-display {
+  font-size: clamp(2.5rem, 6vw, 5.5rem);
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+}
+.kx-display-grad {
+  background: linear-gradient(135deg, #dc2626 0%, #f43f5e 35%, #f59e0b 70%, #dc2626 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: kx-gradient-shift 6s ease-in-out infinite;
+}
+
+/* Cinematic divider — single thin line that draws on scroll */
+.kx-line-draw {
+  height: 1px;
+  width: 0;
+  background: linear-gradient(90deg, transparent, #dc2626, transparent);
+  margin: 0 auto;
+  transition: width 1500ms cubic-bezier(0.2,0.7,0.1,1);
+}
+.kx-line-draw.in-view { width: 240px; }
+
+/* Storytelling: question → answer reveal */
+.kx-question {
+  font-size: clamp(1.25rem, 2.5vw, 1.75rem);
+  color: #475569;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+}
+
+/* Vertical step rail (used in 3-act process) */
+.kx-rail {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(220,38,38,0.18) 20%, rgba(220,38,38,0.18) 80%, transparent);
+  transform: translateX(-50%);
+}
+.kx-rail-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #dc2626;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 4px rgba(220,38,38,0.15), 0 0 20px rgba(220,38,38,0.4);
+}
+
+/* Slow zoom on hero */
+.kx-slow-zoom {
+  animation: kx-slow-zoom 16s ease-out infinite alternate;
+}
+@keyframes kx-slow-zoom {
+  from { transform: scale(1);    }
+  to   { transform: scale(1.03); }
+}
+
+/* Cinematic letterbox bars (top + bottom thin lines for film feel) */
+.kx-letterbox::before,
+.kx-letterbox::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(220,38,38,0.4), transparent);
+}
+.kx-letterbox::before { top: 24px; }
+.kx-letterbox::after  { bottom: 24px; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .kx-camera-pan, .kx-slow-zoom, .kx-line-draw {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* ── SaaS-quality polish for light mode ─────────────────────────────
    Beyond the dark→light token mapping above, these rules sharpen the
    visual identity so the app reads as a professional SaaS product

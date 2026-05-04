@@ -1,475 +1,486 @@
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
-  Play,
-  Scissors,
-  Radio,
-  Music4,
-  SplitSquareHorizontal,
-  Image as ImageIcon,
-  RadioTower,
-  Sparkles,
-  Check,
-  Star,
-  ArrowRight,
-  Twitter,
-  Youtube,
-  Linkedin,
-  Mail,
-  Film,
+  ArrowRight, Play, Check, Sparkles, Youtube, ShieldCheck,
+  Wand2, Languages, Image as ImageIcon, Twitter, Linkedin, Mail,
+  Github, ChevronDown, Eye, Scissors, Send, Lock,
 } from "lucide-react";
-import {
-  Button,
-  SectionHeader,
-  LayoutPreview,
-  DEFAULT_LAYOUT_OPTIONS,
-  ClipEnginePreview,
-  ParticleField,
-  Reveal,
-  Counter,
-  GlowButton,
-  MagneticButton,
-  Tilt3D,
-  TypewriterRotator,
-  AIStatusBar,
-  useActiveSection,
-} from "../components/ui";
 import { useAuth } from "../auth/AuthProvider";
 
-/* ------------------------------------------------------------------ */
-/*  Landing — public marketing page                                    */
-/* ------------------------------------------------------------------ */
-const LANDING_SECTIONS = [
-  { id: "hero",          label: "hero" },
-  { id: "product",       label: "two products" },
-  { id: "features",      label: "features" },
-  { id: "watch",         label: "the 90-second demo" },
-  { id: "live-director", label: "live director" },
-  { id: "pricing",       label: "pricing" },
-  { id: "social",        label: "testimonials" },
-];
+/* ──────────────────────────────────────────────────────────────────── */
+/*  Kaizer News — cinematic, story-driven landing page                  */
+/*                                                                       */
+/*  Each section is a SCENE. The user reads it like a film, not a       */
+/*  feature list. Voice is second-person and narrative ("you record,    */
+/*  we cut..."). Every section earns the next scroll.                   */
+/* ──────────────────────────────────────────────────────────────────── */
 
 export default function Landing() {
   const { isAuthenticated } = useAuth();
-  const { activeSectionLabel } = useActiveSection(LANDING_SECTIONS);
+  const loc = useLocation();
 
-  // Smooth scroll for hash links (used by in-page nav). The CSS also sets
-  // `html { scroll-behavior: smooth }` under motion-safe, so this just
-  // bridges the button click → element id lookup.
   function scrollTo(id) {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  useEffect(() => {
+    if (loc.hash) {
+      const id = loc.hash.replace("#", "");
+      setTimeout(() => scrollTo(id), 100);
+    }
+  }, [loc.hash]);
+
   return (
-    <div className="min-h-screen bg-dark text-ink-100 relative overflow-x-hidden">
-      <TopNav isAuthenticated={isAuthenticated} scrollTo={scrollTo} />
+    <div className="bg-white text-slate-900 overflow-x-hidden">
+      <FloatingNav isAuthenticated={isAuthenticated} scrollTo={scrollTo} />
 
-      <section id="hero">
-        <Hero scrollTo={scrollTo} />
-      </section>
+      {/* ── Act 0: The opening shot ──────────────────────────────── */}
+      <SceneOpening scrollTo={scrollTo} />
 
-      <section id="product">
-        <ProductSplit />
-      </section>
+      {/* ── Act 1: The pain ──────────────────────────────────────── */}
+      <ScenePain />
 
-      <section id="features">
-        <FeaturesGrid />
-      </section>
+      {/* ── Act 2: The pivot ─────────────────────────────────────── */}
+      <ScenePivot />
 
-      <section id="watch">
-        <WatchSection />
-      </section>
+      {/* ── Act 3: The three actions Kaizer takes (story body) ─── */}
+      <SceneAction
+        chapter="Chapter I"
+        eyebrow="We watch"
+        question="What if the best moments were obvious?"
+        title="We see the moments that matter."
+        body="The pipeline reads transcripts and watches the footage. It surfaces the lines the audience leans in for — the laugh, the gasp, the line that earns a share. You don't scrub. We mark them."
+        icon={Eye}
+        accent="from-red-500 to-rose-500"
+        n="01"
+      />
+      <SceneAction
+        chapter="Chapter II"
+        eyebrow="We cut"
+        question="What if the work happened while you sleep?"
+        title="We cut, caption, and brand."
+        body="Every moment becomes a 9:16 clip. Captions in your language, fonts you chose, broadcast cards that match your show. Per-channel logos burn in just before upload — Auto Wala gets Auto Wala's brand, every time."
+        icon={Scissors}
+        accent="from-orange-500 to-amber-500"
+        n="02"
+      />
+      <SceneAction
+        chapter="Chapter III"
+        eyebrow="We publish"
+        question="What if the upload was already done?"
+        title="We deliver. You decide."
+        body="Connect your channel once via Google's standard OAuth. Pick a clip, pick destinations, pick a time — or let it ship now. Titles, descriptions, tags, thumbnails — Gemini wrote them. We just press send."
+        icon={Send}
+        accent="from-rose-500 to-pink-500"
+        n="03"
+      />
 
-      {/* Data-usage transparency — required by Google's homepage
-          compliance check ("Explain with transparency the purpose for
-          which your app requests user data"). Visible without login. */}
-      <section id="data-usage">
-        <DataUsageSection />
-      </section>
+      {/* ── Act 4: Trust + transparency (compliance, but in story voice) */}
+      <SceneTrust />
 
-      <LiveDirectorDeepDive />
+      {/* ── Act 5: The numbers ───────────────────────────────────── */}
+      <SceneNumbers />
 
-      <section id="pricing">
-        <Pricing />
-      </section>
+      {/* ── Act 6: Pricing ───────────────────────────────────────── */}
+      <ScenePricing />
 
-      <section id="social">
-        <SocialProof />
-      </section>
-
-      <FinalCTA />
+      {/* ── Act 7: Closing CTA ───────────────────────────────────── */}
+      <SceneClose />
 
       <Footer />
-
-      <AIStatusBar label={activeSectionLabel} />
     </div>
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  1. Top Nav                                                          */
-/* ──────────────────────────────────────────────────────────────────── */
-function TopNav({ isAuthenticated, scrollTo }) {
-  const [scrolled, setScrolled] = useState(false);
+/* ════════════════════════════════════════════════════════════════════
+   Hooks
+   ════════════════════════════════════════════════════════════════════ */
 
+function useReveal(threshold = 0.2) {
+  const ref = useRef(null);
   useEffect(() => {
-    function onScroll() {
-      setScrolled(window.scrollY > 6);
-    }
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            el.classList.add("in-view");
+            io.unobserve(el);
+          }
+        });
+      },
+      { threshold }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [threshold]);
+  return ref;
+}
+
+function useCounter(target, { duration = 1600 } = {}) {
+  const [val, setVal] = useState(0);
+  const ref = useRef(null);
+  const started = useRef(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (!started.current && e.isIntersecting) {
+            started.current = true;
+            const t0 = performance.now();
+            const step = (now) => {
+              const t = Math.min(1, (now - t0) / duration);
+              const eased = 1 - Math.pow(1 - t, 3);
+              setVal(Math.round(eased * target));
+              if (t < 1) requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+            io.unobserve(el);
+          }
+        });
+      },
+      { threshold: 0.4 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [target, duration]);
+  return [val, ref];
+}
+
+/* Word-by-word reveal */
+function Words({ text, className = "", baseDelay = 0, perWord = 70 }) {
+  const ref = useReveal(0.3);
+  const words = text.split(" ");
+  return (
+    <span ref={ref} className={`kx-words ${className}`}>
+      {words.map((w, i) => (
+        <span
+          key={i}
+          style={{ "--w-delay": `${baseDelay + i * perWord}ms` }}
+        >
+          {w}
+          {i < words.length - 1 ? " " : ""}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function Reveal({ children, delay = 0, className = "" }) {
+  const ref = useReveal(0.2);
+  return (
+    <div
+      ref={ref}
+      className={`kx-reveal ${className}`}
+      style={{ transitionDelay: `${delay}ms` }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Floating nav (minimal — story-mode wants quiet chrome)
+   ════════════════════════════════════════════════════════════════════ */
+
+function FloatingNav({ isAuthenticated, scrollTo }) {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const anchors = [
-    { id: "product",       label: "Product" },
-    { id: "features",      label: "Features" },
-    { id: "live-director", label: "Live Director" },
-    { id: "pricing",       label: "Pricing" },
-  ];
-
   return (
     <header
-      className={`sticky top-0 z-50 transition-all ${
-        scrolled ? "py-2" : "py-3"
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
+        scrolled
+          ? "bg-white/85 backdrop-blur-lg border-b border-slate-200/60 shadow-sm"
+          : ""
       }`}
     >
-      <div className="max-w-[1200px] mx-auto px-5">
-        <div className="glass-panel flex items-center justify-between px-4 py-3 rounded-2xl">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2">
-            <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
-              KAIZER
-            </div>
-            <span className="text-ink-300 text-xs font-medium tracking-[0.2em] font-mono hidden sm:inline">
-              NEWS
-            </span>
-          </Link>
+      <div className="max-w-6xl mx-auto px-5 h-16 flex items-center justify-between">
+        <Link to="/" className="flex items-center gap-2 group" aria-label="Kaizer News — home">
+          <span className="bg-red-600 text-white font-black text-sm tracking-widest rounded px-2 py-1 transition-transform group-hover:scale-105">
+            KAIZER
+          </span>
+          {/* "NEWS" is now visible at every breakpoint so the homepage app
+              name always reads "Kaizer News" — required by Google's OAuth
+              verification so it matches the consent-screen app name. */}
+          <span className="text-slate-700 text-xs font-bold tracking-[0.2em] inline">
+            NEWS
+          </span>
+        </Link>
 
-          {/* Anchors */}
-          <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-ink-300">
-            {anchors.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => scrollTo(a.id)}
-                className="hover:text-white transition-colors"
+        <div className="flex items-center gap-2">
+          {isAuthenticated ? (
+            <Link
+              to="/app"
+              className="kx-glow-btn inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition"
+            >
+              Open app <ArrowRight size={14} />
+            </Link>
+          ) : (
+            <>
+              <Link
+                to="/login"
+                className="hidden sm:inline-block text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-2 rounded-md transition-colors"
               >
-                {a.label}
-              </button>
-            ))}
-          </nav>
-
-          {/* Right cluster */}
-          <div className="flex items-center gap-2">
-            {isAuthenticated ? (
-              <Button as={Link} to="/app" size="sm" rightIcon={<ArrowRight size={14} />}>
-                Go to app
-              </Button>
-            ) : (
-              <>
-                <Link
-                  to="/login"
-                  className="hidden sm:inline text-sm text-ink-300 hover:text-white px-3 py-2 rounded-md transition-colors"
-                >
-                  Sign in
-                </Link>
-                <Button as={Link} to="/register" size="sm">
-                  Get started
-                </Button>
-              </>
-            )}
-          </div>
+                Sign in
+              </Link>
+              <Link
+                to="/register"
+                className="kx-glow-btn inline-flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm transition"
+              >
+                Begin <ArrowRight size={14} />
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  2. Hero                                                             */
-/* ──────────────────────────────────────────────────────────────────── */
-function Hero({ scrollTo }) {
+/* ════════════════════════════════════════════════════════════════════
+   Scene 0 — The opening shot
+   ════════════════════════════════════════════════════════════════════ */
+
+function SceneOpening({ scrollTo }) {
   return (
-    <section
-      className="ui-section relative flex items-center"
-      style={{ minHeight: "90vh" }}
-    >
-      {/* decorative layers — grid-bg (bottom), particles (middle), sheen (top) */}
-      <div className="hero-grid-bg" aria-hidden="true" />
-      <ParticleField density={40} className="hero-particles" />
-      <div
-        className="absolute inset-0 bg-hero-sheen pointer-events-none"
-        aria-hidden="true"
-      />
+    <section className="kx-scene kx-letterbox kx-vignette relative">
+      <div className="kx-camera-pan kx-slow-zoom" />
+      <div className="kx-grid-bg" />
 
-      <div className="ui-section-inner relative grid lg:grid-cols-[1.05fr,1fr] gap-14 items-center w-full">
-        {/* Copy column */}
-        <div className="flex flex-col gap-7">
-          <Reveal>
-            <span className="eyebrow">AUTONOMOUS MEDIA ENGINE</span>
-          </Reveal>
-          <Reveal delay={80}>
-            <h1 className="heading-hero heading-hero--flow text-4xl sm:text-5xl lg:text-[64px]">
-              Go live with zero operators.
-              <br />
-              Clip your archive while you sleep.
-            </h1>
-          </Reveal>
-          <Reveal delay={160}>
-            <p className="lede max-w-xl">
-              One engine films your concerts live and turns recorded shows into
-              platform-ready clips. No editor, no switcher operator, no operator
-              period.
+      <div className="relative max-w-4xl mx-auto text-center flex flex-col items-center gap-8">
+        {/*
+          Product-identity banner — required by Google OAuth verification.
+          Reviewers must see (1) the exact app name that matches the OAuth
+          consent screen ("Kaizer News") and (2) a plain-English purpose
+          statement above the fold without scrolling. The cinematic hero
+          tagline below is preserved for the user experience.
+        */}
+        <Reveal>
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-[11px] font-bold tracking-[0.4em] text-red-600 uppercase">
+              About this app
             </p>
-          </Reveal>
-
-          <Reveal delay={240}>
-            <div className="flex flex-wrap gap-3">
-              <MagneticButton strength={0.25} range={120}>
-                <GlowButton
-                  as={Link}
-                  to="/register"
-                  size="lg"
-                  rightIcon={<ArrowRight size={16} />}
-                >
-                  Start free — 14 days
-                </GlowButton>
-              </MagneticButton>
-              <MagneticButton strength={0.2} range={100}>
-                <Button
-                  variant="ghost"
-                  size="lg"
-                  leftIcon={<Play size={16} />}
-                  onClick={() => scrollTo("product")}
-                >
-                  Watch 90-second demo
-                </Button>
-              </MagneticButton>
-            </div>
-          </Reveal>
-
-          {/* Typewriter rotator — the site feels alive */}
-          <Reveal delay={300}>
-            <p className="text-sm text-ink-300 flex items-center gap-2 flex-wrap">
-              <span className="text-ink-400">Right now Kaizer is</span>
-              <TypewriterRotator
-                phrases={[
-                  "cutting on the beat.",
-                  "watching the crowd react.",
-                  "splitting stage + audience.",
-                  "bridging dead air.",
-                  "pushing to YouTube + Twitch.",
-                ]}
-                typeSpeed={45}
-                deleteSpeed={25}
-                holdDuration={1800}
-                className="text-accent2 font-semibold"
-              />
+            <h2 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
+              Kaizer News
+            </h2>
+            <p className="text-base sm:text-lg text-slate-700 max-w-2xl leading-relaxed">
+              Kaizer News is an AI video automation platform that turns long-form
+              recordings into multiple short-form clips and publishes them to
+              creators' YouTube channels on their behalf using the YouTube Data
+              API with the creator's explicit consent.
             </p>
-          </Reveal>
-
-          {/* Stat row */}
-          <Reveal delay={320}>
-            <div className="grid grid-cols-3 gap-6 pt-6 border-t border-ink-800 max-w-lg">
-              <Stat target={10} suffix="+" label="Hours saved / event" />
-              <Stat target={6}             label="Social formats / clip" />
-              <Stat target="<1s"           label="Auto-cut latency" />
-            </div>
-          </Reveal>
-        </div>
-
-        {/* Video column */}
-        <Reveal delay={200} className="relative">
-          <Tilt3D max={5} glare scale={1.01}>
-          <div className="glass-panel p-3 rounded-3xl shadow-elevated">
-            <div className="relative rounded-2xl overflow-hidden aspect-video bg-black">
-              <video
-                src="/demo/kaizer-demo.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="w-full h-full object-cover"
-              />
-              {/* Live badge */}
-              <div className="absolute top-3 left-3 flex items-center gap-2 glass-panel px-3 py-1.5 text-xs font-semibold text-white">
-                <span className="ui-live-dot" />
-                LIVE · Program feed — auto-directed
-              </div>
-
-              {/* Floating chips — bob gently, stagger so they don't sync */}
-              <FloatingChip
-                className="absolute top-4 right-4"
-                delay="0s"
-                dot
-              >
-                AUTO CUT · 00:04
-              </FloatingChip>
-              <FloatingChip
-                className="absolute top-1/2 -translate-y-1/2 right-2 hidden sm:inline-flex"
-                delay="1.2s"
-              >
-                SPLIT · joke_laugh
-              </FloatingChip>
-              <FloatingChip
-                className="absolute bottom-4 right-4"
-                delay="2.2s"
-                arrow
-              >
-                RELAY → 3 destinations
-              </FloatingChip>
-            </div>
           </div>
-          </Tilt3D>
+        </Reveal>
 
-          {/* Decorative glow blob */}
-          <div
-            className="absolute -bottom-12 -right-10 w-64 h-64 rounded-full blur-3xl opacity-40 pointer-events-none"
-            style={{
-              background:
-                "radial-gradient(circle, rgba(231,76,60,0.6) 0%, transparent 70%)",
-            }}
-            aria-hidden="true"
-          />
+        <Reveal delay={300}>
+          <span className="kx-chapter">A short film by Kaizer News</span>
+        </Reveal>
+
+        <h1 className="kx-display max-w-4xl">
+          <Words text="Every video has more inside it." baseDelay={400} />
+          <br />
+          <span className="kx-display-grad">
+            <Words text="Most of it never sees daylight." baseDelay={900} />
+          </span>
+        </h1>
+
+        <Reveal delay={1700}>
+          <p className="text-lg sm:text-xl text-slate-600 max-w-2xl leading-relaxed">
+            What if the best moments cut themselves? Wrote their own captions?
+            Found their own audience?
+          </p>
+        </Reveal>
+
+        <Reveal delay={2100}>
+          <div className="flex flex-col sm:flex-row gap-3 items-center">
+            <Link
+              to="/register"
+              className="kx-glow-btn inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-base font-semibold px-7 py-3.5 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all"
+            >
+              Watch it happen <ArrowRight size={16} />
+            </Link>
+            <button
+              onClick={() => scrollTo("act-pain")}
+              className="inline-flex items-center gap-2 text-slate-600 hover:text-slate-900 text-sm font-medium px-4 py-3 transition-colors"
+            >
+              <span>Continue reading</span>
+              <ChevronDown size={14} className="animate-bounce" />
+            </button>
+          </div>
         </Reveal>
       </div>
     </section>
   );
 }
 
-function Stat({ target, suffix, label }) {
+/* ════════════════════════════════════════════════════════════════════
+   Scene 1 — The pain
+   ════════════════════════════════════════════════════════════════════ */
+
+function ScenePain() {
+  const tasks = [
+    "Re-watch the recording.",
+    "Mark the moments that matter.",
+    "Cut to vertical, twice.",
+    "Write captions, line by line.",
+    "Generate thumbnails.",
+    "Write SEO. Test. Rewrite.",
+    "Burn the channel logo.",
+    "Upload. Repeat for the next channel.",
+  ];
+
   return (
-    <div className="ui-stat">
-      <div className="ui-stat-value">
-        <Counter target={target} suffix={suffix} />
+    <section id="act-pain" className="kx-scene relative">
+      <div className="absolute inset-0 bg-gradient-to-b from-white via-slate-50/50 to-white pointer-events-none" />
+
+      <div className="relative max-w-4xl mx-auto text-center">
+        <Reveal>
+          <span className="kx-chapter">Act One — The work</span>
+        </Reveal>
+
+        <Reveal delay={150}>
+          <h2 className="kx-display mt-8 max-w-3xl mx-auto">
+            <Words text="An hour of footage." />
+            <br />
+            <span className="text-slate-400">
+              <Words text="A day of editing." baseDelay={400} />
+            </span>
+          </h2>
+        </Reveal>
+
+        <Reveal delay={900}>
+          <p className="kx-question max-w-2xl mx-auto mt-10">
+            You know what comes next. You've done it a hundred times.
+          </p>
+        </Reveal>
+
+        <Reveal delay={1100}>
+          <ol className="mt-12 max-w-md mx-auto text-left flex flex-col gap-3">
+            {tasks.map((t, i) => (
+              <li
+                key={t}
+                className="flex items-start gap-3 text-slate-700 text-[15px] kx-reveal"
+                style={{ transitionDelay: `${1200 + i * 80}ms` }}
+                ref={useReveal(0.1)}
+              >
+                <span className="font-mono text-xs text-slate-400 mt-1.5 flex-shrink-0">
+                  {String(i + 1).padStart(2, "0")}.
+                </span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ol>
+        </Reveal>
+
+        <Reveal delay={2000}>
+          <div className="kx-line-draw mt-16" />
+        </Reveal>
       </div>
-      <div className="ui-stat-label">{label}</div>
-    </div>
+    </section>
   );
 }
 
-function FloatingChip({ children, className = "", delay = "0s", dot, arrow }) {
+/* ════════════════════════════════════════════════════════════════════
+   Scene 2 — The pivot
+   ════════════════════════════════════════════════════════════════════ */
+
+function ScenePivot() {
   return (
-    <span
-      className={`float-chip ${className}`.trim()}
-      style={{ animationDelay: delay }}
-    >
-      {dot ? <span className="float-chip__dot" /> : null}
-      {arrow ? <span className="float-chip__arrow">→</span> : null}
-      <span>{children}</span>
-    </span>
+    <section className="kx-scene kx-scene--tight relative">
+      <div className="kx-camera-pan opacity-60" />
+
+      <div className="relative max-w-3xl mx-auto text-center">
+        <Reveal>
+          <span className="kx-chapter">A pause</span>
+        </Reveal>
+
+        <h2 className="kx-display mt-10">
+          <span className="kx-display-grad">
+            <Words text="There's a faster way." />
+          </span>
+        </h2>
+
+        <Reveal delay={1200}>
+          <p className="text-lg text-slate-500 mt-8 max-w-xl mx-auto leading-relaxed">
+            One you don't have to drive. One that watches your footage, makes
+            the cuts, writes the words, and ships the result while your
+            kettle's still warm.
+          </p>
+        </Reveal>
+
+        <Reveal delay={1500}>
+          <p className="text-sm text-red-700 mt-12 font-mono tracking-widest uppercase">
+            Meet Kaizer News.
+          </p>
+        </Reveal>
+      </div>
+    </section>
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  3. Two autonomous products                                          */
-/* ──────────────────────────────────────────────────────────────────── */
-function ProductSplit() {
+/* ════════════════════════════════════════════════════════════════════
+   Scenes 3-5 — The three acts of what Kaizer does
+   ════════════════════════════════════════════════════════════════════ */
+
+function SceneAction({ chapter, eyebrow, question, title, body, icon: Icon, accent, n }) {
+  const isEven = parseInt(n) % 2 === 0;
   return (
-    <section id="product" className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
-          <Reveal>
-            <SectionHeader
-              eyebrow="TWO ENGINES · ONE PLATFORM"
-              title="Recorded or live — Kaizer runs the show."
-              lede="Drop in a recorded long-form show and it walks out as eight captioned clips. Plug in cameras and a mic and it directs your event in real time."
-            />
+    <section className="kx-scene relative">
+      <div className="absolute inset-0 bg-gradient-to-b from-white via-slate-50/40 to-white" />
+
+      <div className="relative max-w-6xl mx-auto px-5 grid md:grid-cols-2 gap-12 items-center">
+        {/* Visual side */}
+        <div className={`flex items-center justify-center ${isEven ? "md:order-last" : ""}`}>
+          <Reveal delay={200}>
+            <div className="relative">
+              {/* Big gradient orb behind the icon */}
+              <div className={`absolute inset-0 bg-gradient-to-br ${accent} rounded-full blur-3xl opacity-30 scale-125`} />
+              {/* Icon disk */}
+              <div
+                className={`relative w-48 h-48 sm:w-64 sm:h-64 rounded-full bg-gradient-to-br ${accent} flex items-center justify-center shadow-2xl kx-slow-zoom`}
+              >
+                <Icon size={80} className="text-white drop-shadow-lg" strokeWidth={1.5} />
+              </div>
+              {/* Chapter number floating beside */}
+              <span className="absolute -bottom-4 -right-4 bg-white border border-slate-200 rounded-full w-16 h-16 flex items-center justify-center text-2xl font-bold font-mono shadow-lg">
+                {n}
+              </span>
+            </div>
           </Reveal>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-8 mt-4">
-          {/* Card 1: Clip Engine */}
-          <Reveal delay={80}>
-            <div className="feature-card p-8 flex flex-col gap-6 h-full">
-              <div className="flex items-start gap-4">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                  style={{
-                    background:
-                      "linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)",
-                  }}
-                >
-                  <Scissors size={22} className="text-white" />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-white leading-tight">
-                    AI Clip Engine
-                  </h3>
-                  <p className="text-ink-300 text-sm mt-1">
-                    Long-form recording → platform-ready clips.
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-ink-200 text-[15px] leading-relaxed">
-                Drop a 90-minute show and Kaizer detects the hooks, trims the
-                dead air and exports a set of captioned, styled clips sized for
-                every feed you publish to.
-              </p>
-
-              <div className="rounded-xl overflow-hidden mt-2 bg-ink-950 border border-ink-800 p-3">
-                <ClipEnginePreview size="full" />
-              </div>
-              <div className="mt-1 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/15 border border-accent/30 text-[11px] font-bold tracking-wide uppercase text-accent2 self-start">
-                Long-form → 5× clips
-              </div>
-
-              <a
-                href="#features"
-                className="text-accent2 text-sm font-semibold inline-flex items-center gap-1 hover:text-white transition-colors mt-auto"
-              >
-                Learn more
-                <ArrowRight size={14} />
-              </a>
-            </div>
+        {/* Copy side */}
+        <div className="flex flex-col gap-6">
+          <Reveal>
+            <span className="kx-chapter">{chapter}</span>
           </Reveal>
-
-          {/* Card 2: Live Director */}
-          <Reveal delay={200}>
-            <div className="feature-card p-8 flex flex-col gap-6 h-full">
-              <div className="flex items-start gap-4">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                  style={{
-                    background:
-                      "linear-gradient(135deg,#e74c3c 0%,#c0392b 100%)",
-                  }}
-                >
-                  <Radio size={22} className="text-white" />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-white leading-tight">
-                    Autonomous Live Director
-                  </h3>
-                  <p className="text-ink-300 text-sm mt-1">
-                    Cameras in. Broadcast out. Nobody behind the desk.
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-ink-200 text-[15px] leading-relaxed">
-                Kaizer listens to every camera, cuts on beats, splits on crowd
-                reactions and bridges dead air — then pushes the program feed to
-                YouTube, Twitch and Facebook at once.
-              </p>
-
-              <div className="rounded-xl p-5 bg-ink-950 border border-ink-800">
-                <LayoutPreview layout="split2_hstack" size="full" primary={0} />
-                <p className="text-center text-xs text-ink-400 mt-3">
-                  Real split decision — joke → crowd laugh.
-                </p>
-              </div>
-
-              <a
-                href="#live-director"
-                className="text-accent2 text-sm font-semibold inline-flex items-center gap-1 hover:text-white transition-colors mt-auto"
-              >
-                Learn more
-                <ArrowRight size={14} />
-              </a>
-            </div>
+          <Reveal delay={150}>
+            <span className="text-xs font-bold uppercase tracking-[0.18em] text-red-600">
+              {eyebrow}
+            </span>
+          </Reveal>
+          <Reveal delay={250}>
+            <p className="kx-question italic">{question}</p>
+          </Reveal>
+          <Reveal delay={400}>
+            <h2 className="kx-display text-4xl sm:text-5xl">
+              <Words text={title} />
+            </h2>
+          </Reveal>
+          <Reveal delay={1200}>
+            <p className="text-lg text-slate-600 leading-relaxed max-w-lg">
+              {body}
+            </p>
           </Reveal>
         </div>
       </div>
@@ -477,498 +488,266 @@ function ProductSplit() {
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  4. Features grid                                                    */
-/* ──────────────────────────────────────────────────────────────────── */
-function FeaturesGrid() {
-  const features = [
-    {
-      icon: Music4,
-      title: "Beat-synced cuts",
-      body: "The director cuts on beats when music is playing and holds on the speaker when someone is talking. It reads the room.",
-    },
-    {
-      icon: SplitSquareHorizontal,
-      title: "Auto split-screen",
-      body: "Joke → laugh, Q&A and interaction moments become split-screens without a human pressing a button.",
-      preview: <LayoutPreview layout="split2_hstack" size="full" primary={0} />,
-    },
-    {
-      icon: Sparkles,
-      title: "Dead-air bridge",
-      body: "Every camera silent? Kaizer auto-cuts to your title card and back the moment the room comes alive.",
-    },
-    {
-      icon: ImageIcon,
-      title: "Green-screen backgrounds",
-      body: "Per-camera chroma key with image or looping video backgrounds — broadcast-grade without a studio.",
-    },
-    {
-      icon: RadioTower,
-      title: "Relay to anywhere",
-      body: "Broadcast the program feed to YouTube, Twitch and Facebook simultaneously from one click.",
-    },
-    {
-      icon: Film,
-      title: "Clip your archive",
-      body: "A 90-minute recorded show becomes eight platform-ready clips — captioned, trimmed and styled.",
-      preview: <ClipEnginePreview size="full" />,
-    },
+/* ════════════════════════════════════════════════════════════════════
+   Scene 6 — Trust (compliance section, in story voice)
+   ════════════════════════════════════════════════════════════════════ */
+
+function SceneTrust() {
+  const dontDo = [
+    "We don't sell or share your YouTube data with anyone.",
+    "We don't train AI models on your videos.",
+    "We don't read viewers, comments, or analytics.",
+    "We don't upload to channels you haven't authorised.",
   ];
 
   return (
-    <section id="features" className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
-          <Reveal>
-            <SectionHeader
-              eyebrow="WHAT KAIZER DOES"
-              title="One engine. Every format. Zero button-pressing."
-              lede="Every feature is designed around the same idea — remove the operator from the loop."
-            />
-          </Reveal>
-        </div>
+    <section id="data-usage" className="kx-scene relative">
+      <div className="absolute inset-0 bg-gradient-to-b from-white via-emerald-50/20 to-white" />
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {features.map((f, i) => (
-            <Reveal key={i} delay={(i % 3) * 100}>
-              <FeatureCard {...f} />
+      <div className="relative max-w-4xl mx-auto text-center px-5">
+        <Reveal>
+          <span className="kx-chapter">An aside on trust</span>
+        </Reveal>
+
+        <Reveal delay={150}>
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.18em] text-green-700 bg-green-50 border border-green-100 rounded-full px-4 py-1.5 mt-8">
+            <ShieldCheck size={12} /> Transparency
+          </span>
+        </Reveal>
+
+        <Reveal delay={250}>
+          <h2 className="kx-display text-3xl sm:text-5xl mt-6 max-w-3xl mx-auto">
+            <Words text="We only ask for what we need." />
+          </h2>
+        </Reveal>
+
+        <Reveal delay={1200}>
+          <p className="text-lg text-slate-600 mt-8 max-w-2xl mx-auto leading-relaxed">
+            When you connect your channel, Google asks us what we want. We
+            ask for three things — only three — and tell you exactly what
+            each one unlocks.
+          </p>
+        </Reveal>
+
+        <div className="grid md:grid-cols-3 gap-4 mt-16 max-w-4xl mx-auto">
+          {[
+            { name: "youtube.upload",   role: "To upload your clips." },
+            { name: "youtube.readonly", role: "To read your channel name." },
+            { name: "youtube",          role: "To set thumbnails and edit titles." },
+          ].map((s, i) => (
+            <Reveal key={s.name} delay={i * 150}>
+              <div className="kx-card p-6 text-left h-full">
+                <code className="text-[11px] text-red-600 bg-red-50 px-2 py-1 rounded-md font-mono inline-block break-all">
+                  {s.name}
+                </code>
+                <p className="text-slate-700 text-sm leading-relaxed mt-3">{s.role}</p>
+              </div>
             </Reveal>
           ))}
         </div>
-      </div>
-    </section>
-  );
-}
 
-function FeatureCard({ icon: Icon, title, body, preview }) {
-  return (
-    <article className="feature-card p-7 flex flex-col gap-4 h-full">
-      <div
-        className="w-10 h-10 rounded-xl flex items-center justify-center"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(231,76,60,0.25) 0%, rgba(192,57,43,0.10) 100%)",
-          border: "1px solid rgba(231,76,60,0.25)",
-        }}
-      >
-        <Icon size={20} className="text-accent2" />
-      </div>
-      <h3 className="text-base font-bold text-white">{title}</h3>
-      <p className="text-ink-300 text-sm leading-relaxed">{body}</p>
-      {preview ? (
-        <div className="mt-2 rounded-lg overflow-hidden border border-ink-800 p-2 bg-ink-950">
-          {preview}
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────── */
-/*  5. Watch — video deep-dive                                          */
-/* ──────────────────────────────────────────────────────────────────── */
-function WatchSection() {
-  const highlights = [
-    { t: "03s", label: "VAD detects the speaker" },
-    { t: "11s", label: "Crowd reacts — director splits" },
-    { t: "24s", label: "Dead air → title card bridge" },
-    { t: "41s", label: "Program feed pushes to YouTube + Twitch" },
-  ];
-
-  return (
-    <section className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
-          <Reveal>
-            <SectionHeader
-              eyebrow="WATCH"
-              title="90 seconds inside a live show."
-              lede="Watch the director read the room and switch cameras, layouts and destinations in real time."
-            />
-          </Reveal>
-        </div>
-
-        <div className="grid lg:grid-cols-[2fr,1fr] gap-8 items-start">
-          <Reveal>
-            <div className="glass-panel p-3 rounded-3xl shadow-elevated">
-              <video
-                controls
-                poster="/demo/showcase-2.jpeg"
-                src="/demo/kaizer-demo.mp4"
-                className="w-full rounded-2xl aspect-video bg-black"
-              />
-            </div>
-          </Reveal>
-
-          <div className="flex flex-col gap-3">
-            <h4 className="text-xs font-bold tracking-[0.18em] uppercase text-ink-400">
-              What you're seeing
-            </h4>
-            <ul className="flex flex-col gap-3">
-              {highlights.map((h, i) => (
-                <Reveal key={i} delay={i * 90} as="li">
-                  <div className="flex items-start gap-3 p-4 rounded-xl border border-ink-800 bg-ink-900/60">
-                    <span className="text-accent2 text-xs font-bold font-mono mt-0.5 min-w-[34px]">
-                      {h.t}
-                    </span>
-                    <span className="text-ink-200 text-sm">{h.label}</span>
-                  </div>
-                </Reveal>
+        <Reveal delay={600}>
+          <div className="max-w-2xl mx-auto mt-16 bg-gradient-to-br from-emerald-50/70 to-green-50/70 border border-green-100 rounded-2xl p-7 text-left">
+            <h3 className="font-bold text-base flex items-center gap-2 mb-4">
+              <Lock size={16} className="text-green-600" /> What we don't do.
+            </h3>
+            <ul className="space-y-2.5">
+              {dontDo.map((d, i) => (
+                <li key={i} className="flex items-start gap-3 text-slate-700 text-[15px] leading-relaxed">
+                  <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white text-green-600 mt-0.5 border border-green-200">
+                    <Check size={11} strokeWidth={3} />
+                  </span>
+                  <span>{d}</span>
+                </li>
               ))}
             </ul>
           </div>
-        </div>
-      </div>
-    </section>
-  );
-}
+        </Reveal>
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  5b. How we use your YouTube data — required by Google's homepage    */
-/*      compliance check (data-purpose transparency). Public, visible   */
-/*      without login, names every OAuth scope we request and what      */
-/*      each one unlocks.                                               */
-/* ──────────────────────────────────────────────────────────────────── */
-function DataUsageSection() {
-  const scopes = [
-    {
-      name: "youtube.upload",
-      title: "Upload videos to your channel",
-      desc:
-        "We use this to upload the clips you generate in Kaizer News directly to the YouTube channel(s) you connect. Without it, the entire publishing flow doesn't work.",
-    },
-    {
-      name: "youtube.readonly",
-      title: "Read your channel name and ID",
-      desc:
-        "After you click Allow on Google's consent screen, we fetch your channel's title and ID once so we can show you which account is connected (e.g. \"Connected as Auto Wala\"). We don't read viewer data, comments, subscribers, or analytics.",
-    },
-    {
-      name: "youtube",
-      title: "Set custom thumbnails + edit metadata",
-      desc:
-        "Lets us attach the auto-generated 9:16 thumbnail to each upload and edit the title or description if you correct a typo from our editor. We never modify videos uploaded outside of Kaizer News.",
-    },
-  ];
-
-  return (
-    <section id="data-usage" className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
-          <span className="eyebrow">Transparency</span>
-          <h2 className="heading-hero text-3xl sm:text-4xl lg:text-5xl max-w-3xl">
-            How we use your YouTube data
-          </h2>
-          <p className="lede max-w-2xl">
-            Kaizer News uses Google&rsquo;s standard OAuth 2.0 consent flow to
-            connect your YouTube channel. We only request the permissions we
-            actually need, and only act on data that you explicitly hand us.
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto">
-          {scopes.map((s) => (
-            <div key={s.name} className="ui-card p-6 flex flex-col gap-3">
-              <code className="text-[11px] text-accent2 font-mono break-all">
-                {s.name}
-              </code>
-              <h3 className="text-lg font-bold text-ink-100">{s.title}</h3>
-              <p className="text-sm text-ink-300 leading-relaxed">{s.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="max-w-3xl mx-auto mt-12 ui-card p-6 flex flex-col gap-3">
-          <h3 className="text-base font-bold text-ink-100">
-            What we don&rsquo;t do
-          </h3>
-          <ul className="text-sm text-ink-300 leading-relaxed space-y-2 list-disc pl-5">
-            <li>
-              We <strong>do not</strong> sell, rent, or share your YouTube data
-              with advertisers or any third party.
-            </li>
-            <li>
-              We <strong>do not</strong> train AI models on your videos or
-              channel content.
-            </li>
-            <li>
-              We <strong>do not</strong> access subscribers, comments, view
-              data, or analytics for any of your videos.
-            </li>
-            <li>
-              We <strong>do not</strong> upload to channels you have not
-              explicitly authorised — every OAuth grant is for one specific
-              channel and is revocable at any time.
-            </li>
-          </ul>
-        </div>
-
-        <div className="text-center mt-10 text-sm text-ink-300">
-          You can revoke our access at any time via{" "}
+        <p className="text-sm text-slate-500 mt-10">
+          Revoke at{" "}
           <a
             href="https://myaccount.google.com/permissions"
             target="_blank"
             rel="noreferrer"
-            className="text-accent2 hover:text-accent underline"
+            className="text-red-600 hover:text-red-700 underline"
           >
             myaccount.google.com/permissions
           </a>
           . Read our full{" "}
-          <Link to="/privacy" className="text-accent2 hover:text-accent underline">
+          <Link to="/privacy" className="text-red-600 hover:text-red-700 underline">
             Privacy Policy
           </Link>{" "}
           and{" "}
-          <Link to="/terms" className="text-accent2 hover:text-accent underline">
+          <Link to="/terms" className="text-red-600 hover:text-red-700 underline">
             Terms of Service
           </Link>
           .
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────── */
-/*  6. Live Director deep-dive                                          */
-/* ──────────────────────────────────────────────────────────────────── */
-function LiveDirectorDeepDive() {
-  return (
-    <section id="live-director" className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
-          <Reveal>
-            <SectionHeader
-              eyebrow="LIVE"
-              title="Every layout the director can pick — visualised."
-              lede="Kaizer switches both camera and layout in real time, picking the composition that best tells the moment."
-            />
-          </Reveal>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {DEFAULT_LAYOUT_OPTIONS.map((opt, i) => (
-            <Reveal key={opt.id} delay={(i % 3) * 90}>
-              <Tilt3D max={7} glare>
-              <div className="layout-tile" data-cursor="interactive">
-                <LayoutPreview layout={opt.id} size="full" />
-                <div className="layout-tile-label">
-                  <span className="layout-tile-name">{opt.name}</span>
-                  {opt.badge ? (
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-accent/15 text-accent2 border border-accent/30">
-                      {opt.badge}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="layout-tile-desc">{opt.desc}</p>
-              </div>
-              </Tilt3D>
-            </Reveal>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────── */
-/*  7. Pricing                                                          */
-/* ──────────────────────────────────────────────────────────────────── */
-function Pricing() {
-  const plans = [
-    {
-      name: "Starter",
-      price: "29",
-      tagline: "For solo creators running one room.",
-      features: [
-        "Up to 2 live cameras",
-        "Unlimited recorded clips",
-        "Beat-synced auto-cuts",
-        "One simultaneous destination",
-        "Email support",
-      ],
-      cta: "Start with Starter",
-      variant: "ghost",
-      popular: false,
-    },
-    {
-      name: "Pro",
-      price: "99",
-      tagline: "The full autonomous stack.",
-      features: [
-        "Up to 6 live cameras",
-        "Multi-destination relay",
-        "Chroma-key backgrounds",
-        "Dead-air bridge automation",
-        "Priority support",
-      ],
-      cta: "Get Pro",
-      variant: "primary",
-      popular: true,
-    },
-    {
-      name: "Studio",
-      price: "249",
-      tagline: "For venues and touring crews.",
-      features: [
-        "Unlimited cameras",
-        "Priority GPU encoding",
-        "Dedicated Slack channel",
-        "Custom title-card packs",
-        "SLA-backed uptime",
-      ],
-      cta: "Choose Studio",
-      variant: "ghost",
-      popular: false,
-    },
-  ];
-
-  return (
-    <section id="pricing" className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
-          <Reveal>
-            <SectionHeader
-              eyebrow="PRICING"
-              title="Simple, fair, no per-seat nonsense."
-              lede="Everything you need to go live and clip. Cancel any time."
-            />
-          </Reveal>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-6 items-stretch">
-          {plans.map((p, i) => (
-            <Reveal key={p.name} delay={i * 100}>
-              <PricingCard plan={p} />
-            </Reveal>
-          ))}
-        </div>
-
-        <p className="text-center text-ink-400 text-sm mt-10">
-          All plans include a 14-day free trial — no card required.
         </p>
       </div>
     </section>
   );
 }
 
-function PricingCard({ plan }) {
-  const { name, price, tagline, features, cta, variant, popular } = plan;
+/* ════════════════════════════════════════════════════════════════════
+   Scene 7 — The numbers (animated counters)
+   ════════════════════════════════════════════════════════════════════ */
+
+function SceneNumbers() {
+  const stats = [
+    { target: 10, suffix: "×", label: "Faster than manual" },
+    { target: 6,  suffix: "+", label: "Platforms supported" },
+    { target: 3,  suffix: " min", label: "Average per clip" },
+    { target: 99, suffix: "%", label: "Render success" },
+  ];
+
   return (
-    <div
-      className={`ui-card p-8 flex flex-col gap-6 relative h-full ${
-        popular ? "ui-card--selected" : ""
-      }`}
-    >
-      {popular && (
-        <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-accent text-white text-[10px] font-bold tracking-widest uppercase">
-          Most popular
-        </span>
-      )}
+    <section className="kx-scene kx-scene--tight relative bg-gradient-to-b from-white via-slate-50/60 to-white border-y border-slate-200/60">
+      <div className="relative max-w-6xl mx-auto px-5 text-center">
+        <Reveal>
+          <span className="kx-chapter">In numbers</span>
+        </Reveal>
+        <Reveal delay={100}>
+          <h2 className="kx-display text-3xl sm:text-5xl mt-6 max-w-3xl mx-auto">
+            <Words text="The hours come back to you." />
+          </h2>
+        </Reveal>
 
-      <div>
-        <h3 className="text-lg font-bold text-white">{name}</h3>
-        <p className="text-ink-400 text-sm mt-1">{tagline}</p>
+        <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-10">
+          {stats.map((s, i) => (
+            <Reveal key={s.label} delay={i * 100}>
+              <Stat {...s} />
+            </Reveal>
+          ))}
+        </div>
       </div>
+    </section>
+  );
+}
 
-      <div className="flex items-baseline gap-1">
-        <span className="text-5xl font-black text-white tracking-tight">
-          ${price}
-        </span>
-        <span className="text-ink-400 text-sm">/mo</span>
+function Stat({ target, suffix, label }) {
+  const [val, ref] = useCounter(target);
+  return (
+    <div ref={ref} className="text-center">
+      <div className="text-5xl sm:text-6xl font-bold leading-none tracking-tight">
+        <span className="kx-stat-num">{val}</span>
+        <span className="text-slate-700">{suffix}</span>
       </div>
-
-      <ul className="flex flex-col gap-3">
-        {features.map((f) => (
-          <li key={f} className="flex items-start gap-2 text-sm text-ink-200">
-            <Check size={16} className="text-green-500 shrink-0 mt-0.5" />
-            <span>{f}</span>
-          </li>
-        ))}
-      </ul>
-
-      <Button
-        as={Link}
-        to="/register"
-        variant={variant}
-        size="md"
-        className="justify-center w-full mt-auto"
-      >
-        {cta}
-      </Button>
+      <div className="text-xs text-slate-500 mt-3 uppercase tracking-wider font-semibold">
+        {label}
+      </div>
     </div>
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  8. Social proof                                                     */
-/* ──────────────────────────────────────────────────────────────────── */
-function SocialProof() {
-  const quotes = [
-    {
-      text:
-        "I used to watch two monitors and push buttons all night. Now I just watch the show.",
-      name: "Marcus Lane",
-      role: "Front-of-House Engineer",
-      venue: "Echo Hall, Brooklyn",
-      color: "#e74c3c",
-    },
-    {
-      text:
-        "We replaced a three-person broadcast crew with Kaizer on our Thursday comedy night. Zero complaints from the audience.",
-      name: "Priya Shah",
-      role: "Venue Operations",
-      venue: "The Lantern Club",
-      color: "#f39c12",
-    },
-    {
-      text:
-        "The clip engine turned our 90-minute recorded set into eight reels overnight. Growth on Shorts doubled in a month.",
-      name: "Deniz Kaya",
-      role: "Tour Content Manager",
-      venue: "Aether Live",
-      color: "#22c55e",
-    },
-  ];
+/* ════════════════════════════════════════════════════════════════════
+   Scene 8 — Pricing
+   ════════════════════════════════════════════════════════════════════ */
 
-  const photos = [
-    "/demo/showcase-1.jpeg",
-    "/demo/showcase-2.jpeg",
-    "/demo/showcase-3.jpeg",
-    "/demo/showcase-4.jpeg",
+function ScenePricing() {
+  const tiers = [
+    {
+      name: "Free",
+      price: "$0",
+      desc: "Try it for a few videos.",
+      features: [
+        "5 minutes source video / month",
+        "Up to 10 clips / month",
+        "1 connected YouTube channel",
+        "Community support",
+      ],
+      cta: "Begin",
+      highlight: false,
+    },
+    {
+      name: "Pro",
+      price: "$29",
+      period: "/ month",
+      desc: "For creators publishing weekly.",
+      features: [
+        "Unlimited source video",
+        "Unlimited clips",
+        "Up to 5 connected channels",
+        "Priority rendering queue",
+        "Per-channel branding & SEO variants",
+        "Email support",
+      ],
+      cta: "Upgrade",
+      highlight: true,
+    },
+    {
+      name: "Studio",
+      price: "Custom",
+      desc: "For newsrooms running multiple brands.",
+      features: [
+        "Everything in Pro",
+        "Unlimited connected channels",
+        "Dedicated GPU pipeline",
+        "Custom layouts",
+        "Priority support",
+      ],
+      cta: "Contact us",
+      highlight: false,
+    },
   ];
 
   return (
-    <section className="ui-section">
-      <div className="ui-section-inner">
-        <div className="ui-section-head">
+    <section id="pricing" className="kx-scene relative">
+      <div className="absolute inset-0 bg-gradient-to-b from-white via-slate-50/40 to-white" />
+
+      <div className="relative max-w-6xl mx-auto px-5 w-full">
+        <div className="text-center mb-16">
           <Reveal>
-            <SectionHeader
-              eyebrow="TRUSTED BY"
-              title="The operators trust us because we replace them gracefully."
-              lede="Front-of-house engineers, tour managers and venue owners — running shows autonomously from day one."
-            />
+            <span className="kx-chapter">The deal</span>
+          </Reveal>
+          <Reveal delay={100}>
+            <h2 className="kx-display text-3xl sm:text-5xl mt-6 max-w-3xl mx-auto">
+              <Words text="Simple plans. Honest pricing." />
+            </h2>
           </Reveal>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          {quotes.map((q, i) => (
-            <Reveal key={i} delay={i * 100}>
-              <TestimonialCard q={q} />
-            </Reveal>
-          ))}
-        </div>
-
-        {/* Photo strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-12">
-          {photos.map((src, i) => (
-            <Reveal key={i} delay={i * 70}>
-              <div className="relative aspect-video rounded-xl overflow-hidden opacity-70 hover:opacity-100 transition-opacity border border-ink-800">
-                <img
-                  src={src}
-                  alt={`Kaizer customer show ${i + 1}`}
-                  className="w-full h-full object-cover"
-                />
+        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {tiers.map((t, i) => (
+            <Reveal key={t.name} delay={i * 120}>
+              <div
+                className={`flex flex-col h-full bg-white rounded-2xl p-7 transition-all hover:-translate-y-1 ${
+                  t.highlight
+                    ? "kx-popular-glow shadow-xl ring-1 ring-red-200 relative"
+                    : "border border-slate-200 shadow-sm hover:shadow-lg"
+                }`}
+              >
+                {t.highlight && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-[10px] font-bold tracking-widest uppercase px-3 py-1.5 rounded-full shadow-md">
+                    Most popular
+                  </span>
+                )}
+                <h3 className="font-bold text-xl">{t.name}</h3>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="text-5xl font-bold tracking-tight">{t.price}</span>
+                  {t.period && <span className="text-sm text-slate-500">{t.period}</span>}
+                </div>
+                <p className="text-sm text-slate-600 mt-2 mb-6">{t.desc}</p>
+                <ul className="flex flex-col gap-3 mb-7">
+                  {t.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2.5 text-sm text-slate-700">
+                      <span className="flex-shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-50 text-green-600 mt-0.5">
+                        <Check size={11} />
+                      </span>
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  to={t.name === "Studio" ? "/contact" : "/register"}
+                  className={`kx-glow-btn inline-flex items-center justify-center gap-2 font-semibold rounded-xl px-5 py-3 transition mt-auto ${
+                    t.highlight
+                      ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-md hover:shadow-lg"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-900"
+                  }`}
+                >
+                  {t.cta}
+                </Link>
               </div>
             </Reveal>
           ))}
@@ -978,185 +757,150 @@ function SocialProof() {
   );
 }
 
-function TestimonialCard({ q }) {
-  const initials = q.name
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("");
+/* ════════════════════════════════════════════════════════════════════
+   Scene 9 — Closing CTA
+   ════════════════════════════════════════════════════════════════════ */
+
+function SceneClose() {
   return (
-    <div className="ui-card p-7 flex flex-col gap-5 h-full">
-      <div className="flex gap-1">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Star key={i} size={14} className="text-accent3 fill-accent3" />
-        ))}
-      </div>
-      <p className="text-ink-100 text-[15px] leading-relaxed">
-        &ldquo;{q.text}&rdquo;
-      </p>
-      <div className="flex items-center gap-3 mt-auto pt-3 border-t border-ink-800">
-        <span
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0"
-          style={{ background: q.color }}
-        >
-          {initials}
-        </span>
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-white truncate">{q.name}</div>
-          <div className="text-xs text-ink-400 truncate">
-            {q.role} · {q.venue}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+    <section className="kx-scene relative">
+      <div className="kx-camera-pan kx-slow-zoom" />
+      <div className="kx-grid-bg" />
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  9. Final CTA                                                        */
-/* ──────────────────────────────────────────────────────────────────── */
-function FinalCTA() {
-  return (
-    <section className="ui-section">
-      <div className="ui-section-inner">
-        <div
-          className="relative rounded-3xl overflow-hidden p-14 md:p-20 text-center"
-          style={{
-            background:
-              "radial-gradient(ellipse at top, rgba(231,76,60,0.22) 0%, rgba(10,10,10,1) 65%), #0a0a0a",
-            border: "1px solid rgba(231,76,60,0.35)",
-            boxShadow:
-              "0 0 0 1px rgba(231,76,60,0.1), 0 40px 80px -30px rgba(231,76,60,0.45)",
-          }}
-        >
-          <div className="hero-grid-bg" aria-hidden="true" />
+      <div className="relative max-w-3xl mx-auto text-center px-5">
+        <Reveal>
+          <span className="kx-chapter">The end of the editor</span>
+        </Reveal>
 
-          <Reveal>
-            <div className="relative flex flex-col items-center gap-6">
-              <h2 className="heading-hero heading-hero--flow text-4xl sm:text-5xl lg:text-6xl max-w-3xl">
-                Your next show runs itself.
-              </h2>
-              <p className="lede max-w-xl">
-                Fourteen days on us. No card, no setup calls — plug in a camera
-                and a mic, and let Kaizer direct.
-              </p>
-              <div className="flex flex-wrap gap-3 justify-center pt-2">
-                <MagneticButton strength={0.28} range={140}>
-                  <GlowButton
-                    as={Link}
-                    to="/register"
-                    size="lg"
-                    rightIcon={<ArrowRight size={16} />}
-                  >
-                    Start your 14-day trial
-                  </GlowButton>
-                </MagneticButton>
-                <MagneticButton strength={0.2} range={100}>
-                  <Button
-                    as="a"
-                    href="mailto:hello@kaizer.news"
-                    variant="ghost"
-                    size="lg"
-                    leftIcon={<Mail size={16} />}
-                  >
-                    Talk to us
-                  </Button>
-                </MagneticButton>
-              </div>
-            </div>
-          </Reveal>
-        </div>
-      </div>
-    </section>
-  );
-}
+        <h2 className="kx-display mt-10">
+          <Words text="Your turn." />
+        </h2>
 
-/* ──────────────────────────────────────────────────────────────────── */
-/*  10. Footer                                                          */
-/* ──────────────────────────────────────────────────────────────────── */
-function Footer() {
-  const product = [
-    { label: "Features",      href: "#features" },
-    { label: "Live Director", href: "#live-director" },
-    { label: "Pricing",       href: "#pricing" },
-  ];
-  const company = [
-    { label: "About",     href: "#" },
-    { label: "Blog",      href: "#" },
-    { label: "Changelog", href: "#" },
-    { label: "Careers",   href: "#" },
-  ];
-  // Real privacy / terms targets — Google's OAuth verifier crawls this
-  // page and rejects if these links 404 or anchor to "#".
-  const legal = [
-    { label: "Privacy",  href: "/privacy" },
-    { label: "Terms",    href: "/terms" },
-    { label: "Security", href: "/privacy#6-how-we-store-and-protect-your-data" },
-  ];
+        <Reveal delay={1000}>
+          <p className="text-lg sm:text-xl text-slate-600 mt-8 max-w-xl mx-auto leading-relaxed">
+            Connect a channel. Upload a video. Watch it become a week of
+            Shorts.
+          </p>
+        </Reveal>
 
-  return (
-    <footer className="border-t border-ink-800 pt-16 pb-10 px-6">
-      <div className="max-w-[1200px] mx-auto">
-        <div className="grid md:grid-cols-4 gap-10">
-          <div className="flex flex-col gap-4 md:col-span-1">
-            <Link to="/" className="flex items-center gap-2">
-              <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
-                KAIZER
-              </div>
-              <span className="text-ink-300 text-xs font-medium tracking-[0.2em] font-mono">
-                NEWS
-              </span>
+        <Reveal delay={1300}>
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-12">
+            <Link
+              to="/register"
+              className="kx-glow-btn inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-base font-semibold px-7 py-3.5 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all"
+            >
+              Begin <ArrowRight size={16} />
             </Link>
-            <p className="text-ink-400 text-sm max-w-xs leading-relaxed">
-              Autonomous live direction and long-form clipping — one engine for
-              every room.
-            </p>
+            <Link
+              to="/login"
+              className="inline-flex items-center gap-2 text-slate-700 hover:text-slate-900 text-base font-semibold px-6 py-3.5 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-white transition-all"
+            >
+              Sign in
+            </Link>
           </div>
+        </Reveal>
 
-          <FooterCol title="Product" items={product} />
-          <FooterCol title="Company" items={company} />
-          <FooterCol title="Legal"   items={legal} />
+        <Reveal delay={1600}>
+          <p className="text-sm text-slate-400 mt-12 italic">
+            Fade to black.
+          </p>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Footer
+   ════════════════════════════════════════════════════════════════════ */
+
+function Footer() {
+  return (
+    <footer className="border-t border-slate-200 bg-white relative">
+      <div className="max-w-6xl mx-auto px-5 py-14 grid md:grid-cols-4 gap-10">
+        <div className="flex flex-col gap-4 md:col-span-1">
+          <Link to="/" className="flex items-center gap-2">
+            <span className="bg-red-600 text-white font-black text-sm tracking-widest rounded px-2 py-1">
+              KAIZER
+            </span>
+            <span className="text-slate-500 text-xs font-semibold tracking-[0.2em]">
+              NEWS
+            </span>
+          </Link>
+          <p className="text-sm text-slate-500 leading-relaxed max-w-xs">
+            Long videos in. Shorts that publish themselves out.
+          </p>
+          <div className="flex items-center gap-3 text-slate-400">
+            <a href="https://twitter.com" target="_blank" rel="noreferrer" aria-label="Twitter" className="hover:text-red-600 transition-colors"><Twitter size={16} /></a>
+            <a href="https://linkedin.com" target="_blank" rel="noreferrer" aria-label="LinkedIn" className="hover:text-red-600 transition-colors"><Linkedin size={16} /></a>
+            <a href="https://github.com" target="_blank" rel="noreferrer" aria-label="GitHub" className="hover:text-red-600 transition-colors"><Github size={16} /></a>
+            <a href="mailto:devsharkify@gmail.com" aria-label="Email" className="hover:text-red-600 transition-colors"><Mail size={16} /></a>
+          </div>
         </div>
 
-        <div className="mt-14 pt-6 border-t border-ink-800 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <p className="text-ink-500 text-xs">
+        <FooterCol title="Product">
+          <FooterLink to="/register">Get started</FooterLink>
+          <FooterLink to="/login">Sign in</FooterLink>
+          <FooterLink href="#pricing">Pricing</FooterLink>
+        </FooterCol>
+
+        <FooterCol title="Company">
+          <FooterLink href="mailto:devsharkify@gmail.com">Contact</FooterLink>
+        </FooterCol>
+
+        <FooterCol title="Legal">
+          <FooterLink to="/privacy">Privacy Policy</FooterLink>
+          <FooterLink to="/terms">Terms of Service</FooterLink>
+          <FooterLink href="https://www.youtube.com/t/terms" external>YouTube Terms</FooterLink>
+          <FooterLink href="https://policies.google.com/privacy" external>Google Privacy</FooterLink>
+        </FooterCol>
+      </div>
+
+      <div className="border-t border-slate-200">
+        <div className="max-w-6xl mx-auto px-5 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-xs text-slate-400">
             © {new Date().getFullYear()} Kaizer News. All rights reserved.
           </p>
-          <div className="flex items-center gap-4 text-ink-400">
-            <a href="#" aria-label="Twitter" className="hover:text-white transition-colors">
-              <Twitter size={16} />
-            </a>
-            <a href="#" aria-label="YouTube" className="hover:text-white transition-colors">
-              <Youtube size={16} />
-            </a>
-            <a href="#" aria-label="LinkedIn" className="hover:text-white transition-colors">
-              <Linkedin size={16} />
-            </a>
-          </div>
+          <p className="text-xs text-slate-400 italic">
+            Built for storytellers.
+          </p>
         </div>
       </div>
     </footer>
   );
 }
 
-function FooterCol({ title, items }) {
+function FooterCol({ title, children }) {
   return (
-    <div className="flex flex-col gap-3">
-      <h4 className="text-xs uppercase tracking-[0.14em] font-bold text-ink-400">
+    <div>
+      <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">
         {title}
       </h4>
-      <ul className="flex flex-col gap-2">
-        {items.map((it) => (
-          <li key={it.label}>
-            <a
-              href={it.href}
-              className="text-ink-300 text-sm hover:text-white transition-colors"
-            >
-              {it.label}
-            </a>
-          </li>
-        ))}
-      </ul>
+      <ul className="flex flex-col gap-3">{children}</ul>
     </div>
+  );
+}
+
+function FooterLink({ href, to, external, children }) {
+  if (to) {
+    return (
+      <li>
+        <Link to={to} className="text-sm text-slate-600 hover:text-red-600 transition-colors">
+          {children}
+        </Link>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <a
+        href={href}
+        target={external ? "_blank" : undefined}
+        rel={external ? "noreferrer" : undefined}
+        className="text-sm text-slate-600 hover:text-red-600 transition-colors"
+      >
+        {children}
+      </a>
+    </li>
   );
 }
