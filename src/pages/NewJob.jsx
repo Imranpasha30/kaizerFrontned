@@ -3,7 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { Upload, ChevronRight, ChevronLeft, Loader2, Film, Languages, Image as ImageIcon, Star } from "lucide-react";
 import { api } from "../api/client";
 
-const STEPS = ["Upload Video", "Choose Platform", "Choose Frame", "Choose Language", "Confirm"];
+const STEPS         = ["Upload Video", "Choose Platform", "Choose Frame",   "Choose Language", "Confirm"];
+const STEPS_LONGFORM = ["Upload Video", "Choose Platform", "Long-form mode", "Choose Language", "Confirm"];
+
+// Platforms that skip the per-clip frame layout (16:9 long-form only).
+const LONGFORM_PLATFORMS = new Set(["youtube_full"]);
+function isLongForm(platform) {
+  return LONGFORM_PLATFORMS.has(platform);
+}
 
 export default function NewJob() {
   const navigate = useNavigate();
@@ -74,9 +81,10 @@ export default function NewJob() {
     <div className="max-w-2xl lg:max-w-3xl xl:max-w-4xl mx-auto px-4 sm:px-6 py-6">
       <h1 className="text-xl font-bold text-white mb-6">New Job</h1>
 
-      {/* Step indicators */}
+      {/* Step indicators — labels swap in long-form mode so users don't see
+          a "Choose Frame" step they're never asked to interact with. */}
       <div className="flex items-center gap-2 mb-8">
-        {STEPS.map((label, i) => (
+        {(isLongForm(platform) ? STEPS_LONGFORM : STEPS).map((label, i) => (
           <React.Fragment key={i}>
             <button
               onClick={() => i < step && setStep(i)}
@@ -137,7 +145,21 @@ export default function NewJob() {
               {Object.entries(platforms).map(([key, info]) => (
                 <button
                   key={key}
-                  onClick={() => { setPlatform(key); setStep(2); }}
+                  onClick={() => {
+                    setPlatform(key);
+                    // Long-form (16:9) doesn't use the 9:16 frame layouts.
+                    // Auto-fill the frame field with a sentinel that the
+                    // backend ignores when render_mode=bulletin (which is
+                    // also auto-set inside pipeline.run_pipeline when
+                    // platform=youtube_full), and jump straight to the
+                    // language step.
+                    if (isLongForm(key)) {
+                      setFrame("torn_card");
+                      setStep(3);
+                    } else {
+                      setStep(2);
+                    }
+                  }}
                   className={`p-4 rounded-lg border text-left transition-all
                     ${platform === key
                       ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
@@ -151,8 +173,9 @@ export default function NewJob() {
           </div>
         )}
 
-        {/* Step 2: Frame */}
-        {step === 2 && (
+        {/* Step 2: Frame \u2014 Shorts only. Long-form (16:9) uses the bulletin
+            compositor and bypasses this step entirely. */}
+        {step === 2 && !isLongForm(platform) && (
           <div>
             <h2 className="font-semibold text-white mb-4">Choose Frame Layout</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -170,6 +193,24 @@ export default function NewJob() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+        {step === 2 && isLongForm(platform) && (
+          <div>
+            <h2 className="font-semibold text-white mb-4">Long-form bulletin</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              YouTube Full uses the long-form bulletin compositor \u2014
+              TV9-style lower-third, scrolling ticker, channel bug, image
+              carousel sidebar, and full-screen photo cut-aways. Frame
+              layouts (torn card / split / follow bar) are 9:16 Shorts
+              only and don't apply here.
+            </p>
+            <button
+              onClick={() => setStep(3)}
+              className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-semibold"
+            >
+              Continue \u2192
+            </button>
           </div>
         )}
 
@@ -212,7 +253,10 @@ export default function NewJob() {
             <div className="bg-black/40 rounded-lg p-4 flex flex-col gap-3 mb-4 text-sm">
               <ConfirmRow label="Video"    value={file?.name} />
               <ConfirmRow label="Platform" value={platforms[platform]?.label} />
-              <ConfirmRow label="Frame"    value={frame?.replace("_", " ")} />
+              {isLongForm(platform)
+                ? <ConfirmRow label="Mode"  value="Long-form bulletin (TV9 broadcast layout)" />
+                : <ConfirmRow label="Frame" value={frame?.replace("_", " ")} />
+              }
               <ConfirmRow label="Language" value={(() => {
                 const l = languages.find((x) => x.code === language);
                 return l ? `${l.native} (${l.english})` : language;
