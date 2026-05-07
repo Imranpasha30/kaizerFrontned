@@ -193,6 +193,17 @@ export const api = {
   ytLookup:        (q)         => req("GET", `/yt-lookup/?q=${encodeURIComponent(q)}`),
   ytLookupSearch:  (q, limit=5) => req("GET", `/yt-lookup/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 
+  // ── System settings (admin) ─────────────────────────────────────────
+  // List + update global toggles. Today the only setting is
+  // `upload_provider` ('postiz' default | 'kaizer'). PUT requires admin;
+  // there's a separate /public read endpoint for non-admins so the
+  // PublishModal can show "Uploading via X" to everyone.
+  adminListSettings:        ()             => req("GET",  "/admin/settings"),
+  adminUpdateSetting:       (key, value)   =>
+    req("PUT", `/admin/settings/${encodeURIComponent(key)}`, { value }),
+  getActiveUploadProvider:  ()             =>
+    req("GET", "/admin/settings/upload-provider/public"),
+
   // Publish / Uploads (phase 5)
   publishClip:    (clipId, payload) => req("POST",   `/clips/${clipId}/publish`, payload),
   listUploads:    (opts = {})       => {

@@ -27,6 +27,11 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     selectedIds: new Set(),
     text: "",
   });
+  // Active upload provider — visible to every authenticated user as a
+  // small banner so they understand whether their click hits Postiz or
+  // our native YouTube path. Read-only here; admins flip it from
+  // /admin/settings.
+  const [activeProvider, setActiveProvider] = useState(null);
   const [channels, setChannels] = useState([]);
   const [loadingCh, setLoadingCh] = useState(false);
   // channelId = "primary" profile used for SEO + style; still needed for the
@@ -84,6 +89,17 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   const bestVariant = variantList.length
     ? [...variantList].sort((a, b) => b.score - a.score)[0]
     : null;
+
+  // Fetch the active upload provider once on open. Cheap (1 GET); only
+  // fires when the modal opens, not on every render.
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    api.getActiveUploadProvider()
+      .then((d) => { if (alive) setActiveProvider(d?.upload_provider || "postiz"); })
+      .catch(() => { if (alive) setActiveProvider("postiz"); });
+    return () => { alive = false; };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -368,6 +384,35 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   return (
     <Modal open={open} onClose={onClose} title="Publish to YouTube" size="md">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {/* Active upload provider banner — visible to ALL users so it
+            is obvious whether the click hits Postiz or our native YT
+            path. Only admins can flip it (Admin → Settings). */}
+        {activeProvider && (
+          <div className={`text-[11px] px-3 py-2 rounded border flex items-center gap-2 ${
+            activeProvider === "postiz"
+              ? "bg-purple-950/30 border-purple-900/50 text-purple-200"
+              : "bg-red-950/30 border-red-900/50 text-red-200"
+          }`}>
+            {activeProvider === "postiz"
+              ? (
+                <><Globe size={12} className="flex-shrink-0" />
+                  <span>
+                    Uploading via <strong>Postiz</strong> — multi-platform routing
+                    (YouTube + Twitter + Instagram + …). Admin-only toggle in{" "}
+                    <RLink to="/admin/settings" className="underline hover:text-white">
+                      Admin → Settings
+                    </RLink>.
+                  </span></>
+              ) : (
+                <><Youtube size={12} className="flex-shrink-0" />
+                  <span>
+                    Uploading via <strong>Kaizer native</strong> — direct YouTube
+                    Data API. Subject to your project's daily quota.
+                  </span></>
+              )}
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-950/50 border border-red-900 text-red-300 px-3 py-2 rounded text-sm flex items-start gap-2">
             <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />

@@ -4,9 +4,9 @@ import {
   Activity, Cpu, Users, Briefcase, Sparkles, Radio, Shield, RefreshCw,
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
-  BarChart3, Eye, EyeOff,
+  BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
 } from "lucide-react";
-import { adminApi } from "../api/client";
+import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Input from "../components/ui/Input";
@@ -1403,6 +1403,122 @@ function LiveEventsTab() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Tab: Settings — system-wide admin toggles
+// ──────────────────────────────────────────────────────────────────────────
+
+function SettingsTab() {
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState("");
+  const [saving, setSaving]     = useState({});       // { [key]: true } per row
+
+  async function load() {
+    setLoading(true); setError("");
+    try {
+      setSettings(await api.adminListSettings());
+    } catch (e) {
+      setError(e.message || "Failed to load settings");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function update(key, value) {
+    setSaving(s => ({ ...s, [key]: true }));
+    setError("");
+    try {
+      await api.adminUpdateSetting(key, value);
+      await load();
+    } catch (e) {
+      setError(e.message || `Failed to update ${key}`);
+    } finally {
+      setSaving(s => { const n = { ...s }; delete n[key]; return n; });
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-gray-500 p-6">
+        <Loader2 size={14} className="animate-spin" /> Loading settings…
+      </div>
+    );
+  }
+
+  const provider = settings?.upload_provider;
+
+  return (
+    <div className="p-6 max-w-4xl space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-100 flex items-center gap-2 mb-1">
+          <SettingsIcon size={18} className="text-accent2" /> System settings
+        </h2>
+        <p className="text-xs text-gray-500">
+          Global toggles applied across the whole tenant.
+          Visible only to admins; non-admins always see the default behaviour.
+        </p>
+      </div>
+
+      {error && (
+        <div className="bg-red-950/40 border border-red-900/60 text-red-300 text-xs px-3 py-2 rounded flex items-start gap-2">
+          <AlertCircle size={12} className="mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* upload_provider toggle */}
+      {provider && (
+        <div className="bg-surface border border-border rounded-lg p-4">
+          <div className="flex items-start gap-3 mb-3">
+            <YoutubeIcon size={18} className="text-red-400 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-semibold text-gray-100">Upload provider</h3>
+              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                {provider.description}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 max-w-md">
+            {provider.options.map((opt) => {
+              const active = provider.value === opt;
+              const busy = !!saving.upload_provider;
+              return (
+                <button
+                  key={opt}
+                  onClick={() => !active && update("upload_provider", opt)}
+                  disabled={busy}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-md border text-xs font-medium transition-colors ${
+                    active
+                      ? opt === "postiz"
+                        ? "bg-purple-600/20 border-purple-500 text-purple-200"
+                        : "bg-accent/20 border-accent text-accent2"
+                      : "bg-black/30 border-border text-gray-400 hover:border-gray-500"
+                  } disabled:opacity-50`}
+                >
+                  {opt === "postiz" ? <Globe size={12} /> : <YoutubeIcon size={12} />}
+                  {opt === "postiz" ? "Postiz" : "Kaizer (native)"}
+                  {active && <CheckCircle2 size={12} />}
+                  {busy && active && <Loader2 size={12} className="animate-spin" />}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-[10px] text-gray-600 mt-3 leading-relaxed">
+            Default: <strong className="text-gray-400">{provider.default}</strong>.
+            Currently active: <strong className={`text-${provider.value === "postiz" ? "purple" : "accent2"}-300`}>{provider.value}</strong>.
+            Change applies to new publish jobs immediately;
+            already-queued jobs use whichever provider was active at pickup time.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ──────────────────────────────────────────────────────────────────────────
 // Tab: Audit log
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1481,13 +1597,14 @@ function AuditTab() {
 // ──────────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { path: "overview", label: "Overview",    icon: Activity,  comp: OverviewTab   },
-  { path: "system",   label: "System",      icon: Cpu,       comp: SystemTab     },
-  { path: "users",    label: "Users",       icon: Users,     comp: UsersTab      },
-  { path: "jobs",     label: "Jobs",        icon: Briefcase, comp: JobsTab       },
-  { path: "gemini",   label: "Gemini usage",icon: Sparkles,  comp: GeminiTab     },
-  { path: "live",     label: "Live events", icon: Radio,     comp: LiveEventsTab },
-  { path: "audit",    label: "Audit log",   icon: Shield,    comp: AuditTab      },
+  { path: "overview", label: "Overview",    icon: Activity,    comp: OverviewTab   },
+  { path: "system",   label: "System",      icon: Cpu,         comp: SystemTab     },
+  { path: "users",    label: "Users",       icon: Users,       comp: UsersTab      },
+  { path: "jobs",     label: "Jobs",        icon: Briefcase,   comp: JobsTab       },
+  { path: "gemini",   label: "Gemini usage",icon: Sparkles,    comp: GeminiTab     },
+  { path: "live",     label: "Live events", icon: Radio,       comp: LiveEventsTab },
+  { path: "settings", label: "Settings",    icon: SettingsIcon, comp: SettingsTab  },
+  { path: "audit",    label: "Audit log",   icon: Shield,      comp: AuditTab      },
 ];
 
 function AdminSidebar() {
