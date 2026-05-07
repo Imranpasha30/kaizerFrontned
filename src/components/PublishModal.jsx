@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import Modal from "./Modal";
+import PostizCrossPostSection from "./PostizCrossPostSection";
+import { useAuth } from "../auth/AuthProvider";
 
 /**
  * Publish-to-YouTube modal.
@@ -17,6 +19,14 @@ import Modal from "./Modal";
  *   onPublished - (uploadJob) => void  (parent can navigate to /uploads)
  */
 export default function PublishModal({ open, onClose, clip, jobId, onPublished }) {
+  const { user } = useAuth();
+  // Admin-only Postiz cross-post state. Holds the set of Postiz
+  // integration IDs the admin ticked plus the caption to send. Empty
+  // for non-admins (the section never renders) and ignored otherwise.
+  const [postizState, setPostizState] = useState({
+    selectedIds: new Set(),
+    text: "",
+  });
   const [channels, setChannels] = useState([]);
   const [loadingCh, setLoadingCh] = useState(false);
   // channelId = "primary" profile used for SEO + style; still needed for the
@@ -315,6 +325,35 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     try {
       setSubmitting(true);
       const res = await api.publishClip(clip.id, payload);
+      // Fire the Postiz cross-post AFTER the YouTube call returns OK.
+      // We deliberately do not unwind YouTube on a Postiz failure —
+      // the user clicked Publish to YouTube primarily, and Postiz is
+      // a bonus that is allowed to fail soft.
+      if (user?.is_admin && postizState.selectedIds.size > 0) {
+        try {
+          // Use the R2 storage_url Kaizer already wrote so Postiz can
+          // fetch the bytes server-side. Falls back to the local
+          // /api/file URL only when storage_url is empty.
+          const mediaUrl = clip.storage_url || (clip.video_url ? api.mediaUrl(clip.video_url) : "");
+          await api.postizSchedule({
+            integration_ids: Array.from(postizState.selectedIds),
+            text: postizState.text || (clip?.seo?.title || ""),
+            media_url: mediaUrl,
+            type: needsPrivateForSchedule ? "scheduled" : "now",
+            schedule_at_iso: needsPrivateForSchedule
+              ? new Date(publishAt).toISOString()
+              : null,
+          });
+        } catch (postizErr) {
+          // Soft fail: YouTube publish already succeeded. Surface a
+          // non-blocking warning so the admin knows to check Postiz.
+          console.warn("Postiz cross-post failed:", postizErr);
+          setError(
+            `YouTube upload queued. Postiz cross-post failed: ${postizErr.message || postizErr}`
+          );
+          // Don't return — let onPublished + onClose still fire.
+        }
+      }
       onPublished?.(res);
       onClose?.();
     } catch (err) {
@@ -720,6 +759,18 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
               </span>
             )}
           </div>
+        )}
+
+        {/* Postiz cross-post — admin-only, hidden for regular users
+            until each platform's verification is complete. Backend
+            also enforces is_admin on every Postiz endpoint, so this
+            UI being conditionally mounted is just polish. */}
+        {user?.is_admin && (
+          <PostizCrossPostSection
+            value={postizState}
+            onChange={setPostizState}
+            defaultText={clip?.seo?.title || ""}
+          />
         )}
 
         {/* Actions */}

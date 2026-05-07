@@ -179,6 +179,13 @@ export const api = {
         `/channels/${channelId}/destinations/${encodeURIComponent(googleChannelId)}`,
         { enabled: !!enabled }),
 
+  // ── Postiz (admin-only cross-post scheduler) ────────────────────────
+  // Backend gate: auth.admin_required → non-admins get 401 + nothing
+  // leaks. Frontend also hides the UI for non-admins (belt + braces).
+  postizStatus:        ()           => req("GET",  "/postiz/status"),
+  postizIntegrations:  ()           => req("GET",  "/postiz/integrations"),
+  postizSchedule:      (payload)    => req("POST", "/postiz/schedule", payload),
+
   // Publish / Uploads (phase 5)
   publishClip:    (clipId, payload) => req("POST",   `/clips/${clipId}/publish`, payload),
   listUploads:    (opts = {})       => {
