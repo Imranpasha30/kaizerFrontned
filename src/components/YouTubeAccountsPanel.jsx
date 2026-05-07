@@ -26,6 +26,9 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
   // Per-account disconnect spinner: { [primary_profile_id]: true } while
   // calling DELETE /api/youtube/oauth/{id}
   const [disconnectingIds, setDisconnectingIds] = useState({});
+  // Per-destination toggle spinner: { "<profile_id>:<gci>": true } while
+  // calling PATCH /channels/{id}/destinations/{gci}
+  const [togglingIds, setTogglingIds] = useState({});
   // Logo editor modal state — which YT account is being edited
   const [logoAcc, setLogoAcc]     = useState(null);        // the acc object or null
   const [logoValue, setLogoValue] = useState(null);        // pending asset id (or null)
@@ -70,6 +73,54 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
       setError(e.message || "Refresh failed");
     } finally {
       setRefreshingIds((m) => { const n = { ...m }; delete n[key]; return n; });
+    }
+  }
+
+  // Toggle one Brand Account (sibling destination) on/off as a publish
+  // target for the primary profile that owns this Google OAuth token.
+  async function handleToggleDestination(acc, dest, nextEnabled) {
+    if (!acc?.primary_profile_id || !dest?.google_channel_id) return;
+    const key = `${acc.primary_profile_id}:${dest.google_channel_id}`;
+    setTogglingIds((m) => ({ ...m, [key]: true }));
+    setError(""); setNotice("");
+    // Optimistic UI update — flip the local row immediately so the
+    // user sees feedback before the round-trip resolves.
+    setAccounts((list) => list.map((a) => (
+      a.primary_profile_id === acc.primary_profile_id
+        ? {
+            ...a,
+            available_destinations: (a.available_destinations || []).map((d) =>
+              d.google_channel_id === dest.google_channel_id
+                ? { ...d, enabled: nextEnabled }
+                : d
+            ),
+          }
+        : a
+    )));
+    try {
+      await api.toggleProfileDestination(
+        acc.primary_profile_id,
+        dest.google_channel_id,
+        nextEnabled,
+      );
+      setNotice(`${nextEnabled ? "Enabled" : "Disabled"} ${dest.title || dest.google_channel_id} as a publish destination.`);
+    } catch (e) {
+      // Roll back optimistic update on failure
+      setAccounts((list) => list.map((a) => (
+        a.primary_profile_id === acc.primary_profile_id
+          ? {
+              ...a,
+              available_destinations: (a.available_destinations || []).map((d) =>
+                d.google_channel_id === dest.google_channel_id
+                  ? { ...d, enabled: !nextEnabled }
+                  : d
+              ),
+            }
+          : a
+      )));
+      setError(e.message || "Failed to update destination");
+    } finally {
+      setTogglingIds((m) => { const n = { ...m }; delete n[key]; return n; });
     }
   }
 
@@ -172,6 +223,20 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Each row is a real YouTube channel you can publish to. Sign in with a different Google account to add another.
+          </p>
+          {/*
+            Most users instinctively pick a Brand Account row in
+            Google's picker, which limits OAuth to that single
+            channel. Picking the parent Gmail instead returns ALL
+            Brand Accounts in one grant — that's what populates the
+            multi-channel picker per card. This hint nudges them to
+            do the right thing.
+          */}
+          <p className="text-[11px] text-yellow-400/80 mt-1.5 leading-relaxed">
+            <strong>Tip:</strong> in Google's picker, pick your Gmail
+            (the parent account) to connect all your Brand Accounts in
+            <strong> one click</strong>. Picking a Brand row only
+            connects that single channel.
           </p>
         </div>
         <div className="flex gap-2">
@@ -309,6 +374,67 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                     {acc.logo?.url ? "change" : "set"}
                   </button>
                 </div>
+
+                {/* Brand Accounts on this Google login — multi-channel
+                    picker. Populated by exchange_code at OAuth time so
+                    every Brand Account the email owns appears here as
+                    a toggleable publish destination. The primary
+                    channel itself is intentionally excluded (it's the
+                    card heading; can't be turned off without
+                    disconnecting the whole OAuth). */}
+                {acc.available_destinations
+                  && acc.available_destinations.filter(d => !d.is_primary).length > 0 && (
+                  <div className="border-t border-border/60 pt-2 mb-2">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5 flex items-center gap-1.5">
+                      <Users size={10} />
+                      Brand accounts on this Google login
+                    </div>
+                    <div className="space-y-1">
+                      {acc.available_destinations
+                        .filter(d => !d.is_primary)
+                        .map(d => {
+                          const tKey = `${acc.primary_profile_id}:${d.google_channel_id}`;
+                          const busy = !!togglingIds[tKey];
+                          return (
+                            <div key={d.google_channel_id}
+                                 className="flex items-center gap-2 p-1.5 rounded bg-black/30 border border-border/40">
+                              {d.thumbnail_url ? (
+                                <img src={d.thumbnail_url}
+                                     className="w-6 h-6 rounded-full bg-black/40 object-cover flex-shrink-0"
+                                     alt={d.title}
+                                     onError={(e) => { e.target.style.display = "none"; }} />
+                              ) : (
+                                <Youtube size={12} className="text-red-500/70 flex-shrink-0" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[11px] text-gray-200 truncate" title={d.title}>
+                                  {d.title || d.google_channel_id}
+                                </div>
+                                <div className="text-[10px] text-gray-500 truncate">
+                                  {fmtN(d.subscriber_count)} subs · {fmtN(d.video_count)} videos
+                                </div>
+                              </div>
+                              <label
+                                className={`inline-flex items-center cursor-pointer flex-shrink-0 ${busy ? 'opacity-50 cursor-wait' : ''}`}
+                                title={d.enabled ? "Disable as publish destination" : "Enable as publish destination"}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="sr-only peer"
+                                  checked={!!d.enabled}
+                                  disabled={busy}
+                                  onChange={(e) => handleToggleDestination(acc, d, e.target.checked)}
+                                />
+                                <div className={`w-9 h-5 ${d.enabled ? 'bg-green-600' : 'bg-gray-700'} rounded-full relative transition-colors`}>
+                                  <div className={`absolute top-0.5 ${d.enabled ? 'left-[1.125rem]' : 'left-0.5'} w-4 h-4 bg-white rounded-full transition-all`}></div>
+                                </div>
+                              </label>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="border-t border-border/60 pt-2">
                   <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">

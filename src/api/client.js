@@ -171,6 +171,14 @@ export const api = {
     req("PUT", `/channels/${channelId}/destinations`,
         { google_channel_ids: googleChannelIds }),
 
+  // Toggle one Brand Account destination on/off without rewriting the
+  // whole list. Used by the multi-channel picker after OAuth so users
+  // can deselect Brand Accounts they don't want to publish to.
+  toggleProfileDestination: (channelId, googleChannelId, enabled) =>
+    req("PATCH",
+        `/channels/${channelId}/destinations/${encodeURIComponent(googleChannelId)}`,
+        { enabled: !!enabled }),
+
   // Publish / Uploads (phase 5)
   publishClip:    (clipId, payload) => req("POST",   `/clips/${clipId}/publish`, payload),
   listUploads:    (opts = {})       => {
