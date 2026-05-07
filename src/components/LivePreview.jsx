@@ -40,8 +40,20 @@ export default function LivePreview({
   width = 270, // preview container width
 }) {
   const videoRef = useRef(null);
-  const h = Math.round(width * (1920 / 1080));
-  const scale = width / 1080;
+  // Aspect ratio depends on frame_type — bulletin is 16:9 (1920×1080
+  // long-form for YouTube Full), every other frame is 9:16 Shorts.
+  // Without this branch, bulletin clips would render in a portrait
+  // box and the user would only see the centre column of the video,
+  // missing the lower-third / sidebar / ticker entirely.
+  const isLongForm = frameType === "bulletin";
+  const baseW = isLongForm ? 1920 : 1080;
+  const baseH = isLongForm ? 1080 : 1920;
+  // For long-form let the user pick a roomier preview width so the
+  // 16:9 frame is actually readable; the prop default is tuned for
+  // 9:16 Shorts.
+  const previewW = isLongForm ? Math.max(width, 480) : width;
+  const h = Math.round(previewW * (baseH / baseW));
+  const scale = previewW / baseW;
   const fontFamily = getFontFamily(fontFile || "Ponnala-Regular.ttf");
 
   // Autoplay policy: browsers only allow unmuted autoplay after a user gesture.
@@ -77,15 +89,20 @@ export default function LivePreview({
         />
       );
     }
-    // Fallback: just show video with native controls
+    // Fallback: bulletin / long-form / unknown frame types — play the
+    // composed video at its full aspect with native controls. Uses
+    // `contain` so the 16:9 bulletin output (TV9 lower-third + sidebar
+    // + ticker) is fully visible, not centre-cropped to 9:16.
     return (
-      <div style={{ width, height: h, background: "#000", borderRadius: 6, overflow: "hidden" }}>
+      <div style={{ width: previewW, height: h, background: "#000",
+                     borderRadius: 6, overflow: "hidden" }}>
         {srcUrl && (
           <video
             src={srcUrl}
             controls loop playsInline autoPlay
             muted={!audioOn}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ width: "100%", height: "100%",
+                     objectFit: isLongForm ? "contain" : "cover" }}
           />
         )}
       </div>

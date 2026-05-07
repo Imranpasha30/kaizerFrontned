@@ -15,8 +15,12 @@ export default function ClipCard({ clip, jobId, index }) {
 
   return (
     <div className="card overflow-hidden group hover:border-border-hover transition-all duration-150">
-      {/* Thumbnail */}
-      <div className="relative bg-black" style={{ aspectRatio: "9/16" }}>
+      {/* Thumbnail — 16:9 for the bulletin (long-form YouTube Full
+          output, 1920×1080), 9:16 for everything else (Shorts). */}
+      <div
+        className="relative bg-black"
+        style={{ aspectRatio: clip.frame_type === "bulletin" ? "16/9" : "9/16" }}
+      >
         {thumbUrl ? (
           <img
             src={thumbUrl}

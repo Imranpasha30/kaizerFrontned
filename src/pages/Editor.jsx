@@ -289,9 +289,10 @@ export default function Editor() {
             ${i === curIdx ? "border-accent" : "border-transparent hover:border-gray-600"}`}
         >
           {c.thumb_url ? (
-            <img src={api.bustCache(api.mediaUrl(c.thumb_url), imgTs)} alt="" className="w-full aspect-[9/16] object-cover block" />
+            <img src={api.bustCache(api.mediaUrl(c.thumb_url), imgTs)} alt=""
+                 className={`w-full ${c.frame_type === "bulletin" ? "aspect-[16/9]" : "aspect-[9/16]"} object-cover block`} />
           ) : (
-            <div className="w-full aspect-[9/16] bg-surface flex items-center justify-center text-gray-600 text-xs">
+            <div className={`w-full ${c.frame_type === "bulletin" ? "aspect-[16/9]" : "aspect-[9/16]"} bg-surface flex items-center justify-center text-gray-600 text-xs`}>
               {i + 1}
             </div>
           )}
