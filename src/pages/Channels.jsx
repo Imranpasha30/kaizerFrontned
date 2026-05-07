@@ -12,6 +12,16 @@ import YouTubeAccountsPanel from "../components/YouTubeAccountsPanel";
 import ChannelGroupsManager from "../components/ChannelGroupsManager";
 
 export default function Channels() {
+  // Two-tab layout: "accounts" = real YouTube accounts we publish to,
+  // "styles" = style references (Gemini SEO templates that never
+  // upload anywhere). Defaults to "accounts" because that's what
+  // most users come here for; URL hash #styles deep-links to the
+  // style-references tab so docs / onboarding emails can drop a
+  // direct link.
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== "undefined" && window.location.hash === "#styles") return "styles";
+    return "accounts";
+  });
   const [channels, setChannels]   = useState([]);
   const [loading,  setLoading]    = useState(true);
   const [error,    setError]      = useState("");
@@ -217,10 +227,14 @@ export default function Channels() {
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-100 flex items-center gap-2">
-            <Palette className="text-accent2" size={24} /> Style Profiles
+            {activeTab === "accounts"
+              ? <><Youtube className="text-red-500" size={24} /> My YouTube Accounts</>
+              : <><Palette className="text-accent2" size={24} /> Style References</>}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Each profile is a <strong className="text-gray-300">writing style template</strong> that teaches Gemini how to generate SEO (titles, hashtags, descriptions) in that channel's voice.
+            {activeTab === "accounts"
+              ? <>Real YouTube channels Kaizer can publish to. Connect via Google OAuth — pick your <strong className="text-gray-300">parent Gmail</strong> in the picker to grab every Brand Account in one click.</>
+              : <>Each profile is a <strong className="text-gray-300">writing style template</strong> that teaches Gemini how to generate SEO (titles, hashtags, descriptions) in that channel's voice. References do <strong>not</strong> upload anywhere — they style the SEO only.</>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -232,35 +246,80 @@ export default function Channels() {
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
-          <button
-            onClick={() => setModal({ mode: "create" })}
-            className="bg-accent hover:bg-accent2 text-white text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
-          >
-            <Plus size={14} /> New Profile
-          </button>
+          {activeTab === "styles" && (
+            <button
+              onClick={() => setModal({ mode: "create" })}
+              className="bg-accent hover:bg-accent2 text-white text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+            >
+              <Plus size={14} /> New Style Reference
+            </button>
+          )}
         </div>
       </header>
 
-      {/* Unique YouTube accounts — the real destinations */}
-      <YouTubeAccountsPanel oauthConfigured={oauthState.configured} onRefresh={load} />
+      {/* Tab bar — splits the two concerns that used to be mixed:
+          (1) connecting our own YouTube accounts where we PUBLISH,
+          (2) style references for SEO that teach Gemini to write in
+              other channels' voices but never upload anywhere. Mixing
+              them on one page made users connect TV9 Telugu thinking
+              they'd publish to TV9 — they can't, no one outside Google
+              can. Tabs make the boundary obvious. */}
+      <div className="flex border-b border-border mb-5">
+        <button
+          onClick={() => setActiveTab("accounts")}
+          className={`px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-1.5 -mb-px border-b-2 ${
+            activeTab === "accounts"
+              ? "text-red-300 border-red-500"
+              : "text-gray-500 border-transparent hover:text-gray-300"
+          }`}
+        >
+          <Youtube size={14} />
+          My accounts
+          <span className="ml-1 text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-gray-400">
+            {ytAccounts?.length || 0}
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveTab("styles")}
+          className={`px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-1.5 -mb-px border-b-2 ${
+            activeTab === "styles"
+              ? "text-accent2 border-accent2"
+              : "text-gray-500 border-transparent hover:text-gray-300"
+          }`}
+        >
+          <Palette size={14} />
+          Style references
+          <span className="ml-1 text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-gray-400">
+            {channels?.length || 0}
+          </span>
+        </button>
+      </div>
 
-      {/* Channel groups — user-defined presets for publish fan-out */}
-      <ChannelGroupsManager ytAccounts={ytAccounts} />
+      {activeTab === "accounts" && (
+        <>
+          {/* Unique YouTube accounts — the real destinations */}
+          <YouTubeAccountsPanel oauthConfigured={oauthState.configured} onRefresh={load} />
 
-      {/* How it works explainer */}
-      <div className="mb-5 p-3 bg-blue-950/20 border border-blue-900/40 rounded text-xs text-gray-300 leading-relaxed">
-        <div className="flex items-start gap-2">
-          <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <strong className="text-blue-300">How this works:</strong> Profile names (TV9 Telugu, RTV, etc.) are just
-            <strong className="text-gray-100"> style references</strong> — they tell Gemini to write like those channels.
-            When you click <strong className="text-gray-100">Connect</strong>, Google authorizes the app to upload to
-            <strong className="text-gray-100"> your own YouTube channel</strong> (whichever account you sign in with).
-            A clip rendered with the "TV9 Telugu" profile will have TV9-style SEO but will be posted to
-            <strong className="text-gray-100"> your channel</strong>, not TV9's. You cannot upload to a YouTube channel you don't own.
+          {/* Channel groups — user-defined presets for publish fan-out */}
+          <ChannelGroupsManager ytAccounts={ytAccounts} />
+        </>
+      )}
+
+      {activeTab === "styles" && (
+        <div className="mb-5 p-3 bg-blue-950/20 border border-blue-900/40 rounded text-xs text-gray-300 leading-relaxed">
+          <div className="flex items-start gap-2">
+            <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <strong className="text-blue-300">How style references work:</strong>{" "}
+              Style profiles ("TV9 Telugu", "RTV", etc.) are{" "}
+              <strong className="text-gray-100">writing-style templates</strong>, not channels you publish to. They tell
+              Gemini "write SEO like this channel does." A clip rendered with TV9 Telugu's style ends up on{" "}
+              <strong className="text-gray-100">your own channel</strong> — picked in the publish modal — with TV9-style
+              titles, descriptions, and hashtags. You can never upload to a YouTube channel you don't own.
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {error && (
         <div className="bg-red-950/50 border border-red-900 text-red-300 px-3 py-2 rounded text-sm mb-4 flex items-start gap-2">
@@ -274,7 +333,7 @@ export default function Channels() {
           <span>{notice}</span>
         </div>
       )}
-      {selected.size > 0 && (
+      {activeTab === "styles" && selected.size > 0 && (
         <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-3 bg-[#1a0f0f]/95 backdrop-blur border-y border-red-900/50 flex items-center gap-3">
           <button
             onClick={clearSelection}
@@ -316,43 +375,45 @@ export default function Channels() {
         </div>
       )}
 
-      {loading && channels.length === 0 ? (
-        <div className="flex items-center justify-center py-16 text-gray-500">
-          <Loader2 size={20} className="animate-spin mr-2" /> Loading channels…
-        </div>
-      ) : channels.length === 0 ? (
-        <div className="bg-surface border border-border rounded-lg p-12 text-center">
-          <Palette size={40} className="mx-auto text-gray-600 mb-3" />
-          <p className="text-gray-400 mb-4">No profiles yet. Create one to define your SEO writing style.</p>
-          <button
-            onClick={() => setModal({ mode: "create" })}
-            className="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded inline-flex items-center gap-1.5"
-          >
-            <Plus size={14} /> New Profile
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {channels.map((ch) => (
-            <ChannelCard
-              key={ch.id}
-              channel={ch}
-              selected={selected.has(ch.id)}
-              onToggleSelect={() => toggleSelect(ch.id)}
-              oauthConfigured={oauthState.configured}
-              connecting={connectingId === ch.id}
-              learning={learningId === ch.id}
-              corpus={corpora[ch.id] || null}
-              ytAccounts={ytAccounts}
-              onSavedDestinations={() => load()}
-              onConnect={() => handleConnect(ch)}
-              onDisconnect={() => handleDisconnect(ch)}
-              onLearn={() => handleLearn(ch)}
-              onEdit={() => setModal({ mode: "edit", channel: ch })}
-              onDelete={() => handleDelete(ch)}
-            />
-          ))}
-        </div>
+      {activeTab === "styles" && (
+        loading && channels.length === 0 ? (
+          <div className="flex items-center justify-center py-16 text-gray-500">
+            <Loader2 size={20} className="animate-spin mr-2" /> Loading style references…
+          </div>
+        ) : channels.length === 0 ? (
+          <div className="bg-surface border border-border rounded-lg p-12 text-center">
+            <Palette size={40} className="mx-auto text-gray-600 mb-3" />
+            <p className="text-gray-400 mb-4">No style references yet. Create one to define a SEO writing voice (e.g. "TV9 Telugu", "RTV").</p>
+            <button
+              onClick={() => setModal({ mode: "create" })}
+              className="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded inline-flex items-center gap-1.5"
+            >
+              <Plus size={14} /> New Style Reference
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {channels.map((ch) => (
+              <ChannelCard
+                key={ch.id}
+                channel={ch}
+                selected={selected.has(ch.id)}
+                onToggleSelect={() => toggleSelect(ch.id)}
+                oauthConfigured={oauthState.configured}
+                connecting={connectingId === ch.id}
+                learning={learningId === ch.id}
+                corpus={corpora[ch.id] || null}
+                ytAccounts={ytAccounts}
+                onSavedDestinations={() => load()}
+                onConnect={() => handleConnect(ch)}
+                onDisconnect={() => handleDisconnect(ch)}
+                onLearn={() => handleLearn(ch)}
+                onEdit={() => setModal({ mode: "edit", channel: ch })}
+                onDelete={() => handleDelete(ch)}
+              />
+            ))}
+          </div>
+        )
       )}
 
       <Modal
