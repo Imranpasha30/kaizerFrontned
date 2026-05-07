@@ -186,6 +186,13 @@ export const api = {
   postizIntegrations:  ()           => req("GET",  "/postiz/integrations"),
   postizSchedule:      (payload)    => req("POST", "/postiz/schedule", payload),
 
+  // ── YouTube channel lookup (powers the Style References search) ─────
+  // Paste a handle (@TV9Telugu), channel ID (UC…), URL, or free text →
+  // backend hits the YouTube Data API and returns name / handle /
+  // language / thumbnail / sub-count / etc. so the form auto-fills.
+  ytLookup:        (q)         => req("GET", `/yt-lookup/?q=${encodeURIComponent(q)}`),
+  ytLookupSearch:  (q, limit=5) => req("GET", `/yt-lookup/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+
   // Publish / Uploads (phase 5)
   publishClip:    (clipId, payload) => req("POST",   `/clips/${clipId}/publish`, payload),
   listUploads:    (opts = {})       => {

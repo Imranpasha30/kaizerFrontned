@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Save, Loader2, Tag, Hash, Star } from "lucide-react";
+import { Save, Loader2, Tag, Hash, Star, Search, AlertCircle, Youtube, CheckCircle2 } from "lucide-react";
 import TagInput from "./TagInput";
 import LogoPicker from "./LogoPicker";
+import { api } from "../api/client";
 
 const DESC_STYLES = [
   { value: "hook_first",     label: "Hook First — open with the viral sentence" },
@@ -92,6 +93,17 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
           {error}
         </div>
       )}
+
+      <YouTubeChannelLookup
+        onApply={(found) => {
+          // Best-effort auto-fill: name / handle / language. We don't
+          // overwrite custom user fields (titleFormula, footer, hashtags
+          // — those are voice/style choices the user defines).
+          if (found.name) setName(found.name);
+          if (found.handle) setHandle(found.handle);
+          if (found.language) setLanguage(found.language);
+        }}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="block">
@@ -232,5 +244,130 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         </button>
       </div>
     </form>
+  );
+}
+
+
+/**
+ * Drop a handle / channel ID / URL / free-text query → backend hits
+ * the YouTube Data API → preview card with Apply button.
+ *
+ * Visual states:
+ *   idle          — input only
+ *   loading       — spinner replaces button label
+ *   error         — red banner under input
+ *   single result — preview card with thumbnail + sub count + Apply
+ *   no match      — gray "no match" notice
+ *
+ * The component never writes to the parent form directly — onApply
+ * carries the normalized dict so the parent decides which fields to
+ * populate (we don't clobber user edits to title_formula / footer).
+ */
+function YouTubeChannelLookup({ onApply }) {
+  const [q, setQ]            = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]    = useState("");
+  const [result, setResult]  = useState(null);
+
+  function fmtN(n) {
+    if (!n || n < 1000) return String(n || 0);
+    if (n < 1e6) return (n / 1e3).toFixed(n < 1e4 ? 1 : 0) + "K";
+    if (n < 1e9) return (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + "M";
+    return (n / 1e9).toFixed(1) + "B";
+  }
+
+  async function lookup() {
+    const v = q.trim();
+    if (!v) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      const found = await api.ytLookup(v);
+      setResult(found);
+    } catch (e) {
+      setError(e.message || "Lookup failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="bg-blue-950/15 border border-blue-900/40 rounded-md p-3 mb-2">
+      <div className="text-xs font-medium text-blue-300 flex items-center gap-2 mb-2">
+        <Youtube size={13} className="text-red-400" />
+        Auto-fill from YouTube
+        <span className="ml-auto text-[10px] text-blue-400/60 font-normal">
+          paste a handle, channel ID, or URL
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();   // form submit hijack — only do lookup
+                lookup();
+              }
+            }}
+            placeholder="@TV9Telugu  ·  UCxxxxx  ·  youtube.com/@Channel"
+            className="w-full bg-black/40 border border-border rounded pl-8 pr-2.5 py-1.5 text-sm text-gray-100 focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={lookup}
+          disabled={loading || !q.trim()}
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-medium px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
+        >
+          {loading
+            ? <><Loader2 size={11} className="animate-spin" /> Looking up…</>
+            : <><Search size={11} /> Lookup</>}
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-2 text-[11px] text-red-300 flex items-start gap-1">
+          <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-2 flex items-center gap-3 p-2 rounded bg-black/40 border border-blue-900/30">
+          {result.thumbnail_url ? (
+            <img src={result.thumbnail_url}
+                 alt={result.name}
+                 className="w-12 h-12 rounded-full bg-black/40 object-cover flex-shrink-0"
+                 onError={(e) => { e.target.style.display = "none"; }} />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-blue-900/40 flex items-center justify-center flex-shrink-0">
+              <Youtube size={18} className="text-red-400" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-gray-100 truncate">{result.name || "(no name)"}</div>
+            <div className="text-[10px] text-gray-500 truncate">
+              {result.handle && <span className="text-blue-300">{result.handle}</span>}
+              {result.handle && (result.subscriber_count > 0 || result.video_count > 0) && <span> · </span>}
+              {result.subscriber_count > 0 && <span>{fmtN(result.subscriber_count)} subs</span>}
+              {result.video_count > 0 && <span> · {fmtN(result.video_count)} videos</span>}
+              {result.country && <span> · {result.country}</span>}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onApply?.(result)}
+            className="bg-green-600 hover:bg-green-500 text-white text-[11px] font-medium px-2.5 py-1.5 rounded inline-flex items-center gap-1 flex-shrink-0"
+          >
+            <CheckCircle2 size={11} /> Use this
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
