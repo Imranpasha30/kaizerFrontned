@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
-  Radar, Zap, User, LogOut, LogIn, UserPlus, Image as ImageIcon,
+  Radar, Zap, LogOut, LogIn, UserPlus, Image as ImageIcon,
   Settings as SettingsIcon, CreditCard, Radio, Shield,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
@@ -12,11 +12,15 @@ export default function NavBar() {
   const loc  = useLocation();
   const nav  = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
+  // Drawer state — only used on mobile (sidebar is always visible on ≥sm).
   const [open, setOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
 
-  // Close user menu on outside click
+  // Close drawer on every route change so taps don't leave it stuck open.
+  useEffect(() => { setOpen(false); }, [loc.pathname]);
+
+  // Close user menu on outside click.
   useEffect(() => {
     if (!userMenuOpen) return;
     function onClick(e) {
@@ -28,30 +32,21 @@ export default function NavBar() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [userMenuOpen]);
 
-  const active = (path) => {
-    // /admin should stay highlighted for any nested /admin/* tab.
-    const match = path === "/admin"
-      ? loc.pathname.startsWith("/admin")
-      : loc.pathname === path;
-    return match
-      ? "text-accent2 border-b-2 border-accent2"
-      : "text-gray-400 hover:text-gray-200";
-  };
+  const isActive = (path) =>
+    path === "/admin" ? loc.pathname.startsWith("/admin") : loc.pathname === path;
 
   const navLinks = [
     { to: "/app",           icon: Home,        label: "Jobs" },
     { to: "/new",           icon: Plus,        label: "New Job" },
     { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
-    { to: "/live",          icon: Radio,       label: "Live",    badge: "NEW" },
+    { to: "/live",          icon: Radio,       label: "Live", badge: "NEW" },
     { to: "/assets",        icon: ImageIcon,   label: "Assets" },
     { to: "/channels",      icon: Palette,     label: "Style Profiles" },
     { to: "/uploads",       icon: UploadCloud, label: "Uploads" },
     { to: "/campaigns",     icon: Megaphone,   label: "Campaigns" },
     { to: "/performance",   icon: BarChart3,   label: "Performance" },
     { to: "/trending",      icon: Radar,       label: "Trending" },
-    // Admin link — appears last in the nav row (immediately before the
-    // user-menu cluster on the right). Rendered only for admins.
-    ...(user?.is_admin ? [{ to: "/admin", icon: Shield, label: "Admin", adminOnly: true }] : []),
+    ...(user?.is_admin ? [{ to: "/admin", icon: Shield, label: "Admin" }] : []),
   ];
 
   const displayName = user?.name?.trim() || user?.email?.split("@")[0] || "Account";
@@ -63,150 +58,165 @@ export default function NavBar() {
     nav("/login", { replace: true });
   }
 
-  return (
-    <header className="bg-[#0a0a0a] border-b-2 border-accent flex-shrink-0 relative z-50">
-      <div className="max-w-8xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
-        {/* Logo — links to the authenticated dashboard */}
-        <Link to="/app" className="flex items-center gap-2 flex-shrink-0">
-          <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
-            KAIZER
-          </div>
-          <span className="text-gray-400 text-sm font-medium tracking-wider hidden sm:inline">
-            NEWS
-          </span>
-        </Link>
-
-        {/* Desktop nav */}
-        <nav className="hidden sm:flex items-center gap-4 text-sm font-medium">
-          {navLinks.map(({ to, icon: Icon, label, badge }) => (
-            <Link key={to} to={to} className={`flex items-center gap-1.5 pb-0.5 ${active(to)}`}>
-              <Icon size={14} /> {label}
-              {badge && <span className="beta-badge">{badge}</span>}
-            </Link>
-          ))}
-        </nav>
-
-        {/* Right cluster: theme toggle + user menu + mobile toggle */}
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          {isAuthenticated ? (
-            <div ref={userMenuRef} className="relative">
-              <button
-                onClick={() => setUserMenuOpen((v) => !v)}
-                className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 text-gray-200"
-                title={user?.email}
-              >
-                <span className="w-6 h-6 rounded-full bg-accent2 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
-                  {avatarLetter}
-                </span>
-                <span className="hidden md:inline text-xs font-medium max-w-[120px] truncate">
-                  {displayName}
-                </span>
-              </button>
-              {userMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 w-56 bg-[#0c0c0c] border border-border rounded shadow-xl py-1 z-50">
-                  <div className="px-3 py-2 border-b border-border">
-                    <div className="text-sm text-gray-100 font-medium truncate">{displayName}</div>
-                    <div className="text-[11px] text-gray-500 truncate">{user?.email}</div>
-                    {user?.google && (
-                      <div className="text-[10px] text-accent2 mt-0.5">Signed in with Google</div>
-                    )}
-                  </div>
-                  <Link
-                    to="/settings"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
-                  >
-                    <SettingsIcon size={13} /> Settings & social links
-                  </Link>
-                  <Link
-                    to="/billing"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
-                  >
-                    <CreditCard size={13} /> Billing & Plans
-                  </Link>
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
-                  >
-                    <LogOut size={13} /> Sign out
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="hidden sm:flex items-center gap-1.5">
-              <Link
-                to="/login"
-                className="text-xs text-gray-300 hover:text-white px-2 py-1 rounded hover:bg-white/5 flex items-center gap-1"
-              >
-                <LogIn size={12} /> Sign in
-              </Link>
-              <Link
-                to="/register"
-                className="text-xs bg-accent hover:bg-accent2 text-white font-medium px-2.5 py-1 rounded flex items-center gap-1"
-              >
-                <UserPlus size={12} /> Sign up
-              </Link>
-            </div>
-          )}
-
-          <button
-            onClick={() => setOpen(!open)}
-            className="sm:hidden p-2 -mr-2 text-gray-400 hover:text-white"
-            aria-label="Toggle menu"
-          >
-            {open ? <X size={20} /> : <Menu size={20} />}
-          </button>
+  // The sidebar body is reused by both the desktop static rail and the
+  // mobile slide-in drawer — extracted so we don't duplicate markup.
+  const sidebarBody = (
+    <>
+      {/* Logo / brand */}
+      <Link
+        to="/app"
+        className="flex items-center gap-2 px-4 h-12 border-b border-border flex-shrink-0"
+      >
+        <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
+          KAIZER
         </div>
-      </div>
+        <span className="text-gray-400 text-sm font-medium tracking-wider">
+          NEWS
+        </span>
+      </Link>
 
-      {/* Mobile dropdown */}
-      {open && (
-        <nav className="sm:hidden border-t border-border bg-[#0a0a0a] px-4 pb-3 pt-2 flex flex-col gap-1">
-          {navLinks.map(({ to, icon: Icon, label, badge }) => (
+      {/* Nav links — scrollable when overflowed */}
+      <nav className="flex-1 overflow-y-auto py-3 px-2 flex flex-col gap-0.5">
+        {navLinks.map(({ to, icon: Icon, label, badge }) => {
+          const a = isActive(to);
+          return (
             <Link
               key={to}
               to={to}
-              onClick={() => setOpen(false)}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium
-                ${loc.pathname === to
-                  ? "bg-accent/10 text-accent2"
-                  : "text-gray-400 hover:bg-white/5 hover:text-gray-200"}`}
+              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                ${a
+                  ? "bg-accent/15 text-accent2 border-l-2 border-accent2"
+                  : "text-gray-400 hover:bg-white/5 hover:text-gray-200 border-l-2 border-transparent"}`}
             >
-              <Icon size={16} /> {label}
+              <Icon size={16} className="flex-shrink-0" />
+              <span className="flex-1 truncate">{label}</span>
               {badge && <span className="beta-badge">{badge}</span>}
             </Link>
-          ))}
-          {!isAuthenticated && (
-            <>
-              <Link
-                to="/login"
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-gray-300 hover:bg-white/5"
-              >
-                <LogIn size={16} /> Sign in
-              </Link>
-              <Link
-                to="/register"
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-white bg-accent hover:bg-accent2"
-              >
-                <UserPlus size={16} /> Sign up
-              </Link>
-            </>
-          )}
-          {isAuthenticated && (
+          );
+        })}
+      </nav>
+
+      {/* Bottom cluster: theme toggle + user menu (or auth links) */}
+      <div className="border-t border-border p-2 flex flex-col gap-1 flex-shrink-0">
+        <div className="flex items-center justify-between px-2 py-1">
+          <span className="text-[10px] uppercase tracking-wider text-gray-500">
+            Theme
+          </span>
+          <ThemeToggle />
+        </div>
+        {isAuthenticated ? (
+          <div ref={userMenuRef} className="relative">
             <button
-              onClick={() => { setOpen(false); handleLogout(); }}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-gray-300 hover:bg-white/5 text-left"
+              onClick={() => setUserMenuOpen((v) => !v)}
+              className="w-full flex items-center gap-2 px-2 py-2 rounded hover:bg-white/5 text-gray-200"
+              title={user?.email}
             >
-              <LogOut size={16} /> Sign out ({displayName})
+              <span className="w-7 h-7 rounded-full bg-accent2 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                {avatarLetter}
+              </span>
+              <span className="flex-1 text-left text-xs font-medium truncate">
+                {displayName}
+              </span>
             </button>
-          )}
-        </nav>
-      )}
-    </header>
+            {userMenuOpen && (
+              <div className="absolute left-2 right-2 bottom-full mb-1 bg-[#0c0c0c] border border-border rounded shadow-xl py-1 z-50">
+                <div className="px-3 py-2 border-b border-border">
+                  <div className="text-sm text-gray-100 font-medium truncate">{displayName}</div>
+                  <div className="text-[11px] text-gray-500 truncate">{user?.email}</div>
+                  {user?.google && (
+                    <div className="text-[10px] text-accent2 mt-0.5">Signed in with Google</div>
+                  )}
+                </div>
+                <Link
+                  to="/settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                >
+                  <SettingsIcon size={13} /> Settings & social links
+                </Link>
+                <Link
+                  to="/billing"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                >
+                  <CreditCard size={13} /> Billing & Plans
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                >
+                  <LogOut size={13} /> Sign out
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Link
+              to="/login"
+              className="flex items-center gap-2 px-3 py-2 rounded text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+            >
+              <LogIn size={13} /> Sign in
+            </Link>
+            <Link
+              to="/register"
+              className="flex items-center gap-2 px-3 py-2 rounded text-xs bg-accent hover:bg-accent2 text-white font-medium"
+            >
+              <UserPlus size={13} /> Sign up
+            </Link>
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile-only top bar — hamburger + brand. The full sidebar lives
+          off-canvas on screens narrower than `sm` and slides in on demand. */}
+      <header className="sm:hidden bg-[#0a0a0a] border-b-2 border-accent flex-shrink-0 h-12 flex items-center justify-between px-4 relative z-40">
+        <Link to="/app" className="flex items-center gap-2">
+          <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
+            KAIZER
+          </div>
+          <span className="text-gray-400 text-sm font-medium tracking-wider">NEWS</span>
+        </Link>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="p-2 -mr-2 text-gray-400 hover:text-white"
+          aria-label="Toggle menu"
+        >
+          {open ? <X size={20} /> : <Menu size={20} />}
+        </button>
+      </header>
+
+      {/* Desktop sidebar — sticky to the viewport so long pages still
+          scroll the main column independently. */}
+      <aside
+        className="hidden sm:flex flex-col w-56 bg-[#0a0a0a] border-r-2 border-accent flex-shrink-0
+                   sticky top-0 h-screen z-40"
+      >
+        {sidebarBody}
+      </aside>
+
+      {/* Mobile slide-in drawer — backdrop + panel. Animates with a
+          translate-x; backdrop click closes. */}
+      <div
+        className={`sm:hidden fixed inset-0 z-50 transition-opacity duration-200
+                    ${open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+      >
+        <div
+          className="absolute inset-0 bg-black/60"
+          onClick={() => setOpen(false)}
+        />
+        <aside
+          className={`absolute left-0 top-0 h-full w-64 bg-[#0a0a0a] border-r-2 border-accent
+                      flex flex-col transform transition-transform duration-200
+                      ${open ? "translate-x-0" : "-translate-x-full"}`}
+        >
+          {sidebarBody}
+        </aside>
+      </div>
+    </>
   );
 }

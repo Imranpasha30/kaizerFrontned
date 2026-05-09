@@ -44,10 +44,15 @@ function Shell({ children }) {
     loc.pathname.startsWith("/phone/") ||
     loc.pathname.startsWith("/program/") ||
     loc.pathname.startsWith("/admin");
+  // Layout: when chrome is shown, NavBar renders a sticky sidebar on
+  // ≥sm and a slide-in drawer + thin top bar on mobile. We use a column
+  // wrapper so the mobile top bar can stack above the main content,
+  // while the sidebar (position: sticky) anchors itself to the side on
+  // wider screens via its own classes.
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col sm:flex-row min-h-screen">
       {!hideChrome && <NavBar />}
-      <main className="flex-1">{children}</main>
+      <main className="flex-1 min-w-0">{children}</main>
     </div>
   );
 }
