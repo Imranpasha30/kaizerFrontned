@@ -8,6 +8,7 @@ import LivePreview from "../components/LivePreview";
 import SEOPanel from "../components/SEOPanel";
 import PublishModal from "../components/PublishModal";
 import DownloadModal from "../components/DownloadModal";
+import BulletinImagesPanel from "../components/BulletinImagesPanel";
 
 // NotoSansTelugu-Bold is the project default — strong, legible at the
 // 80px headline size we ship with. Other fonts kept for variety.
@@ -67,6 +68,23 @@ export default function Editor() {
   const [imgTs, setImgTs]     = useState(Date.now());
   const [vidTs, setVidTs]     = useState(Date.now());
   const [error, setError]     = useState("");
+
+  // ── Bulk-edit state: lets the user apply one image to many Shorts
+  // at once. Selected clip IDs are tracked here; UI toggles them via
+  // the clip strip checkboxes. Persisted only in memory — clearing on
+  // unmount is intentional (don't carry stale selections between jobs).
+  const [selectedClipIds, setSelectedClipIds] = useState(() => new Set());
+  // Pending-image-for-bulk: the File object chosen via the bulk picker.
+  // Stays null until the user actually picks an image. Cleared after
+  // the batch operation completes.
+  const [bulkPendingImage, setBulkPendingImage] = useState(null);
+  const [bulkBusy, setBulkBusy]                 = useState(false);
+  const [bulkProgress, setBulkProgress]         = useState({ done: 0, total: 0 });
+  // "Needs render" sticky banner — flipped on by ANY edit (image swap,
+  // text, style, etc.) and cleared after a successful rerender. Keeps
+  // the user from being confused when the preview still shows old
+  // content.
+  const [needsRender, setNeedsRender] = useState(false);
 
   // Mobile panel toggle: "preview" | "controls"
   const [mobilePanel, setMobilePanel] = useState("preview");
@@ -154,6 +172,17 @@ export default function Editor() {
     setFbTextColor(fp.follow_text_color || "#ffffff");
     setFbBg(fp.bg_color || "#1a0a2e");
     setFbTc(fp.text_color || "#ffff00");
+    // When the user switches clips, clear the "render needed" banner —
+    // it represented unsaved edits to the PREVIOUS clip, not this one.
+    // The trade-off is they'd lose the warning if they edited clip A,
+    // jumped to B, then came back to A without rendering. Acceptable —
+    // the explicit re-render button is right there.
+    setNeedsRender(false);
+    // Same reasoning for bulk Shorts selection: a half-built selection
+    // from clip A shouldn't bleed into clip B. Clear it on every clip
+    // change, including a pending image waiting to be applied.
+    setSelectedClipIds(new Set());
+    setBulkPendingImage(null);
   }, [curIdx, clips]);
 
   async function rerender() {
@@ -184,6 +213,7 @@ export default function Editor() {
       setClip(updated);
       setImgTs(Date.now());
       setVidTs(Date.now());
+      setNeedsRender(false);   // edits are now reflected in the rendered output
     } catch (e) {
       setError(e.message);
     } finally {
@@ -246,9 +276,97 @@ export default function Editor() {
       const newClips = clips.map(c => c.id === clip.id ? { ...c, image_path: res.image_path, image_url: res.image_url } : c);
       setClips(newClips);
       setClip(prev => ({ ...prev, image_path: res.image_path, image_url: res.image_url }));
+      // The clip's source image changed but the rendered MP4 + thumbnail
+      // still reflect the OLD image until rerender runs. Surface that
+      // loudly so the user doesn't think the change didn't take.
+      setNeedsRender(true);
     } catch (e) {
       setError(e.message);
     }
+  }
+
+  // ── Bulk image apply ───────────────────────────────────────────
+  // Apply the same image file to every selected Short and rerender
+  // them. Sequential to stay within the worker's render budget; if a
+  // single clip fails the rest still run.
+  async function applyImageToSelected() {
+    if (!bulkPendingImage || selectedClipIds.size === 0) return;
+    setBulkBusy(true);
+    setError("");
+    const targetIds = clips
+      .filter((c) => selectedClipIds.has(c.id))
+      .map((c) => c.id);
+    setBulkProgress({ done: 0, total: targetIds.length });
+
+    let workingClips = clips.slice();
+    let firstError = null;
+    for (let i = 0; i < targetIds.length; i++) {
+      const cid = targetIds[i];
+      try {
+        const form = new FormData();
+        form.append("image", bulkPendingImage);
+        const r = await api.uploadImage(cid, form);
+        // Patch the clip row with the new image path immediately so
+        // even before re-render the UI reflects intent.
+        workingClips = workingClips.map((c) =>
+          c.id === cid
+            ? { ...c, image_path: r.image_path, image_url: r.image_url }
+            : c
+        );
+        // Re-render this clip with its current edit envelope (we use
+        // an empty-ish payload — the backend re-uses persisted state).
+        // Passing the minimum keeps the call cheap and avoids leaking
+        // the currently-focused clip's text into siblings.
+        const targetClip = workingClips.find((c) => c.id === cid);
+        const minimalEdits = {
+          frame_type: targetClip.frame_type,
+          text:       targetClip.text || "",
+          font_size:  targetClip.font_size || DEFAULT_FONT_SIZE,
+          text_color: targetClip.text_color || "#ffffff",
+          font_file:  targetClip.font_file || "NotoSansTelugu-Bold.ttf",
+        };
+        const updated = await api.rerenderClip(cid, minimalEdits);
+        workingClips = workingClips.map((c) =>
+          c.id === cid ? updated : c
+        );
+      } catch (e) {
+        if (!firstError) firstError = e.message || String(e);
+      }
+      setBulkProgress({ done: i + 1, total: targetIds.length });
+      // Bust thumbnail + preview caches mid-loop so the user sees
+      // progress visually as each clip finishes its render.
+      setImgTs(Date.now());
+      setVidTs(Date.now());
+    }
+
+    setClips(workingClips);
+    // Re-sync the currently-focused clip in case it was part of the batch.
+    const focused = workingClips[curIdx];
+    if (focused) setClip(focused);
+
+    setBulkBusy(false);
+    setBulkPendingImage(null);
+    setSelectedClipIds(new Set());
+    if (firstError) setError(`Bulk apply: ${firstError}`);
+  }
+
+  // Helpers for the bulk-select UI ───────────────────────────────
+  function toggleClipSelection(clipId) {
+    setSelectedClipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(clipId)) next.delete(clipId);
+      else next.add(clipId);
+      return next;
+    });
+  }
+  function selectAllShorts() {
+    const ids = clips
+      .filter((c) => (c.frame_type || "").toLowerCase() !== "bulletin")
+      .map((c) => c.id);
+    setSelectedClipIds(new Set(ids));
+  }
+  function clearSelection() {
+    setSelectedClipIds(new Set());
   }
 
   async function doExport() {
@@ -278,29 +396,138 @@ export default function Editor() {
 
   /* ── Shared sub-components ─────────────────────────────── */
 
+  const shortClipCount = clips.filter(
+    (c) => (c.frame_type || "").toLowerCase() !== "bulletin"
+  ).length;
+
+  // ── Horizontal bulk-edit bar (rendered ABOVE the preview, not in
+  // the narrow left strip). Appears only when there's more than one
+  // Short and either (a) at least one is selected, or (b) we have a
+  // pending image staged. Keeps the narrow clip-strip column clean
+  // (just thumbnails + checkboxes) and gives the wide top bar room
+  // for the help text + buttons without wrapping. */
+  const showBulkBar = shortClipCount > 1 && (selectedClipIds.size > 0 || bulkPendingImage || bulkBusy);
+  const bulkBar = showBulkBar ? (
+    <div className="flex items-center gap-3 px-3 py-1.5 bg-[#0c0c0c] border-b border-border text-[11px] flex-shrink-0">
+      <span className="text-gray-400 uppercase tracking-wider flex-shrink-0 whitespace-nowrap">
+        Bulk · <span className="text-accent2">{selectedClipIds.size}/{shortClipCount}</span> Shorts selected
+      </span>
+      <span className="hidden sm:inline text-gray-600">|</span>
+      <button
+        type="button"
+        onClick={selectAllShorts}
+        className="text-accent2 hover:text-white whitespace-nowrap"
+        title="Tick every Short clip in this job"
+      >
+        Select all
+      </button>
+      {selectedClipIds.size > 0 && (
+        <button
+          type="button"
+          onClick={clearSelection}
+          className="text-gray-400 hover:text-white whitespace-nowrap"
+        >
+          Clear
+        </button>
+      )}
+      <span className="flex-1" />
+      {selectedClipIds.size > 0 && (
+        <>
+          <label className="px-3 py-1 bg-surface hover:bg-panel-hover border border-border rounded text-gray-200 cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5">
+            <Upload size={12} />
+            <span className="hidden sm:inline">
+              {bulkPendingImage
+                ? `${bulkPendingImage.name.slice(0, 22)}${bulkPendingImage.name.length > 22 ? "…" : ""}`
+                : "Pick image…"}
+            </span>
+            <span className="sm:hidden">
+              {bulkPendingImage ? "✓" : "Image"}
+            </span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => setBulkPendingImage(e.target.files[0] || null)}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!bulkPendingImage || bulkBusy}
+            onClick={applyImageToSelected}
+            className="px-3 py-1 bg-accent hover:bg-accent2 text-white rounded disabled:opacity-40 whitespace-nowrap inline-flex items-center gap-1.5"
+            title="Replace + re-render every selected Short with this image"
+          >
+            {bulkBusy
+              ? <><Loader2 size={12} className="animate-spin" /> {bulkProgress.done}/{bulkProgress.total}</>
+              : <>Apply &rarr; {selectedClipIds.size}</>}
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
   const clipStrip = (
     <div className="flex md:flex-col gap-2 p-2 overflow-x-auto md:overflow-y-auto md:overflow-x-hidden">
-      {clips.map((c, i) => (
+      {/* Tiny "Select all Shorts" affordance — fits in the narrow left
+          rail and triggers the wider bulkBar above the preview. */}
+      {shortClipCount > 1 && selectedClipIds.size === 0 && !bulkPendingImage && (
         <button
-          key={c.id}
-          onClick={() => setCurIdx(i)}
-          className={`rounded overflow-hidden border-2 transition-colors relative flex-shrink-0
-            w-16 md:w-full
-            ${i === curIdx ? "border-accent" : "border-transparent hover:border-gray-600"}`}
+          type="button"
+          onClick={selectAllShorts}
+          className="md:order-first text-[9px] text-accent2 hover:text-white text-center py-1 -mx-0.5 mb-1 bg-black/30 border border-border rounded whitespace-nowrap"
+          title="Bulk-edit Shorts: tick checkboxes, pick image, re-render all in one click"
         >
-          {c.thumb_url ? (
-            <img src={api.bustCache(api.mediaUrl(c.thumb_url), imgTs)} alt=""
-                 className={`w-full ${c.frame_type === "bulletin" ? "aspect-[16/9]" : "aspect-[9/16]"} object-cover block`} />
-          ) : (
-            <div className={`w-full ${c.frame_type === "bulletin" ? "aspect-[16/9]" : "aspect-[9/16]"} bg-surface flex items-center justify-center text-gray-600 text-xs`}>
-              {i + 1}
-            </div>
-          )}
-          <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-center py-0.5 text-gray-300">
-            #{i + 1}
-          </div>
+          ☑ all Shorts
         </button>
-      ))}
+      )}
+
+      {clips.map((c, i) => {
+        const isShort   = (c.frame_type || "").toLowerCase() !== "bulletin";
+        const checked   = selectedClipIds.has(c.id);
+        return (
+          <div
+            key={c.id}
+            className={`rounded overflow-hidden border-2 transition-colors relative flex-shrink-0
+              w-16 md:w-full
+              ${i === curIdx ? "border-accent" : checked ? "border-accent2" : "border-transparent hover:border-gray-600"}`}
+          >
+            <button
+              type="button"
+              onClick={() => setCurIdx(i)}
+              className="block w-full text-left"
+            >
+              {c.thumb_url ? (
+                <img src={api.bustCache(api.mediaUrl(c.thumb_url), imgTs)} alt=""
+                     className={`w-full ${c.frame_type === "bulletin" ? "aspect-[16/9]" : "aspect-[9/16]"} object-cover block`} />
+              ) : (
+                <div className={`w-full ${c.frame_type === "bulletin" ? "aspect-[16/9]" : "aspect-[9/16]"} bg-surface flex items-center justify-center text-gray-600 text-xs`}>
+                  {i + 1}
+                </div>
+              )}
+              <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-center py-0.5 text-gray-300">
+                #{i + 1}
+              </div>
+            </button>
+            {/* Selection checkbox — Shorts only, top-left corner.
+                stopPropagation so the box doesn't also trigger the
+                clip-select button. */}
+            {isShort && shortClipCount > 1 && (
+              <label
+                className="absolute top-1 left-1 w-5 h-5 rounded bg-black/70 border border-white/50 flex items-center justify-center cursor-pointer hover:bg-black/90"
+                onClick={(e) => e.stopPropagation()}
+                title={checked ? "Deselect this Short" : "Include this Short in bulk operations"}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleClipSelection(c.id)}
+                  className="accent-accent w-3.5 h-3.5"
+                />
+              </label>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -379,6 +606,8 @@ export default function Editor() {
     </div>
   );
 
+  const isBulletin = (clip?.frame_type || "").toLowerCase() === "bulletin";
+
   const tabsBar = (
     <div className="flex border-b border-border flex-shrink-0 bg-[#0a0a0a]">
       <button
@@ -396,6 +625,35 @@ export default function Editor() {
         <Sparkles size={13} /> SEO
         {clip?.seo && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
       </button>
+      {/* Bulletin-only tab — shows the per-story image carousel grid
+          with click-to-replace + recompose CTA. Hidden for Shorts
+          (they use the single image upload in the Styling panel). */}
+      {isBulletin && (
+        <button
+          onClick={() => setRightTab("bulletin")}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors
+            ${rightTab === "bulletin" ? "text-accent2 border-b-2 border-accent2" : "text-gray-500 hover:text-gray-300"}`}
+        >
+          <Eye size={13} /> Images
+        </button>
+      )}
+    </div>
+  );
+
+  const bulletinImagesPanel = (
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      {tabsBar}
+      <div className="overflow-y-auto">
+        <BulletinImagesPanel
+          jobId={job?.id}
+          onRecomposeStarted={() => {
+            // The bulletin.mp4 will land on disk in ~7-10 min;
+            // bust the preview's <video> cache so when the user
+            // returns it picks up the freshly composed file.
+            setVidTs(Date.now());
+          }}
+        />
+      </div>
     </div>
   );
 
@@ -421,6 +679,7 @@ export default function Editor() {
       {tabsBar}
       <SEOPanel
         clip={clip}
+        jobClips={clips}
         onSeoChange={(newSeo) => {
           if (!clip) return;
           const updated = { ...clip, seo: newSeo };
@@ -432,7 +691,13 @@ export default function Editor() {
   );
 
   const controlsPanel = (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    // The outer overflow-y-auto here is what scrolls the entire
+    // Styling / SEO column — including the sticky header + tabs at
+    // the top and the CURRENT/BETA preview at the bottom.  The inner
+    // ``overflow-y-auto`` on the content div below was redundant and
+    // fighting this one for wheel events; keep this single scroll
+    // container at the outermost level.
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       {/* Header */}
       <div className="p-3 border-b border-border flex items-center gap-2 flex-shrink-0">
         <Link to={`/jobs/${jobId}`} className="btn btn-secondary py-1 px-2">
@@ -454,14 +719,18 @@ export default function Editor() {
 
       {tabsBar}
 
-      <div className="p-3 flex-1 overflow-y-auto">
+      {/* Content area — no overflow class here on purpose.  The
+          parent controlsPanel is now the single scroll container, so
+          this div just lays out the form fields vertically and lets
+          the parent handle wheel events. */}
+      <div className="p-3 flex-1">
         {error && <p className="text-red-400 text-xs mb-3 bg-red-950/30 p-2 rounded">{error}</p>}
 
         {/* Text */}
         <SectionHead>Headline Text</SectionHead>
         <textarea
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={e => { setText(e.target.value); setNeedsRender(true); }}
           className="w-full bg-surface border border-border text-gray-200 text-xs p-2 rounded resize-y min-h-[60px] focus:outline-none focus:border-accent"
         />
 
@@ -469,19 +738,19 @@ export default function Editor() {
         <SectionHead>Font</SectionHead>
         <Row>
           <Label>Font</Label>
-          <select value={fontFile} onChange={e => setFontFile(e.target.value)}
+          <select value={fontFile} onChange={e => { setFontFile(e.target.value); setNeedsRender(true); }}
             className="flex-1 bg-surface border border-border text-gray-300 text-xs p-1.5 rounded">
             {FONTS.map(f => <option key={f} value={f}>{f.replace(".ttf", "").replace("-", " ")}</option>)}
           </select>
         </Row>
         <Row>
           <Label>Size</Label>
-          <input type="range" min="16" max="120" value={fontSize} onChange={e => setFontSize(+e.target.value)} className="flex-1" />
+          <input type="range" min="16" max="120" value={fontSize} onChange={e => { setFontSize(+e.target.value); setNeedsRender(true); }} className="flex-1" />
           <span className="text-xs text-gray-400 w-8 text-right tabular-nums">{fontSize}</span>
         </Row>
         <Row>
           <Label>Color</Label>
-          <input type="color" value={textColor} onChange={e => setTextColor(e.target.value)}
+          <input type="color" value={textColor} onChange={e => { setTextColor(e.target.value); setNeedsRender(true); }}
             className="w-7 h-7 border border-border rounded bg-surface p-0.5" />
           <span className="text-xs text-gray-500">{textColor}</span>
         </Row>
@@ -563,10 +832,27 @@ export default function Editor() {
 
       {/* Re-render button */}
       <div className="p-3 border-t border-border flex-shrink-0">
+        {/* "Edits made → render to apply" banner.  Visible only when an
+            edit (image swap, text, style change) has happened since the
+            last successful rerender. Clears automatically once rerender
+            completes.  Stops the "I changed the image but the thumbnail
+            still shows the old one — is it broken?" confusion. */}
+        {needsRender && !rendering && (
+          <div className="mb-2 p-2 rounded text-[11px] flex items-start gap-2 bg-amber-500/10 border border-amber-500/40 text-amber-300">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+            <span>
+              Changes made — click <strong>Re-render</strong> below to apply
+              them. The preview + thumbnail update automatically once
+              rendering finishes.
+            </span>
+          </div>
+        )}
         <button
           onClick={rerender}
           disabled={rendering}
-          className="btn btn-primary w-full flex items-center justify-center gap-2"
+          className={`btn w-full flex items-center justify-center gap-2 ${
+            needsRender ? "btn-primary ring-2 ring-amber-500/40" : "btn-primary"
+          }`}
         >
           {rendering
             ? <><Loader2 size={14} className="animate-spin" /> Rendering&hellip;</>
@@ -721,8 +1007,9 @@ export default function Editor() {
           {clipStrip}
         </div>
 
-        {/* Center: preview */}
+        {/* Center: preview (with bulk-edit bar on top when applicable) */}
         <div className="flex-1 flex flex-col bg-[#060606] min-w-0">
+          {bulkBar}
           {previewArea}
         </div>
 
@@ -754,12 +1041,22 @@ export default function Editor() {
           className="w-1.5 bg-black hover:bg-accent2/70 cursor-col-resize flex-shrink-0 transition-colors"
         />
 
-        {/* Right: controls / SEO */}
+        {/* Right: controls / SEO.  ``min-h-0 overflow-hidden`` is the
+            critical pair: without them, flex-1 inside this column
+            doesn't constrain to the parent's height — meaning the
+            inner ``overflow-y-auto`` on controlsPanel's content area
+            (line ~457) never triggers because nothing is overflowing
+            from its perspective.  Result: the Style Packs + Render
+            preview + CURRENT/BETA video pair extend past the viewport
+            and the play/seek controls become unreachable.
+            overflow-hidden (not auto!) — we want the INNER scroll to
+            handle wheel events; two stacked scroll containers fight
+            each other. */}
         <div
-          className="bg-[#0e0e0e] border-l border-border flex flex-col flex-shrink-0"
-          style={{ width: rightWidth }}
+          className="bg-[#0e0e0e] border-l border-border flex flex-col flex-shrink-0 min-h-0 overflow-hidden"
+          style={{ width: rightWidth, height: "calc(100vh - 48px)" }}
         >
-          {rightTab === "seo" ? seoPanel : controlsPanel}
+          {rightTab === "seo" ? seoPanel : rightTab === "bulletin" ? bulletinImagesPanel : controlsPanel}
         </div>
       </div>
 
@@ -792,11 +1089,12 @@ export default function Editor() {
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           {mobilePanel === "preview" ? (
             <div className="flex-1 flex flex-col bg-[#060606] min-h-0">
+              {bulkBar}
               {previewArea}
             </div>
           ) : (
             <div className="flex-1 flex flex-col bg-[#0e0e0e] min-h-0 overflow-y-auto">
-              {rightTab === "seo" ? seoPanel : controlsPanel}
+              {rightTab === "seo" ? seoPanel : rightTab === "bulletin" ? bulletinImagesPanel : controlsPanel}
             </div>
           )}
         </div>

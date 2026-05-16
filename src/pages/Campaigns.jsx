@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
-  Megaphone, Plus, Trash2, Loader2, AlertCircle, CheckCircle2,
+  CalendarClock, Plus, Trash2, Loader2, AlertCircle, CheckCircle2,
   Save, X, Youtube, Clock, Globe, CheckSquare, Square,
 } from "lucide-react";
 import { api } from "../api/client";
@@ -140,8 +140,8 @@ export default function Campaigns() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
       <header className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Megaphone className="text-accent2" size={22} />
-          <h1 className="text-xl font-semibold text-white">Campaigns</h1>
+          <CalendarClock className="text-accent2" size={22} />
+          <h1 className="text-xl font-semibold text-white">Publishing Plans</h1>
         </div>
         <button
           onClick={() => setEditing("new")}

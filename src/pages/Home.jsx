@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, Trash2, Edit2, Loader2, CheckCircle, XCircle, Clock } from "lucide-react";
 import { api } from "../api/client";
 
@@ -29,6 +29,7 @@ const LANG_LABEL = {
 };
 
 export default function Home() {
+  const navigate = useNavigate();
   const [jobs, setJobs]     = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -122,13 +123,21 @@ export default function Home() {
               <div className="flex items-center gap-2 flex-shrink-0
                               sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 {job.status === "done" && (
-                  <Link
-                    to={`/jobs/${job.id}/edit`}
-                    onClick={e => e.stopPropagation()}
+                  // Rendered as a button (NOT a Link) because the whole row
+                  // is already wrapped in <Link to=...>, and nesting <a>
+                  // inside <a> is invalid HTML — React Router warns about
+                  // it. Programmatic navigate() gives the same behaviour.
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      navigate(`/jobs/${job.id}/edit`);
+                    }}
                     className="btn btn-secondary py-1.5 px-2.5 flex items-center gap-1 text-xs"
                   >
                     <Edit2 size={12} /> <span className="hidden sm:inline">Editor</span>
-                  </Link>
+                  </button>
                 )}
                 <button
                   onClick={(e) => deleteJob(job.id, e)}

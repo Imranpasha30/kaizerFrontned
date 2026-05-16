@@ -26,36 +26,85 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
   const [profileByDest, setProfileByDest]     = useState({});
   const [privacy, setPrivacy]                 = useState("private");
   const [useSeo, setUseSeo]                   = useState(true);
-  const [publishKind, setPublishKind]         = useState("short");
+  // publish_kind is now derived PER CLIP via kindForClip(c) at submit
+  // time — bulletin → "video", everything else → "short". The KIND
+  // dropdown was removed because a single value over a mixed batch
+  // (5 Shorts + 1 bulletin) always uploaded one bucket at the wrong
+  // aspect.
   const [scheduleMode, setScheduleMode]       = useState("immediate"); // immediate | staggered
   const [gapMinutes, setGapMinutes]           = useState(30);
   const [firstPublishAt, setFirstPublishAt]   = useState("");         // ISO local when staggered
+  // Per-publish upload route override applied to the whole batch.
+  // "" → use channel/system default per row. "postiz" / "kaizer" /
+  // "native_rtmp" → force every clip in this batch through the chosen path.
+  const [publishProvider, setPublishProvider] = useState("");
+
+  // ── Per-clip + per-channel overrides ────────────────────────────
+  // Two independent maps, both keyed by id-as-string. Precedence at
+  // submit time (most-specific wins → no collisions):
+  //   1. providerByClip[clip.id]      — per-clip override (a Shorts
+  //                                     gets kaizer, a bulletin gets
+  //                                     native_rtmp)
+  //   2. providerByChannel[ch.id]     — per-channel override (a
+  //                                     channel not under Postiz
+  //                                     always goes kaizer)
+  //   3. publishProvider (bulk)        — "force everything to X"
+  //   4. backend resolves              — Channel → Account → system
+  // The per-clip wins over per-channel on the rationale "the user
+  // explicitly chose a route for THIS clip, intent is strongest".
+  const [providerByClip, setProviderByClip]       = useState({});
+  const [providerByChannel, setProviderByChannel] = useState({});
+
   const [submitting, setSubmitting]           = useState(false);
   const [progress, setProgress]               = useState({ done: 0, total: 0, failed: [] });
   const [error, setError]                     = useState("");
 
-  // Kind heuristic: fall back to the majority clip kind in the selection.
-  const defaultKind = useMemo(() => {
-    if (!clips?.length) return "short";
-    let short = 0, full = 0;
-    for (const c of clips) {
-      const plat = c?.meta?.platform || c?.meta?.preset?.key || "";
-      if (plat === "youtube_full") full++;
-      else if (plat === "youtube_short" || plat === "instagram_reel") short++;
-      else if (Number(c?.duration || 0) > 60) full++;
-      else short++;
+  // Resolve the effective provider for one (clip × channel) cell. Pure
+  // function over the three override sources + the no-op default.
+  // Returns "" (or undefined) when no override applies — backend
+  // resolves in that case.
+  function resolveEffective(clipId, channelId) {
+    const perClip = providerByClip[clipId];
+    if (perClip) return perClip;
+    const perChannel = providerByChannel[channelId];
+    if (perChannel) return perChannel;
+    if (publishProvider) return publishProvider;
+    return "";
+  }
+
+  // Per-clip kind detection. Bulletin clips are 16:9 long-form → YouTube
+  // "Regular video"; everything else is 9:16 vertical → YouTube Short
+  // (#Shorts). Compound jobs (Full Video + Shorts) produce mixed lists,
+  // so we MUST decide per-clip — a single dropdown over the whole batch
+  // forces wrong-aspect uploads either way.
+  function kindForClip(c) {
+    if (!c) return "short";
+    if ((c.frame_type || "").toLowerCase() === "bulletin") return "video";
+    const plat = c?.meta?.platform || c?.meta?.preset?.key || "";
+    if (plat === "youtube_full") return "video";
+    if (plat === "youtube_short" || plat === "instagram_reel") return "short";
+    // Last-resort heuristic: anything > 60s is probably a long-form.
+    return Number(c?.duration || 0) > 60 ? "video" : "short";
+  }
+
+  // Used only for the "auto-detected mix" summary copy at the bottom
+  // of the modal. The actual submit loop calls kindForClip per row.
+  const kindMix = useMemo(() => {
+    let short = 0, video = 0;
+    for (const c of (clips || [])) {
+      if (kindForClip(c) === "video") video++; else short++;
     }
-    return short >= full ? "short" : "video";
+    return { short, video };
   }, [clips]);
 
   useEffect(() => {
     if (!open) return;
     setError("");
     setSubmitting(false);
-    setPublishKind(defaultKind);
     setProgress({ done: 0, total: 0, failed: [] });
     setScheduleMode("immediate");
     setGapMinutes(30);
+    setPublishProvider("");
     // Default first publish = 5 minutes from now (staggered mode requires
     // privacy=private per YouTube; datetime-local uses local wall time)
     const d = new Date(Date.now() + 5 * 60 * 1000);
@@ -84,7 +133,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
       })
       .catch((e) => setError(e.message || "Failed to load channels"))
       .finally(() => setLoadingCh(false));
-  }, [open, defaultKind]);
+  }, [open]);
 
   const destinations = useMemo(() => {
     const groups = new Map();
@@ -170,7 +219,11 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
         channel_ids:    channelIdsForSubmit.map(Number),
         privacy_status: privacy,
         use_seo:        useSeo,
-        publish_kind:   publishKind,
+        // Per-clip kind: bulletin → "video" (Regular YouTube upload),
+        // anything else → "short" (#Shorts). Fixes the mixed-batch
+        // problem where one global Kind dropdown forced wrong-aspect
+        // uploads for either the Shorts or the bulletin.
+        publish_kind:   kindForClip(clip),
       };
       // For clips without their own SEO, ask the backend to read SEO from
       // the donor sibling. The clip's own SEO still wins server-side when
@@ -181,6 +234,45 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
       if (baseTime) {
         const t = new Date(baseTime.getTime() + i * gapMinutes * 60_000);
         payload.publish_at = t.toISOString();
+      }
+      // ── Route resolution per (clip × channel) ────────────────────
+      // Build the precedence chain:
+      //   per-clip override → per-channel override → bulk override → ""
+      // The bulk one (publishProvider) is still sent as the top-level
+      // upload_provider so callers without per-channel awareness keep
+      // working; per-channel deviations are sent in the dict and win
+      // server-side.
+      if (publishProvider) {
+        payload.upload_provider = publishProvider;
+      }
+      const perClipChoice = providerByClip[clip.id] || "";
+      if (perClipChoice) {
+        // Per-clip override applies to every destination uniformly →
+        // overwrite the top-level value. (Channel-specific entries
+        // in the map can still override this further below.)
+        payload.upload_provider = perClipChoice;
+      }
+      // Build the per-channel dict only when at least one entry differs
+      // from what we'd already send as the top-level value (avoids
+      // shipping a no-op dict for the common batch case).
+      const upbc = {};
+      let anyPerChan = false;
+      for (const cid of channelIdsForSubmit.map(Number)) {
+        const perCh = providerByChannel[cid] || "";
+        if (perClipChoice) {
+          // per-clip wins — leave dict entry empty unless the channel
+          // explicitly wants something different from per-clip.
+          if (perCh && perCh !== perClipChoice) {
+            upbc[String(cid)] = perCh;
+            anyPerChan = true;
+          }
+        } else if (perCh) {
+          upbc[String(cid)] = perCh;
+          anyPerChan = true;
+        }
+      }
+      if (anyPerChan) {
+        payload.upload_provider_by_channel = upbc;
       }
       try {
         const res = await api.publishClip(clip.id, payload);
@@ -224,6 +316,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
               const hasSeo = !!c?.seo?.title;
               const inheritsFromDonor = !hasSeo && !!seoDonor;
               const isPublishing = hasSeo || inheritsFromDonor;
+              const clipKind = kindForClip(c);   // "short" | "video"
               return (
                 <li
                   key={c.id}
@@ -232,6 +325,20 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
                   <span className="font-mono text-[10px] w-5 text-right">{i + 1}.</span>
                   <span className="flex-1 truncate" title={c?.seo?.title || c.filename}>
                     {c?.seo?.title || c.filename || `Clip ${c.id}`}
+                  </span>
+                  <span
+                    className={`text-[10px] flex-shrink-0 px-1.5 py-px rounded-full font-medium uppercase tracking-wide ${
+                      clipKind === "video"
+                        ? "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                        : "bg-pink-500/20 text-pink-300 border border-pink-500/40"
+                    }`}
+                    title={
+                      clipKind === "video"
+                        ? "16:9 long-form — will publish as a regular YouTube video"
+                        : "9:16 vertical — will publish as a YouTube Short (#Shorts)"
+                    }
+                  >
+                    {clipKind === "video" ? "video" : "short"}
                   </span>
                   {hasSeo && (
                     <span className="text-[10px] text-green-400/80 flex-shrink-0">own SEO</span>
@@ -247,6 +354,29 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
                   {!hasSeo && !seoDonor && (
                     <span className="text-[10px] text-amber-400 flex-shrink-0">skipped — no SEO</span>
                   )}
+                  {/* ── Per-clip "Upload via" override ───────────
+                       Overrides the bulk-batch choice for THIS clip
+                       only. Set to "" to inherit the resolved route
+                       (per-channel → batch → channel default → system).
+                       Disabled when the clip isn't actually being
+                       published (no SEO + no donor). */}
+                  <select
+                    value={providerByClip[c.id] || ""}
+                    disabled={!isPublishing}
+                    onChange={(e) =>
+                      setProviderByClip((prev) => ({
+                        ...prev,
+                        [c.id]: e.target.value,
+                      }))
+                    }
+                    className="text-[10px] bg-black/40 border border-border rounded px-1 py-0.5 text-gray-300 disabled:opacity-40"
+                    title="Per-clip upload route — overrides batch + channel defaults"
+                  >
+                    <option value="">auto</option>
+                    <option value="kaizer">native</option>
+                    <option value="postiz">postiz</option>
+                    <option value="native_rtmp">rtmp-live</option>
+                  </select>
                 </li>
               );
             })}
@@ -279,53 +409,117 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
-              {destinations.map(([key, profs]) => (
-                <label
-                  key={key}
-                  className="flex items-center gap-2 bg-black/30 border border-border rounded px-2.5 py-2 cursor-pointer hover:border-border-hover"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedDests.has(key)}
-                    onChange={() => toggleDest(key)}
-                    className="accent-accent"
-                  />
-                  <Youtube size={13} className="text-red-400" />
-                  <span className="text-xs text-white flex-1 truncate">{key}</span>
-                  <span className="text-[10px] text-gray-500">
-                    {profs.length} profile{profs.length > 1 ? "s" : ""}
-                  </span>
-                </label>
-              ))}
+              {destinations.map(([key, profs]) => {
+                // Resolve the channel.id that this destination maps to.
+                // profileByDest gives us the primary profile id —
+                // which lines up with Channel.id in the DB.
+                const chIdRaw = profileByDest[key];
+                const chId    = chIdRaw ? Number(chIdRaw) : null;
+                const selected = selectedDests.has(key);
+                return (
+                  <div
+                    key={key}
+                    className="flex items-center gap-2 bg-black/30 border border-border rounded px-2.5 py-2 hover:border-border-hover"
+                  >
+                    <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleDest(key)}
+                        className="accent-accent"
+                      />
+                      <Youtube size={13} className="text-red-400" />
+                      <span className="text-xs text-white flex-1 truncate">{key}</span>
+                      <span className="text-[10px] text-gray-500">
+                        {profs.length} profile{profs.length > 1 ? "s" : ""}
+                      </span>
+                    </label>
+                    {/* ── Per-channel "Upload via" override ─────
+                         Wins over batch dropdown for THIS channel
+                         only. Per-clip override (set in the clip list
+                         above) still takes precedence over this for
+                         a given (clip × channel) cell. */}
+                    {selected && chId != null && (
+                      <select
+                        value={providerByChannel[chId] || ""}
+                        onChange={(e) =>
+                          setProviderByChannel((prev) => ({
+                            ...prev,
+                            [chId]: e.target.value,
+                          }))
+                        }
+                        className="text-[10px] bg-black/40 border border-border rounded px-1 py-0.5 text-gray-300"
+                        title="Per-channel upload route — overrides batch default; per-clip override still wins"
+                      >
+                        <option value="">auto</option>
+                        <option value="kaizer">native</option>
+                        <option value="postiz">postiz</option>
+                        <option value="native_rtmp">rtmp-live</option>
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
 
-        {/* Privacy + kind */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-[11px] uppercase tracking-wider text-gray-500 mb-1.5 block">Privacy</label>
-            <select
-              value={privacy}
-              onChange={(e) => setPrivacy(e.target.value)}
-              className="ui-input w-full"
-            >
-              <option value="private">Private</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="public">Public</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[11px] uppercase tracking-wider text-gray-500 mb-1.5 block">Kind</label>
-            <select
-              value={publishKind}
-              onChange={(e) => setPublishKind(e.target.value)}
-              className="ui-input w-full"
-            >
-              <option value="short">Short (#Shorts)</option>
-              <option value="video">Regular video</option>
-            </select>
-          </div>
+        {/* Per-batch upload provider override.  Empty = let backend
+            resolve per-row (channel default → system default).  Setting
+            it forces every clip in this batch to the chosen path —
+            primarily a comparison tool. */}
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-gray-500 mb-1.5 block">
+            Upload via (override)
+          </label>
+          <select
+            value={publishProvider}
+            onChange={(e) => setPublishProvider(e.target.value)}
+            className="ui-input w-full"
+          >
+            <option value="">Channel / system default (per row)</option>
+            <option value="postiz">Force Postiz for all rows</option>
+            <option value="kaizer">Force Native YouTube for all rows</option>
+            <option value="native_rtmp">Force Native RTMP-live for all rows</option>
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1.5">
+            Forces every clip in this batch through the chosen path.
+            Use it once on each path and diff the [compare:native] vs
+            [compare:postiz] log lines on the Uploads page to verify
+            parity (SEO, tags, made-for-kids, logo).
+            <br />
+            <strong className="text-gray-400">Native RTMP-live</strong> saves
+            ~6× quota (250 units vs 1,600 per video). Trade-off: each push
+            takes the video's full duration in real-time, and the video
+            appears on the channel as a "past stream" — still public,
+            still monetisable, still in the subscriber feed.
+          </p>
+        </div>
+
+        {/* Privacy. (Kind is auto-detected per clip — see the order list
+            above; bulletin → Regular video, everything else → Short.) */}
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-gray-500 mb-1.5 block">Privacy</label>
+          <select
+            value={privacy}
+            onChange={(e) => setPrivacy(e.target.value)}
+            className="ui-input w-full"
+          >
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
+          {(kindMix.short > 0 && kindMix.video > 0) ? (
+            <p className="text-[11px] text-gray-500 mt-1.5">
+              <span className="text-gray-300">Kind: auto-detected per clip</span> —
+              <span className="text-accent2"> {kindMix.short} Short{kindMix.short === 1 ? "" : "s"}</span> +
+              <span className="text-accent2"> {kindMix.video} Regular video{kindMix.video === 1 ? "" : "s"}</span>.
+            </p>
+          ) : (
+            <p className="text-[11px] text-gray-500 mt-1.5">
+              Kind: all <span className="text-gray-300">{kindMix.video > 0 ? "Regular video" : "Short (#Shorts)"}</span> — auto-detected from clip frame layout.
+            </p>
+          )}
         </div>
 
         <label className="flex items-center gap-2 text-[12px] text-gray-300">

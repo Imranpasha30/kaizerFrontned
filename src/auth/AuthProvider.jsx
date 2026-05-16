@@ -71,9 +71,28 @@ export default function AuthProvider({ children }) {
     return res.user;
   }
 
+  /** Adopt a (token, user) pair that another flow already minted — used by
+   *  the password-reset page so a successful reset signs the user in
+   *  immediately without forcing a separate login round-trip. */
+  function setSession(token, u) {
+    if (token) setToken(token);
+    if (u)     setUser(u);
+  }
+
   function logout() {
     clearToken();
     setUser(null);
+    // Tell Google Identity Services to NOT auto-sign-back-in. Without
+    // this, GIS auto-select fires on the very next page mount (Login,
+    // Register) and re-issues a credential immediately — making the
+    // sign-out button look broken because the user appears logged
+    // back in within milliseconds. ``disableAutoSelect`` persists in
+    // localStorage and is the canonical fix per Google's docs.
+    try {
+      if (window.google?.accounts?.id?.disableAutoSelect) {
+        window.google.accounts.id.disableAutoSelect();
+      }
+    } catch { /* GIS not yet loaded — fine, nothing to disable */ }
     // Fire-and-forget server call (stateless, mainly for symmetry)
     api.logout().catch(() => {});
   }
@@ -86,6 +105,7 @@ export default function AuthProvider({ children }) {
     loginEmail,
     registerEmail,
     loginGoogle,
+    setSession,
     logout,
     refresh: hydrate,
   };

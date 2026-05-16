@@ -32,6 +32,10 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
   // Channel-level logo — FK to a UserAsset.  Null = no logo on renders.
   const [logoAssetId,      setLogoAssetId]       = useState(null);
   const [logoPreview,      setLogoPreview]       = useState(null);
+  // Per-channel upload route override.  "" = use system default
+  // (the admin's global toggle).  "postiz" / "kaizer" force this
+  // channel to a specific path regardless of system default.
+  const [uploadProvider,   setUploadProvider]    = useState("");
 
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
@@ -55,6 +59,7 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         ? { url: initial.logo.url, filename: initial.logo.filename }
         : null,
     );
+    setUploadProvider(initial.upload_provider || "");
   }, [initial?.id]);
 
   async function handleSubmit(e) {
@@ -78,6 +83,9 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         mandatory_hashtags: mandatoryHashtags,
         is_priority: isPriority,
         logo_asset_id: logoAssetId,
+        // Empty string → null on the wire → backend falls back to
+        // system default.  Two-state UX, three-state storage.
+        upload_provider: uploadProvider || null,
       });
     } catch (err) {
       setError(err.message || "Failed to save profile");
@@ -223,6 +231,35 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         <Star size={14} className={isPriority ? "text-accent2" : "text-gray-500"} />
         <span className="text-gray-300">Priority profile</span>
         <span className="text-xs text-gray-500">— used as a reference for competitor analysis</span>
+      </label>
+
+      <label className="block">
+        <span className="text-gray-400 text-xs uppercase tracking-wide">Upload via</span>
+        <select
+          value={uploadProvider}
+          onChange={(e) => setUploadProvider(e.target.value)}
+          className="mt-1 w-full bg-black/40 border border-border rounded px-2.5 py-1.5 text-gray-100 focus:border-accent focus:outline-none"
+        >
+          <option value="">System default (admin setting)</option>
+          <option value="postiz">Postiz (cross-platform scheduler)</option>
+          <option value="kaizer">Native YouTube (direct upload via OAuth)</option>
+          <option value="native_rtmp">Native YouTube — RTMP live (quota-friendly)</option>
+        </select>
+        <span className="text-xs text-gray-500 mt-1 block">
+          Per-channel override.  Native pushes title / description / tags /
+          category / language / thumbnail directly to YouTube and returns
+          the video URL immediately.  Postiz also handles cross-platform
+          scheduling but currently doesn't accept category or language
+          and returns the URL only after the post goes live.
+          <br />
+          <strong className="text-gray-400">Native RTMP live</strong> pushes
+          the rendered video to YouTube as a live broadcast over RTMPS —
+          ~6× cheaper on quota (250 units vs 1,600 per video) so you can
+          publish to many more channels per day. Trade-off: the push takes
+          the video's full duration in real-time, and the video appears
+          as a "past stream" on the channel (still public, still
+          monetisable, still in the subscriber feed).
+        </span>
       </label>
 
       <div className="flex justify-end gap-2 pt-3 border-t border-border">

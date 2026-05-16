@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 /**
@@ -8,6 +9,17 @@ import { X } from "lucide-react";
  *     {children}
  *   </Modal>
  * size: "sm" | "md" | "lg" | "xl"
+ *
+ * Why ``createPortal(..., document.body)``:
+ *   ``position: fixed`` anchors to the nearest ancestor that has a
+ *   transform / filter / perspective / will-change / backdrop-filter
+ *   property — NOT always the viewport.  Many of our cards
+ *   (ClipCard's ``card`` + ``transition-all`` + ``group hover:…``,
+ *   the editor's ``transform`` on hover, etc.) create those
+ *   containing blocks implicitly.  Without the portal the modal
+ *   gets trapped inside whichever card spawned it, rendering as a
+ *   tiny clipped panel.  Mounting at document.body sidesteps the
+ *   whole CSS-containing-block dance.
  */
 export default function Modal({ open, onClose, title, children, size = "md", hideClose = false }) {
   useEffect(() => {
@@ -32,9 +44,9 @@ export default function Modal({ open, onClose, title, children, size = "md", hid
     xl: "max-w-4xl",
   }[size] || "max-w-lg";
 
-  return (
+  const node = (
     <div
-      className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-[1000] flex items-start sm:items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
       role="dialog"
       aria-modal="true"
@@ -48,6 +60,7 @@ export default function Modal({ open, onClose, title, children, size = "md", hid
             <h3 className="text-base font-semibold text-gray-100 truncate pr-6">{title}</h3>
             {!hideClose && (
               <button
+                type="button"
                 onClick={onClose}
                 className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
                 aria-label="Close dialog"
@@ -61,4 +74,9 @@ export default function Modal({ open, onClose, title, children, size = "md", hid
       </div>
     </div>
   );
+
+  // SSR/test environments may not have document — defensive guard
+  // even though Vite dev always does.  Falls back to in-tree render.
+  if (typeof document === "undefined" || !document.body) return node;
+  return createPortal(node, document.body);
 }

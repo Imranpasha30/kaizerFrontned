@@ -54,6 +54,14 @@ export const api = {
   getSocials:   ()              => req("GET",  "/auth/me/socials"),
   putSocials:   (socials)       => req("PUT",  "/auth/me/socials", { socials }),
 
+  // Password management
+  hasPassword:    ()                                                => req("GET",  "/auth/me/has-password"),
+  changePassword: ({ current_password, new_password })              =>
+    req("POST", "/auth/me/password", { current_password, new_password }),
+  forgotPassword: (email)                                           => req("POST", "/auth/forgot-password", { email }),
+  validateReset:  (token)                                           => req("GET",  `/auth/reset-password/validate?token=${encodeURIComponent(token)}`),
+  resetPassword:  ({ token, new_password })                         => req("POST", "/auth/reset-password", { token, new_password }),
+
   // Config
   platforms:     () => req("GET", "/platforms/"),
   frameLayouts:  () => req("GET", "/frame-layouts/"),
@@ -123,6 +131,38 @@ export const api = {
   rerenderClip: (id, edits)  => req("POST", `/clips/${id}/rerender/`, edits),
   uploadImage:  (id, form)   => req("POST", `/clips/${id}/upload-image/`, form, true),
 
+  // ── Bulletin per-image management ─────────────────────────────
+  // For full-video / bulletin clips: list every story's carousel
+  // image, replace any individual slot, and trigger a compose-only
+  // re-render (skips Gemini analysis + OpenAI gen via on-disk caches).
+  listBulletinImages: (jobId) =>
+    req("GET", `/jobs/${jobId}/bulletin-images`),
+  replaceBulletinImage: (jobId, storyIndex, slotIndex, imageFile) => {
+    const fd = new FormData();
+    fd.append("story_index", String(storyIndex));
+    fd.append("slot_index",  String(slotIndex));
+    fd.append("image",       imageFile);
+    return req("POST", `/jobs/${jobId}/bulletin-images/replace`, fd, true);
+  },
+  recomposeBulletin: (jobId, { scope = "auto", verify = false } = {}) => {
+    const fd = new FormData();
+    fd.append("scope", scope);
+    fd.append("verify", verify ? "true" : "false");
+    return req("POST", `/jobs/${jobId}/bulletin-images/recompose`, fd, true);
+  },
+
+  // ── Express Mode (auto-publish) ───────────────────────────────
+  // Lazy-user "one-click" tab. Whisper transcribe -> Claude SEO ->
+  // Postiz upload + post. All AI keys are sent per-request so they
+  // live in the browser's localStorage (never on the server).
+  expressIntegrations: () => req("GET", "/express/integrations"),
+  expressKeyStatus:    () => req("GET", "/express/key-status"),
+  expressJobs:         () => req("GET", "/express/jobs"),
+  expressStart: (formData) =>
+    req("POST", "/express/start", formData, true),
+  expressStatus: (jobId) =>
+    req("GET", `/express/status/${jobId}`),
+
   // Channels (phase 1)
   listChannels:   ()             => req("GET",    "/channels/"),
   getChannel:     (id)           => req("GET",    `/channels/${id}/`),
@@ -146,6 +186,10 @@ export const api = {
   // to hit YouTube again for normal page loads.
   refreshYtAccount: (channelId)  => req("POST",   `/youtube/oauth/accounts/${channelId}/refresh`),
   setYtAccountLogo: (channelId, logo_asset_id) => req("POST", `/youtube/oauth/accounts/${channelId}/logo`, { logo_asset_id }),
+  // Per-YT-account upload route.  upload_provider ∈ {"postiz","kaizer",null}
+  // (null = inherit channel / system default).
+  setYtAccountUploadProvider: (channelId, upload_provider) =>
+    req("POST", `/youtube/oauth/accounts/${channelId}/upload-provider`, { upload_provider }),
   // Revokes our refresh token for this YT account. Caller MUST confirm
   // — this is destructive: any pending uploads to that channel fail
   // until the user re-authorises. Also satisfies Google's policy
@@ -224,6 +268,9 @@ export const api = {
   getClipSEOStatus: (clipId)         => req("GET",    `/clips/${clipId}/seo/status`),
   updateClipSEO:   (clipId, payload) => req("PUT",    `/clips/${clipId}/seo`, payload),
   clearClipSEO:    (clipId)          => req("DELETE", `/clips/${clipId}/seo`),
+  // Copy this clip's SEO to every other Short in the same job (UPSERT).
+  // Server-side single call — handles "no SEO yet on target" case.
+  applySeoToJobShorts: (clipId)      => req("POST",   `/clips/${clipId}/seo/apply-to-job-shorts`),
   bulkGenerateSEO: (jobId, payload)  => req("POST",   `/jobs/${jobId}/seo/generate-all`, payload),
   // Compose-preview: returns exact title/desc/tags that WOULD be uploaded to
   // `channelId` for this clip (generic SEO + that destination's brand overlay).
@@ -241,10 +288,50 @@ export const api = {
   getJobCampaigns:  (jobId)              => req("GET",    `/campaigns/job/${jobId}`),
 
   // Performance / analytics (phase B)
-  getLeaderboard:   (limit = 50)         => req("GET",    `/performance/leaderboard?limit=${limit}`),
-  getCalibration:   ()                   => req("GET",    "/performance/calibration"),
+  getLeaderboard:   (limit = 50, channelId = null) =>
+    req("GET", `/performance/leaderboard?limit=${limit}`
+              + (channelId ? `&channel_id=${encodeURIComponent(channelId)}` : "")),
+  // Calibration histogram.  Pass channelId to scope to one style profile
+  // — needed for per-channel analysis on the Performance page (otherwise
+  // the histogram is mixed across every connected channel and you can't
+  // tell which one is converting).
+  getCalibration:   (channelId = null) =>
+    req("GET", channelId
+                 ? `/performance/calibration?channel_id=${encodeURIComponent(channelId)}`
+                 : "/performance/calibration"),
   getPerfHistory:   (uploadId)           => req("GET",    `/performance/history/${uploadId}`),
-  triggerPoll:      ()                   => req("POST",   "/performance/poll"),
+  // Per-YouTube-channel rollup: total views/likes/comments + top clip +
+  // engagement rate + avg SEO score. One entry per real YT channel
+  // (grouped via google_channel_id, not style-profile id). Drives the
+  // summary cards row at the top of the Performance page.
+  getPerfChannels:  ()                   => req("GET",    "/performance/channels"),
+  // Phase 2 — full-channel video catalogue
+  syncChannelVideos: (gcid, maxVideos = 200) =>
+    req("POST", `/performance/yt/${encodeURIComponent(gcid)}/sync?max_videos=${maxVideos}`),
+  listChannelVideos: (gcid, { limit = 50, offset = 0, q = "", orderBy = "views" } = {}) => {
+    const params = new URLSearchParams({ limit, offset, order_by: orderBy });
+    if (q) params.set("q", q);
+    return req("GET", `/performance/yt/${encodeURIComponent(gcid)}/videos?${params.toString()}`);
+  },
+  getChannelPercentiles: (gcid) =>
+    req("GET", `/performance/yt/${encodeURIComponent(gcid)}/percentiles`),
+  // Phase 3 — one video's rank in its channel + nearby peers
+  compareVideo:  (videoId) =>
+    req("GET", `/performance/compare/video/${encodeURIComponent(videoId)}`),
+  // Feature 3: same video ranked within every connected channel's
+  // distribution. Answers "would this hit have travelled to my other
+  // channels?" with per-channel percentile + median context.
+  compareVideoAcrossChannels: (videoId) =>
+    req("GET", `/performance/compare/video/${encodeURIComponent(videoId)}/across-channels`),
+  // Phase 4 — every connected channel side-by-side
+  compareChannels: () => req("GET", "/performance/compare/channels"),
+  // Stats poll trigger.  channelId null = poll every recent upload (old
+  // behaviour); channelId set = refresh ONLY that channel's numbers,
+  // saving YouTube Data API quota on the others.
+  triggerPoll:      (channelId = null) =>
+    req("POST", channelId
+                  ? `/performance/poll?channel_id=${encodeURIComponent(channelId)}`
+                  : "/performance/poll"),
 
   // Translation (phase D)
   translateClip:       (clipId, payload) => req("POST", `/clips/${clipId}/translate`, payload),
@@ -272,10 +359,50 @@ export const api = {
   ),
   markTopicUsed:    (topicId, jobId)     => req("POST",   `/trending/topics/${topicId}/use?job_id=${jobId}`),
   deleteTopic:      (id)                 => req("DELETE", `/trending/topics/${id}`),
-  // Veo 3 video generation from a trending topic
-  veoGenerateFromTopic: (topicId, payload = { platform: "youtube_short", language: "te" }) =>
-    req("POST", `/veo/generate-from-topic/${topicId}`, payload),
-  veoStatus: (topicId) => req("GET", `/veo/status/${topicId}`),
+  // ── HeyGen avatar generation from a trending topic ─────────────
+  // (Replaces the prior Veo 3 flow — same endpoints under /api/heygen)
+  heygenAvatars:        ()      => req("GET",  "/heygen/avatars"),
+  heygenVoices:         ()      => req("GET",  "/heygen/voices"),
+  heygenGetDefaults:    ()      => req("GET",  "/heygen/defaults"),
+  heygenSaveDefaults:   (body)  => req("PUT",  "/heygen/defaults", body),
+  heygenGenerateFromTopic:
+    (topicId, payload)          => req("POST", `/heygen/generate-from-topic/${topicId}`, payload),
+  heygenStatus:         (topicId) => req("GET", `/heygen/status/${topicId}`),
+
+  // ── Live Studio (bulk RTMP-live publishing) ───────────────────
+  // Multi-video × multi-channel batches. Each LiveStream row tracks
+  // one (video × channel) pair. Browser uploads chunks via PATCH with
+  // Content-Range, then POSTs /start to spawn the broadcast worker.
+  liveChannels:        ()             => req("GET",  "/live-studio/channels"),
+  liveGenerateSeo:     (body)         => req("POST", "/live-studio/seo/generate", body),
+  liveBatches:         ()             => req("GET",  "/live-studio/batches"),
+  liveBatch:           (id)           => req("GET",  `/live-studio/batches/${id}`),
+  liveCreateBatch:     (body)         => req("POST", "/live-studio/batches", body),
+  liveStream:          (id)           => req("GET",  `/live-studio/streams/${id}`),
+  liveStartStream:     (id)           => req("POST", `/live-studio/streams/${id}/start`),
+  liveCancelStream:    (id)           => req("POST", `/live-studio/streams/${id}/cancel`),
+  liveHealth:          ()             => req("GET",  "/live-studio/health"),
+  liveValidateSeo:     (body)         => req("POST", "/live-studio/seo/validate", body),
+  /** Upload a single byte range to one stream. Returns
+   * {bytes_written, total, is_complete, status}. ``onProgress`` is
+   * called with the response's bytes_written each successful chunk. */
+  liveUploadChunk: async (streamId, fileSlice, { start, end, total }) => {
+    const tok = getToken();
+    const headers = {
+      "Content-Range": `bytes ${start}-${end}/${total ?? "*"}`,
+      "Content-Type":  "application/octet-stream",
+    };
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(`${BASE}/live-studio/streams/${streamId}/chunk`, {
+      method: "POST", headers, body: fileSlice,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (res.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      throw new Error(err.detail || err.error || `chunk upload ${res.status}`);
+    }
+    return res.json();
+  },
   // Channel discovery for the competitor picker
   listYtCategories:  (region = "IN")     => req("GET", `/trending/yt-categories?region=${encodeURIComponent(region)}`),
   suggestChannels:   (opts = {}) => {
@@ -292,6 +419,11 @@ export const api = {
   // filter returns only assets directly in that folder (no subtree).
   listAssets:        (folderPath = null) =>
     req("GET", folderPath != null ? `/assets/?folder_path=${encodeURIComponent(folderPath)}` : "/assets/"),
+  // Previously-generated assets tagged with a specific source video
+  // fingerprint.  Powers the "we already generated images for this
+  // video — reuse them?" prompt on the NewJob page after re-upload.
+  listAssetsByVideoHash: (hash) =>
+    req("GET", `/assets/by-video-hash?hash=${encodeURIComponent(hash || "")}`),
   listAssetFolders:  () => req("GET",    "/assets/folders"),
   createAssetFolder: (path) => req("POST",   "/assets/folders", { path }),
   renameAssetFolder: (old_path, new_path) => req("PATCH",  "/assets/folders", { old_path, new_path }),
@@ -417,6 +549,58 @@ export const api = {
     xhr.onerror = () => reject(new Error("Download failed — network error"));
     xhr.send(JSON.stringify({ channel_id: channelId }));
   }),
+
+  // GET /api/clips/{id}/download-seo/ — downloads the clip's SEO
+  // (title / description / tags / hashtags) as a plain-text file.
+  // When channelId is supplied, the SEO is composed for that specific
+  // channel (footer + mandatory hashtags + brand overlay applied) so
+  // the user sees exactly what would land on that destination.
+  // fmt="txt" (default, copy-paste friendly) or "json" (structured).
+  downloadClipSeo: (clipId, { channelId = null, fmt = "txt" } = {}) =>
+    new Promise((resolve, reject) => {
+      const params = new URLSearchParams({ fmt });
+      if (channelId) params.set("channel_id", String(channelId));
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", `${BASE}/clips/${clipId}/download-seo/?${params.toString()}`);
+      const tok = getToken();
+      if (tok) xhr.setRequestHeader("Authorization", `Bearer ${tok}`);
+      xhr.responseType = "blob";
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const ext = fmt === "json" ? "json" : "txt";
+          const filename = `clip_${clipId}_seo.${ext}`;
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(xhr.response);
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+          resolve();
+        } else {
+          // Read the backend's actual error message instead of swallowing
+          // it as "HTTP 404".  FastAPI's HTTPException body is JSON
+          // {"detail": "..."}; xhr.response is a Blob because we set
+          // responseType="blob" for the happy path, so we re-read it as
+          // text and JSON-parse to get the detail.
+          const fail = (msg) => reject(new Error(msg));
+          try {
+            if (xhr.response instanceof Blob) {
+              xhr.response.text().then((txt) => {
+                let detail = txt;
+                try { detail = (JSON.parse(txt) || {}).detail || txt; } catch {}
+                fail(detail || `SEO download failed (HTTP ${xhr.status})`);
+              }).catch(() => fail(`SEO download failed (HTTP ${xhr.status})`));
+            } else {
+              fail(`SEO download failed (HTTP ${xhr.status})`);
+            }
+          } catch {
+            fail(`SEO download failed (HTTP ${xhr.status})`);
+          }
+        }
+      };
+      xhr.onerror = () => reject(new Error("SEO download failed — network error"));
+      xhr.send();
+    }),
 };
 
 // ── Phase 12 — Admin panel ──────────────────────────────────────────────────
@@ -437,6 +621,68 @@ export const adminApi = {
   getJob:       (id)                        => req("GET",  `/admin/jobs/${id}`),
   geminiUsage:  (days = 30, userId = null)  =>
     req("GET", `/admin/gemini-usage?days=${days}${userId ? `&user_id=${userId}` : ""}`),
+  // Multi-provider live dashboard — Gemini + OpenAI + YouTube quota in one shot.
+  usageDashboard: (days = 30, userId = null) =>
+    req("GET", `/admin/usage/dashboard?days=${days}${userId ? `&user_id=${userId}` : ""}`),
+  // Persistent CPU/RAM/GPU history for capacity planning.
+  // `bucketMinutes>0` server-side aggregates to keep large windows fast.
+  systemHistory: (hours = 24, bucketMinutes = 0) =>
+    req("GET", `/admin/system/history?hours=${hours}&bucket_minutes=${bucketMinutes}`),
+  // Consolidated audit for the RTMP-live agent — totals, recent
+  // broadcasts, quota saved vs videos.insert. Drives the small RTMP
+  // Activity card on the AI & quota page.
+  rtmpActivity: (days = 30) =>
+    req("GET", `/admin/rtmp/activity?days=${days}`),
+  // Live-log backlog — pair with `streamLogs` below for the live tail.
+  recentLogs:   (limit = 500, level = null) =>
+    req("GET", `/admin/logs/recent?limit=${limit}${level ? `&level=${level}` : ""}`),
+  /**
+   * Subscribe to the SSE log stream with proper Bearer auth.
+   *
+   * Browser EventSource doesn't support custom headers, so we use fetch +
+   * ReadableStream and parse `data:` lines ourselves. Returns an `abort()`
+   * that the caller invokes on unmount.
+   *
+   * onEvent({id, ts, level, source, line}) — fires for each `data:` JSON.
+   * onError(err)                           — fires on network failure.
+   */
+  streamLogs: ({ onEvent, onError }) => {
+    const ac  = new AbortController();
+    const tok = getToken();
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/admin/logs/stream`, {
+          headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+          signal: ac.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let pending = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          let nlnl;
+          while ((nlnl = pending.indexOf("\n\n")) !== -1) {
+            const block = pending.slice(0, nlnl);
+            pending = pending.slice(nlnl + 2);
+            // Each block has lines like `data: {...}` or `: keepalive`.
+            for (const line of block.split("\n")) {
+              if (line.startsWith("data:")) {
+                const payload = line.slice(5).trim();
+                if (!payload) continue;
+                try { onEvent?.(JSON.parse(payload)); } catch {}
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (e?.name !== "AbortError") onError?.(e);
+      }
+    })();
+    return () => ac.abort();
+  },
   liveEvents:   ()                          => req("GET",  "/admin/live-events"),
   audit:        ()                          => req("GET",  "/admin/audit"),
 };

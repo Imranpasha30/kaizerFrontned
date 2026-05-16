@@ -11,6 +11,8 @@ import Campaigns from "./pages/Campaigns";
 import Performance from "./pages/Performance";
 import Trending from "./pages/Trending";
 import QuickPublish from "./pages/QuickPublish";
+import ExpressMode  from "./pages/ExpressMode";
+import LiveStudio   from "./pages/LiveStudio";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
 import Billing  from "./pages/Billing";
@@ -20,6 +22,8 @@ import PhoneCamera from "./pages/PhoneCamera";
 import Login    from "./pages/Login";
 import Register from "./pages/Register";
 import Landing  from "./pages/Landing";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword  from "./pages/ResetPassword";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import AuthProvider from "./auth/AuthProvider";
@@ -38,6 +42,8 @@ function Shell({ children }) {
   const hideChrome =
     loc.pathname === "/login" ||
     loc.pathname === "/register" ||
+    loc.pathname === "/forgot-password" ||
+    loc.pathname === "/reset-password" ||
     loc.pathname === "/" ||
     loc.pathname === "/privacy" ||
     loc.pathname === "/terms" ||
@@ -57,17 +63,36 @@ function Shell({ children }) {
   );
 }
 
+function GlobalCursor() {
+  const loc = useLocation();
+  // Hide the app cursor on public marketing/auth routes — those pages
+  // own the pointer experience (the landing has its own NibCursor +
+  // LivingCursor that should not be doubled up with the app's overlay).
+  const hide =
+    loc.pathname === "/" ||
+    loc.pathname === "/login" ||
+    loc.pathname === "/register" ||
+    loc.pathname === "/forgot-password" ||
+    loc.pathname === "/reset-password" ||
+    loc.pathname === "/privacy" ||
+    loc.pathname === "/terms";
+  if (hide) return null;
+  return <CursorLayer />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CursorLayer />
+        <GlobalCursor />
         <Shell>
         <Routes>
           {/* Public marketing + auth routes */}
-          <Route path="/"         element={<Landing />} />
-          <Route path="/login"    element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/"                 element={<Landing />} />
+          <Route path="/login"            element={<Login />} />
+          <Route path="/register"         element={<Register />} />
+          <Route path="/forgot-password"  element={<ForgotPassword />} />
+          <Route path="/reset-password"   element={<ResetPassword />} />
 
           {/* Public legal pages — required by Google for the YouTube
               API quota review. Must be reachable without authentication
@@ -83,6 +108,8 @@ export default function App() {
           <Route path="/app"                           element={<ProtectedRoute><Home /></ProtectedRoute>} />
           <Route path="/new"                           element={<ProtectedRoute><NewJob /></ProtectedRoute>} />
           <Route path="/quick-publish"                 element={<ProtectedRoute><QuickPublish /></ProtectedRoute>} />
+          <Route path="/express"                       element={<ProtectedRoute><ExpressMode /></ProtectedRoute>} />
+          <Route path="/live-studio"                   element={<ProtectedRoute><LiveStudio /></ProtectedRoute>} />
           <Route path="/assets"                        element={<ProtectedRoute><Assets /></ProtectedRoute>} />
           <Route path="/settings"                      element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/jobs/:jobId"                   element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />

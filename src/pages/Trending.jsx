@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Radar, Plus, Trash2, Loader2, AlertCircle, RefreshCw, ExternalLink,
   Flame, Clock, CheckCircle2, X, Zap, CheckSquare, Square, Film,
+  UserCircle2, Star,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
@@ -38,6 +39,143 @@ export default function Trending() {
   const [selTopics, setSelTopics] = useState(() => new Set());
   const [selComps,  setSelComps]  = useState(() => new Set());
   const [bulkBusy,  setBulkBusy]  = useState(false);
+
+  // ── HeyGen state (lifted from per-row so the modal lives at root) ──
+  // heygenTarget: the topic currently being configured in the modal
+  // heygenAssets: { avatars, voices, defaults } — fetched once on demand
+  // heygenStatusByTopic: { topicId: { state, progress, message, error,
+  //                                   job_id, clip_id } }
+  // pollersRef: keep timer handles so we can clean up.
+  const [heygenTarget,        setHeygenTarget]    = useState(null);
+  const [heygenAssets,        setHeygenAssets]    = useState(null);
+  const [heygenAssetsLoading, setHeygenAssetsLoad]= useState(false);
+  const [heygenAssetsError,   setHeygenAssetsErr] = useState("");
+  const [heygenStatusByTopic, setHeygenStatusByTopic] = useState({});
+  const heygenPollersRef = React.useRef({});       // topic_id -> intervalId
+  const nav = useNavigate();
+
+  async function loadHeygenAssets(force = false) {
+    if (heygenAssets && !force) return heygenAssets;
+    setHeygenAssetsLoad(true); setHeygenAssetsErr("");
+    try {
+      const [avResp, vcResp, defResp] = await Promise.all([
+        api.heygenAvatars(),
+        api.heygenVoices(),
+        api.heygenGetDefaults(),
+      ]);
+      const pack = {
+        avatars:        avResp?.avatars || [],
+        talking_photos: avResp?.talking_photos || [],
+        voices:         vcResp?.voices || [],
+        defaults:       defResp || {},
+      };
+      setHeygenAssets(pack);
+      return pack;
+    } catch (e) {
+      setHeygenAssetsErr(e.message || "Failed to load HeyGen avatars/voices");
+      return null;
+    } finally {
+      setHeygenAssetsLoad(false);
+    }
+  }
+
+  // One-click entry point: if the server has env defaults OR the user
+  // saved their own avatar/voice, fire generation immediately. Only
+  // fall through to the picker modal when neither default exists.
+  async function startOrPickHeygen(topic) {
+    try {
+      const def = await api.heygenGetDefaults();
+      // Precedence: env wins when set (operator-configured canonical
+      // defaults), user DB defaults are the fallback for users who
+      // explicitly picked something else via the modal.
+      const avatarId = (def?.env_default_avatar_id || def?.avatar_id || "").trim();
+      const voiceId  = (def?.env_default_voice_id  || def?.voice_id  || "").trim();
+      if (avatarId && voiceId) {
+        startHeygenGeneration({ topic, avatarId, voiceId, saveDefault: false });
+        return;
+      }
+    } catch (e) {
+      // Couldn't reach defaults endpoint — fall through to modal so
+      // the user can pick manually instead of being stuck.
+      console.warn("heygen defaults fetch failed:", e.message);
+    }
+    setHeygenTarget(topic);
+    loadHeygenAssets();
+  }
+
+  function closeHeygenModal() { setHeygenTarget(null); }
+
+  function setHeygenStatus(topicId, patch) {
+    setHeygenStatusByTopic((cur) => ({
+      ...cur,
+      [topicId]: { ...(cur[topicId] || {}), ...patch },
+    }));
+  }
+
+  async function startHeygenGeneration({ topic, avatarId, voiceId, saveDefault }) {
+    closeHeygenModal();
+    setHeygenStatus(topic.id, {
+      state: "queued", progress: 0, message: "Queued", error: "",
+      job_id: null, clip_id: null,
+    });
+    try {
+      if (saveDefault) {
+        try {
+          await api.heygenSaveDefaults({ avatar_id: avatarId, voice_id: voiceId });
+          // Refresh defaults so subsequent modal opens pre-select them.
+          if (heygenAssets) {
+            setHeygenAssets({
+              ...heygenAssets,
+              defaults: { ...heygenAssets.defaults, avatar_id: avatarId, voice_id: voiceId },
+            });
+          }
+        } catch (e) {
+          console.warn("heygen save-defaults failed:", e.message);
+        }
+      }
+      await api.heygenGenerateFromTopic(topic.id, {
+        platform:  "youtube_short",
+        language:  "te",
+        avatar_id: avatarId,
+        voice_id:  voiceId,
+      });
+    } catch (e) {
+      setHeygenStatus(topic.id, { state: "error", error: e.message });
+      return;
+    }
+    // Poll status every 4 s; auto-navigate on done.
+    const started = Date.now();
+    const tick = async () => {
+      try {
+        const s = await api.heygenStatus(topic.id);
+        setHeygenStatus(topic.id, s);
+        if (s.state === "done" && s.job_id && s.clip_id) {
+          clearInterval(heygenPollersRef.current[topic.id]);
+          delete heygenPollersRef.current[topic.id];
+          nav(`/jobs/${s.job_id}/edit/${s.clip_id}`);
+        } else if (s.state === "error") {
+          clearInterval(heygenPollersRef.current[topic.id]);
+          delete heygenPollersRef.current[topic.id];
+        } else if (Date.now() - started > 20 * 60 * 1000) {
+          clearInterval(heygenPollersRef.current[topic.id]);
+          delete heygenPollersRef.current[topic.id];
+          setHeygenStatus(topic.id, { state: "error", error: "Polling timed out after 20 min" });
+        }
+      } catch (e) {
+        clearInterval(heygenPollersRef.current[topic.id]);
+        delete heygenPollersRef.current[topic.id];
+        setHeygenStatus(topic.id, { state: "error", error: e.message });
+      }
+    };
+    heygenPollersRef.current[topic.id] = setInterval(tick, 4000);
+    tick();
+  }
+
+  // Clean up timers on unmount so we don't leak between page navigations.
+  useEffect(() => () => {
+    Object.values(heygenPollersRef.current).forEach((id) => clearInterval(id));
+    heygenPollersRef.current = {};
+  }, []);
 
   function toggleTopic(id) {
     setSelTopics((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -131,7 +269,7 @@ export default function Trending() {
       <header className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Radar className="text-accent2" size={22} />
-          <h1 className="text-xl font-semibold text-white">Trending Topics</h1>
+          <h1 className="text-xl font-semibold text-white">Topic Radar</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -334,6 +472,8 @@ export default function Trending() {
               topic={t}
               selected={selTopics.has(t.id)}
               onToggleSelect={() => toggleTopic(t.id)}
+              onHeygen={() => startOrPickHeygen(t)}
+              heygenStatus={heygenStatusByTopic[t.id]}
             />
           ))}
         </div>
@@ -345,61 +485,250 @@ export default function Trending() {
           onCancel={() => setShowCompForm(false)}
         />
       )}
+
+      {heygenTarget && (
+        <HeyGenModal
+          topic={heygenTarget}
+          assets={heygenAssets}
+          loading={heygenAssetsLoading}
+          error={heygenAssetsError}
+          onRetryLoad={() => loadHeygenAssets(true)}
+          onCancel={closeHeygenModal}
+          onGenerate={(opts) => startHeygenGeneration({ topic: heygenTarget, ...opts })}
+        />
+      )}
     </div>
   );
 }
 
-function TopicRow({ topic, selected, onToggleSelect }) {
+// ─── HeyGen avatar/voice picker modal ────────────────────────────
+// Opens when the user clicks the generate button on a topic row.
+// Shows the user's saved defaults pre-selected (server-wide env fallback
+// when the user hasn't picked yet). User can save the current pick as
+// their personal default via the checkbox at the bottom.
+
+function HeyGenModal({ topic, assets, loading, error, onRetryLoad, onCancel, onGenerate }) {
+  // Server-wide env defaults are the fallback when user_defaults are blank.
+  const userDefAv  = assets?.defaults?.avatar_id || "";
+  const userDefVc  = assets?.defaults?.voice_id || "";
+  const envDefAv   = assets?.defaults?.env_default_avatar_id || "";
+  const envDefVc   = assets?.defaults?.env_default_voice_id || "";
+
+  const [avatarId,   setAvatarId]   = useState(userDefAv || envDefAv || "");
+  const [voiceId,    setVoiceId]    = useState(userDefVc || envDefVc || "");
+  const [saveDef,    setSaveDef]    = useState(false);
+  const [voiceFilter,setVoiceFilter]= useState("Telugu");
+
+  // When the user-defaults arrive after the modal opened, pre-fill.
+  useEffect(() => {
+    if (!avatarId && userDefAv)  setAvatarId(userDefAv);
+    if (!voiceId  && userDefVc)  setVoiceId(userDefVc);
+    if (!avatarId && envDefAv)   setAvatarId(envDefAv);
+    if (!voiceId  && envDefVc)   setVoiceId(envDefVc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userDefAv, userDefVc, envDefAv, envDefVc]);
+
+  // When a new avatar is picked, auto-jump to its default voice if the user
+  // hasn't manually chosen one this session.
+  const avatars = assets?.avatars || [];
+  const voices  = assets?.voices  || [];
+  const selectedAvatar = useMemo(
+    () => avatars.find((a) => a.avatar_id === avatarId),
+    [avatars, avatarId],
+  );
+
+  // Voice list, filtered by language search (HeyGen returns 1500+ voices).
+  const filteredVoices = useMemo(() => {
+    const q = voiceFilter.trim().toLowerCase();
+    if (!q) return voices.slice(0, 60);
+    return voices.filter((v) =>
+      (v.language || "").toLowerCase().includes(q) ||
+      (v.name     || "").toLowerCase().includes(q),
+    ).slice(0, 60);
+  }, [voices, voiceFilter]);
+
+  const canGenerate = !!avatarId && !!voiceId && !loading;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-[#0d0d0d] border border-border rounded-lg max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+        <header className="p-4 border-b border-border flex items-start justify-between">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-base font-semibold text-white flex items-center gap-1.5">
+              <UserCircle2 size={18} className="text-accent2" /> Generate avatar video
+            </h3>
+            <p className="text-xs text-gray-400 mt-1 line-clamp-2">
+              For: <span className="text-gray-200">{topic.video_title}</span>
+            </p>
+          </div>
+          <button onClick={onCancel} className="text-gray-500 hover:text-white"><X size={16} /></button>
+        </header>
+
+        {loading ? (
+          <div className="p-8 flex items-center justify-center text-sm text-gray-400">
+            <Loader2 size={16} className="animate-spin mr-2" /> Loading avatars + voices from HeyGen…
+          </div>
+        ) : error ? (
+          <div className="p-6 text-sm text-red-300">
+            <AlertCircle size={14} className="inline mr-1.5" />
+            {error}
+            <button onClick={onRetryLoad} className="block mt-2 text-xs text-accent hover:underline">Retry</button>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+            {/* Avatar grid */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs uppercase tracking-wider text-gray-400">
+                  Pick an avatar ({avatars.length} available)
+                </h4>
+                {userDefAv && (
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                    <Star size={10} /> default = your last pick
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-72 overflow-y-auto">
+                {avatars.map((a) => {
+                  const isSel = a.avatar_id === avatarId;
+                  return (
+                    <button
+                      key={a.avatar_id}
+                      type="button"
+                      onClick={() => {
+                        setAvatarId(a.avatar_id);
+                        // Auto-jump to avatar's default voice if voice not set yet.
+                        if (!voiceId && a.default_voice_id) setVoiceId(a.default_voice_id);
+                      }}
+                      className={`relative rounded overflow-hidden border text-left transition-all ${
+                        isSel
+                          ? "border-accent2 ring-2 ring-accent2/40"
+                          : "border-border hover:border-gray-500"
+                      }`}
+                    >
+                      {a.preview_image_url ? (
+                        <img
+                          src={a.preview_image_url}
+                          alt={a.avatar_name}
+                          className="w-full aspect-square object-cover bg-surface"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full aspect-square bg-surface flex items-center justify-center">
+                          <UserCircle2 size={32} className="text-gray-600" />
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 inset-x-0 px-1.5 py-1 bg-black/70 text-[10px]">
+                        <div className="text-white truncate">{a.avatar_name || a.avatar_id}</div>
+                        <div className="text-gray-500 truncate flex items-center gap-1">
+                          {a.gender || ""}
+                          {a.premium && <span className="text-amber-400">★ premium</span>}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Voice picker */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs uppercase tracking-wider text-gray-400">
+                  Voice
+                </h4>
+                <input
+                  type="text"
+                  value={voiceFilter}
+                  onChange={(e) => setVoiceFilter(e.target.value)}
+                  placeholder="filter by language / name (e.g. Telugu)"
+                  className="bg-black border border-border rounded px-2 py-1 text-[11px] text-gray-200 w-56"
+                />
+              </div>
+              <select
+                value={voiceId}
+                onChange={(e) => setVoiceId(e.target.value)}
+                className="w-full bg-black border border-border rounded px-2 py-1.5 text-sm text-white"
+              >
+                <option value="">— pick a voice —</option>
+                {filteredVoices.map((v) => (
+                  <option key={v.voice_id} value={v.voice_id}>
+                    {v.language || "?"} · {v.name || v.voice_id} · {v.gender || ""}
+                    {selectedAvatar?.default_voice_id === v.voice_id ? "  (avatar default)" : ""}
+                  </option>
+                ))}
+              </select>
+              {selectedAvatar?.default_voice_id && voiceId !== selectedAvatar.default_voice_id && (
+                <button
+                  type="button"
+                  onClick={() => setVoiceId(selectedAvatar.default_voice_id)}
+                  className="mt-1 text-[10px] text-accent hover:underline"
+                >
+                  use avatar's default voice
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <footer className="p-4 border-t border-border flex items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={saveDef}
+              onChange={(e) => setSaveDef(e.target.checked)}
+            />
+            Set as my default for future generations
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-3 py-1.5 text-sm text-gray-300 hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onGenerate({ avatarId, voiceId, saveDefault: saveDef })}
+              disabled={!canGenerate}
+              className="px-4 py-1.5 bg-accent2 hover:bg-accent2/80 text-white text-sm rounded disabled:opacity-40 flex items-center gap-1.5"
+            >
+              <UserCircle2 size={14} /> Generate
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function TopicRow({ topic, selected, onToggleSelect, onHeygen, heygenStatus }) {
   const ago = topic.published_at ? timeAgo(topic.published_at) : "—";
   const color = URGENCY_COLORS[topic.urgency] || URGENCY_COLORS.normal;
-  const [veoBusy, setVeoBusy] = useState(false);
-  const [veoStatus, setVeoStatus] = useState("");
-  const [veoErr, setVeoErr] = useState("");
-  const nav = useNavigate();
 
-  async function generateVeo() {
-    if (veoBusy) return;
-    if (!confirm(
-      `Generate a Veo 3 video for:\n\n"${topic.video_title}"\n\n` +
-      `This calls Gemini Veo 3 — expect 30-120s + a small billing charge. Continue?`
-    )) return;
-    setVeoBusy(true); setVeoErr(""); setVeoStatus("queued…");
-    try {
-      await api.veoGenerateFromTopic(topic.id, {
-        platform: "youtube_short",
-        language: "te",
-      });
-      // Poll
-      const started = Date.now();
-      const t = setInterval(async () => {
-        try {
-          const s = await api.veoStatus(topic.id);
-          setVeoStatus(s.state || "");
-          if (s.state === "done" && s.job_id) {
-            clearInterval(t);
-            setVeoBusy(false);
-            nav(`/jobs/${s.job_id}/edit/${s.clip_id}`);
-          } else if ((s.state || "").startsWith("error")) {
-            clearInterval(t);
-            setVeoBusy(false);
-            setVeoErr(s.error || s.state);
-          }
-          if (Date.now() - started > 10 * 60 * 1000) {
-            clearInterval(t);
-            setVeoBusy(false);
-            setVeoErr("Timed out after 10 minutes");
-          }
-        } catch (e) {
-          clearInterval(t);
-          setVeoBusy(false);
-          setVeoErr(e.message);
-        }
-      }, 4000);
-    } catch (e) {
-      setVeoBusy(false);
-      setVeoErr(e.message);
-    }
-  }
+  // Active generation = anything between queued and downloading.
+  const ACTIVE_STATES = new Set([
+    "queued", "transcribing", "scripting",
+    "heygen_pending", "heygen_processing", "downloading",
+  ]);
+  const hgState = heygenStatus?.state || "";
+  const hgBusy  = ACTIVE_STATES.has(hgState);
+  const hgErr   = hgState === "error" ? (heygenStatus?.error || "error") : "";
+  const hgProgressLabel = (() => {
+    if (!hgBusy) return "";
+    const pct = typeof heygenStatus?.progress === "number" ? `${heygenStatus.progress}% · ` : "";
+    const human = {
+      queued:             "queued",
+      transcribing:       "pulling YouTube transcript",
+      scripting:          "building anchor script",
+      heygen_pending:     "submitted to HeyGen",
+      heygen_processing:  "HeyGen rendering avatar",
+      downloading:        "downloading rendered video",
+    }[hgState] || hgState;
+    return `${pct}${human}`;
+  })();
 
   return (
     <div className={`bg-[#111] border rounded p-3 hover:bg-[#161616] ${
@@ -455,23 +784,23 @@ function TopicRow({ topic, selected, onToggleSelect }) {
             </a>
           )}
           <button
-            onClick={generateVeo}
-            disabled={veoBusy}
-            title="Generate a Veo 3 video from this topic"
+            onClick={onHeygen}
+            disabled={hgBusy}
+            title="Generate a HeyGen avatar video from this topic"
             className="p-1.5 text-accent2 hover:text-white hover:bg-accent2/10 rounded disabled:opacity-50"
           >
-            {veoBusy ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
+            {hgBusy ? <Loader2 size={14} className="animate-spin" /> : <UserCircle2 size={14} />}
           </button>
         </div>
       </div>
-      {(veoStatus && veoBusy) && (
+      {hgBusy && (
         <div className="mt-2 ml-6 text-[10px] text-accent2 flex items-center gap-1.5">
-          <Loader2 size={10} className="animate-spin" /> Veo: {veoStatus}
+          <Loader2 size={10} className="animate-spin" /> HeyGen: {hgProgressLabel}
         </div>
       )}
-      {veoErr && (
-        <div className="mt-2 ml-6 text-[10px] text-red-400">
-          Veo error: {veoErr}
+      {hgErr && (
+        <div className="mt-2 ml-6 text-[10px] text-red-400 break-words">
+          HeyGen error: {hgErr}
         </div>
       )}
     </div>

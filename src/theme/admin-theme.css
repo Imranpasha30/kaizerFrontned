@@ -1,0 +1,396 @@
+/* ─── Kaizer Admin theme ────────────────────────────────────────────
+   Scoped to elements under [data-admin-theme]. Anything outside the
+   admin shell keeps the existing red/dark Kaizer theme — only the
+   admin gets the polished slate / cyan / violet analytics palette.
+
+   Source: ui-ux-pro-max skill, "Photo Editor & Filters" palette + the
+   "Data-Dense Dashboard" style + Fira Sans/Code typography pairing.
+   ----------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
+[data-admin-theme] {
+  /* ── Palette ─────────────────────────────────────────────────── */
+  --adm-bg:           #0a0f1e;
+  --adm-bg-elev:      #0f172a;
+  --adm-surface:      #131a2e;
+  --adm-surface-2:    #192134;
+  --adm-card:         #1a233a;
+  --adm-card-hover:   #1f2942;
+  --adm-muted:        #171939;
+  --adm-rail:         #0d1426;
+  --adm-border:       rgba(148, 163, 184, 0.10);
+  --adm-border-hover: rgba(148, 163, 184, 0.22);
+  --adm-divider:      rgba(148, 163, 184, 0.06);
+
+  /* Brand */
+  --adm-violet:       #7c3aed;
+  --adm-violet-2:     #a78bfa;
+  --adm-indigo:       #6366f1;
+  --adm-cyan:         #06b6d4;
+  --adm-cyan-2:       #67e8f9;
+  --adm-cyan-dim:     #0891b2;
+
+  /* Status semantic */
+  --adm-success:      #22c55e;
+  --adm-warning:      #f59e0b;
+  --adm-danger:       #ef4444;
+  --adm-info:         #3b82f6;
+
+  /* Text */
+  --adm-text:         #f1f5f9;
+  --adm-text-2:       #cbd5e1;
+  --adm-text-3:       #94a3b8;
+  --adm-text-4:       #64748b;
+  --adm-text-5:       #475569;
+
+  /* Chart series — accessible at AA on dark; supplement with line styles */
+  --adm-series-1:     #7c3aed;   /* violet  */
+  --adm-series-2:     #06b6d4;   /* cyan    */
+  --adm-series-3:     #a78bfa;   /* light violet */
+  --adm-series-4:     #22c55e;   /* emerald */
+  --adm-series-5:     #f59e0b;   /* amber   */
+  --adm-series-6:     #ec4899;   /* pink    */
+
+  /* Elevation scale */
+  --adm-shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.30);
+  --adm-shadow-md: 0 4px 12px -2px rgba(0,0,0,0.45),
+                   0 0 0 1px rgba(124, 58, 237, 0.02);
+  --adm-shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.55),
+                   0 0 0 1px rgba(124, 58, 237, 0.04);
+  --adm-glow:      0 0 32px -4px rgba(124, 58, 237, 0.25);
+  --adm-glow-cyan: 0 0 32px -4px rgba(6, 182, 212, 0.30);
+
+  /* Radii */
+  --adm-r-sm: 6px;
+  --adm-r:    10px;
+  --adm-r-lg: 14px;
+  --adm-r-xl: 20px;
+
+  /* Type */
+  --adm-font-body:    "Fira Sans", ui-sans-serif, system-ui, sans-serif;
+  --adm-font-mono:    "Fira Code", ui-monospace, "SF Mono", monospace;
+
+  /* Motion */
+  --adm-ease:     cubic-bezier(0.16, 1, 0.3, 1);
+  --adm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --adm-dur-fast: 150ms;
+  --adm-dur:      220ms;
+  --adm-dur-slow: 320ms;
+
+  font-family: var(--adm-font-body);
+  color: var(--adm-text);
+  background: var(--adm-bg);
+  font-feature-settings: "cv11", "ss01", "tnum";
+}
+
+/* Map existing Tailwind tokens used by legacy admin tabs. The
+   html.light / html.dark selectors in index.css would otherwise win on
+   specificity (chain of 1 class + 1 type vs 1 attr), so we duplicate
+   each rule under html.light / html.dark to outrank them. The end
+   result: the admin always uses the slate / cyan / violet palette
+   regardless of the app-wide theme toggle. ---------------------- */
+[data-admin-theme] .bg-dark,
+html.light [data-admin-theme] .bg-dark,
+html.dark  [data-admin-theme] .bg-dark           { background: var(--adm-bg) !important; }
+
+[data-admin-theme] .bg-panel,
+html.light [data-admin-theme] .bg-panel,
+html.dark  [data-admin-theme] .bg-panel          { background: var(--adm-card) !important; }
+
+[data-admin-theme] .bg-panel-hover,
+html.light [data-admin-theme] .bg-panel-hover,
+html.dark  [data-admin-theme] .bg-panel-hover    { background: var(--adm-card-hover) !important; }
+
+[data-admin-theme] .bg-surface,
+html.light [data-admin-theme] .bg-surface,
+html.dark  [data-admin-theme] .bg-surface        { background: var(--adm-surface) !important; }
+
+[data-admin-theme] .border-border,
+html.light [data-admin-theme] .border-border,
+html.dark  [data-admin-theme] .border-border     { border-color: var(--adm-border) !important; }
+
+[data-admin-theme] .border-border-hover,
+html.light [data-admin-theme] .border-border-hover,
+html.dark  [data-admin-theme] .border-border-hover { border-color: var(--adm-border-hover) !important; }
+
+[data-admin-theme] .text-accent,
+html.light [data-admin-theme] .text-accent,
+html.dark  [data-admin-theme] .text-accent       { color: var(--adm-violet) !important; }
+
+[data-admin-theme] .text-accent2,
+html.light [data-admin-theme] .text-accent2,
+html.dark  [data-admin-theme] .text-accent2      { color: var(--adm-cyan) !important; }
+
+/* Body / headings inside admin always read from the admin palette */
+html.light [data-admin-theme],
+html.dark  [data-admin-theme],
+[data-admin-theme] {
+  background: var(--adm-bg) !important;
+  color: var(--adm-text) !important;
+}
+
+/* Force text-gray-X readable on the dark slate backdrop even under
+   html.light. Tailwind's text-gray-* classes become very dark grey in
+   light mode, which would blend into our dark admin background. */
+html.light [data-admin-theme] .text-gray-100,
+html.light [data-admin-theme] .text-gray-200 { color: var(--adm-text) !important; }
+html.light [data-admin-theme] .text-gray-300,
+html.light [data-admin-theme] .text-gray-400 { color: var(--adm-text-2) !important; }
+html.light [data-admin-theme] .text-gray-500,
+html.light [data-admin-theme] .text-gray-600 { color: var(--adm-text-3) !important; }
+html.light [data-admin-theme] .text-gray-700,
+html.light [data-admin-theme] .text-gray-800,
+html.light [data-admin-theme] .text-gray-900 { color: var(--adm-text-4) !important; }
+[data-admin-theme] .bg-accent       { background: var(--adm-violet) !important; }
+[data-admin-theme] .bg-accent2      { background: var(--adm-cyan) !important; }
+[data-admin-theme] .hover\:bg-accent:hover  { background: var(--adm-violet) !important; }
+[data-admin-theme] .border-accent   { border-color: var(--adm-violet) !important; }
+[data-admin-theme] .border-accent2  { border-color: var(--adm-cyan) !important; }
+[data-admin-theme] .ui-card {
+  background: var(--adm-card);
+  border-color: var(--adm-border);
+  border-radius: var(--adm-r-lg);
+  box-shadow: var(--adm-shadow-md);
+}
+
+/* ── Numeric strings (KPIs, timestamps) use tabular Fira Code ── */
+[data-admin-theme] .tabular-nums,
+[data-admin-theme] .font-mono { font-family: var(--adm-font-mono) !important; }
+
+/* ── Sidebar rail ─────────────────────────────────────────────── */
+.adm-rail {
+  background: linear-gradient(180deg, #0c1226 0%, var(--adm-rail) 100%);
+  border-right: 1px solid var(--adm-border);
+  position: relative;
+}
+.adm-rail::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: radial-gradient(800px 400px at -10% 0%, rgba(124,58,237,0.10), transparent 60%);
+  pointer-events: none;
+}
+.adm-rail-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--adm-r-sm);
+  font-size: 13px;
+  color: var(--adm-text-3);
+  transition: all var(--adm-dur-fast) var(--adm-ease-out);
+  position: relative;
+}
+.adm-rail-item:hover {
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--adm-text);
+}
+.adm-rail-item.is-active {
+  color: var(--adm-cyan-2);
+  background: linear-gradient(90deg, rgba(6,182,212,0.18) 0%, rgba(124,58,237,0.10) 100%);
+}
+.adm-rail-item.is-active::before {
+  content: "";
+  position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--adm-cyan);
+  box-shadow: 0 0 12px var(--adm-cyan);
+}
+
+/* ── Cards (glassmorphic / bento) ─────────────────────────────── */
+.adm-card {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%),
+    var(--adm-card);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-lg);
+  box-shadow: var(--adm-shadow-md);
+  transition: border-color var(--adm-dur) var(--adm-ease-out),
+              transform   var(--adm-dur) var(--adm-ease-out);
+}
+.adm-card:hover { border-color: var(--adm-border-hover); }
+
+.adm-card-glass {
+  background: linear-gradient(135deg, rgba(124,58,237,0.06) 0%, rgba(6,182,212,0.04) 100%),
+              rgba(26, 35, 58, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-lg);
+  box-shadow: var(--adm-shadow-lg);
+}
+
+/* ── KPI rail tiles (cyan, reference-image style) ─────────────── */
+.adm-kpi {
+  position: relative;
+  background: linear-gradient(160deg, #0e7490 0%, #0891b2 50%, #06b6d4 100%);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: var(--adm-r);
+  padding: 14px 16px;
+  color: white;
+  overflow: hidden;
+  transition: transform var(--adm-dur) var(--adm-ease-out),
+              box-shadow var(--adm-dur) var(--adm-ease-out);
+  box-shadow: var(--adm-shadow-md);
+}
+.adm-kpi:hover { transform: translateY(-2px); box-shadow: var(--adm-shadow-lg); }
+.adm-kpi::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: radial-gradient(120px 60px at 100% 0%, rgba(255,255,255,0.22), transparent 70%);
+  pointer-events: none;
+}
+.adm-kpi--violet {
+  background: linear-gradient(160deg, #4c1d95 0%, #6d28d9 50%, #7c3aed 100%);
+}
+.adm-kpi--indigo {
+  background: linear-gradient(160deg, #312e81 0%, #4338ca 50%, #6366f1 100%);
+}
+.adm-kpi--emerald {
+  background: linear-gradient(160deg, #064e3b 0%, #047857 50%, #10b981 100%);
+}
+.adm-kpi--amber {
+  background: linear-gradient(160deg, #78350f 0%, #b45309 50%, #f59e0b 100%);
+}
+.adm-kpi--rose {
+  background: linear-gradient(160deg, #831843 0%, #be185d 50%, #ec4899 100%);
+}
+.adm-kpi__label { font-size: 11px; font-weight: 500; opacity: 0.92; letter-spacing: 0.04em; }
+.adm-kpi__value { font-family: var(--adm-font-mono); font-size: 26px; font-weight: 700; margin-top: 6px; line-height: 1.05; }
+.adm-kpi__delta { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 6px; opacity: 0.92; }
+
+/* ── Range tabs (Day / Week / Month) ──────────────────────────── */
+.adm-range {
+  display: inline-flex;
+  background: var(--adm-surface);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-r-sm);
+  padding: 3px;
+}
+.adm-range__btn {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--adm-text-3);
+  border-radius: 4px;
+  transition: all var(--adm-dur-fast) var(--adm-ease-out);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.adm-range__btn:hover { color: var(--adm-text); }
+.adm-range__btn.is-active {
+  color: white;
+  background: linear-gradient(135deg, var(--adm-violet) 0%, var(--adm-indigo) 100%);
+  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.40);
+}
+
+/* ── Chips / pills ────────────────────────────────────────────── */
+.adm-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid var(--adm-border);
+  background: rgba(255,255,255,0.02);
+  color: var(--adm-text-2);
+}
+.adm-chip--violet  { color: var(--adm-violet-2); border-color: rgba(124,58,237,0.30); background: rgba(124,58,237,0.10); }
+.adm-chip--cyan    { color: var(--adm-cyan-2);   border-color: rgba(6,182,212,0.30);  background: rgba(6,182,212,0.10); }
+.adm-chip--emerald { color: #6ee7b7; border-color: rgba(34,197,94,0.30); background: rgba(34,197,94,0.10); }
+.adm-chip--amber   { color: #fbbf24; border-color: rgba(245,158,11,0.30); background: rgba(245,158,11,0.10); }
+.adm-chip--rose    { color: #fb7185; border-color: rgba(244,63,94,0.30);  background: rgba(244,63,94,0.10); }
+
+/* ── Tables ──────────────────────────────────────────────────── */
+.adm-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+.adm-table thead th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--adm-text-4);
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.015);
+  border-bottom: 1px solid var(--adm-border);
+}
+.adm-table tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--adm-divider);
+  color: var(--adm-text-2);
+}
+.adm-table tbody tr { transition: background var(--adm-dur-fast) var(--adm-ease-out); }
+.adm-table tbody tr:hover { background: rgba(124, 58, 237, 0.05); }
+.adm-table tbody tr:last-child td { border-bottom: none; }
+
+/* ── Section header ──────────────────────────────────────────── */
+.adm-section-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--adm-text-3);
+}
+
+/* ── Glow accent ─────────────────────────────────────────────── */
+.adm-glow-violet { box-shadow: var(--adm-glow); }
+.adm-glow-cyan   { box-shadow: var(--adm-glow-cyan); }
+
+/* ── Inputs ──────────────────────────────────────────────────── */
+[data-admin-theme] input[type="text"],
+[data-admin-theme] input[type="search"],
+[data-admin-theme] input[type="email"],
+[data-admin-theme] input[type="number"],
+[data-admin-theme] textarea,
+[data-admin-theme] select {
+  background: var(--adm-surface);
+  border: 1px solid var(--adm-border);
+  color: var(--adm-text);
+  transition: border-color var(--adm-dur-fast) var(--adm-ease-out),
+              box-shadow var(--adm-dur-fast) var(--adm-ease-out);
+}
+[data-admin-theme] input:focus,
+[data-admin-theme] textarea:focus,
+[data-admin-theme] select:focus {
+  outline: none;
+  border-color: var(--adm-violet);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18);
+}
+
+/* ── Scrollbar (subtle, dashboard-y) ─────────────────────────── */
+[data-admin-theme] *::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-admin-theme] *::-webkit-scrollbar-track { background: transparent; }
+[data-admin-theme] *::-webkit-scrollbar-thumb {
+  background: rgba(124, 58, 237, 0.18);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+[data-admin-theme] *::-webkit-scrollbar-thumb:hover { background: rgba(124, 58, 237, 0.35); background-clip: padding-box; }
+
+/* ── Status pill helpers ─────────────────────────────────────── */
+.adm-dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; }
+.adm-dot--live   { background: var(--adm-success); box-shadow: 0 0 8px var(--adm-success); animation: adm-pulse 1.8s var(--adm-ease) infinite; }
+.adm-dot--warn   { background: var(--adm-warning); }
+.adm-dot--down   { background: var(--adm-danger);  }
+
+@keyframes adm-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  [data-admin-theme] *,
+  [data-admin-theme] *::before,
+  [data-admin-theme] *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

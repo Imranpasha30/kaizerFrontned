@@ -339,7 +339,7 @@ export default function Billing() {
                     ["Brand kits",           "brand_kits",          (v) => fmtLimit(v)],
                     ["Veo 3 video gen / mo", "veo_videos_monthly",  (v) => fmtLimit(v)],
                     ["Advanced AI SEO",      "advanced_seo",        (v) => v ? "✓" : "—"],
-                    ["Campaigns",            "campaigns_enabled",   (v) => v ? "✓" : "—"],
+                    ["Publishing Plans",     "campaigns_enabled",   (v) => v ? "✓" : "—"],
                     ["Channel groups",       "channel_groups",      (v) => v ? "✓" : "—"],
                     ["Thumbnail A/B",        "thumb_ab",            (v) => v ? "✓" : "—"],
                     ["Analytics history",    "analytics_days",      (v) => v === -1 ? "Unlimited" : `${v} days`],

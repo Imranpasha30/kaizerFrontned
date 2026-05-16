@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Home, Plus, Menu, X, Palette, UploadCloud, Megaphone, BarChart3,
-  Radar, Zap, LogOut, LogIn, UserPlus, Image as ImageIcon,
-  Settings as SettingsIcon, CreditCard, Radio, Shield,
+  Home, Plus, Menu, X, Palette, UploadCloud, CalendarClock, LineChart,
+  Compass, Zap, LogOut, LogIn, UserPlus, Image as ImageIcon,
+  Settings as SettingsIcon, CreditCard, Radio, Shield, Rocket,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import ThemeToggle from "./ThemeToggle";
@@ -15,16 +15,24 @@ export default function NavBar() {
   // Drawer state — only used on mobile (sidebar is always visible on ≥sm).
   const [open, setOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef(null);
 
   // Close drawer on every route change so taps don't leave it stuck open.
   useEffect(() => { setOpen(false); }, [loc.pathname]);
 
   // Close user menu on outside click.
+  //
+  // ``sidebarBody`` is rendered twice (desktop <aside> + mobile drawer),
+  // so a single ref can't reliably point at the visible instance. We
+  // tag both instances with data-user-menu="root" and use
+  // ``event.target.closest('[data-user-menu="root"]')`` — this walks
+  // the real DOM tree from wherever the click happened and returns the
+  // nearest matching ancestor regardless of which instance owns it.
   useEffect(() => {
     if (!userMenuOpen) return;
     function onClick(e) {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+      const inside = !!(e.target && typeof e.target.closest === "function"
+                        && e.target.closest('[data-user-menu="root"]'));
+      if (!inside) {
         setUserMenuOpen(false);
       }
     }
@@ -39,13 +47,15 @@ export default function NavBar() {
     { to: "/app",           icon: Home,        label: "Jobs" },
     { to: "/new",           icon: Plus,        label: "New Job" },
     { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
+    { to: "/express",       icon: Rocket,      label: "Express Mode", badge: "NEW" },
+    { to: "/live-studio",   icon: Radio,       label: "Live Studio",  badge: "NEW" },
     { to: "/live",          icon: Radio,       label: "Live", badge: "NEW" },
     { to: "/assets",        icon: ImageIcon,   label: "Assets" },
     { to: "/channels",      icon: Palette,     label: "Style Profiles" },
     { to: "/uploads",       icon: UploadCloud, label: "Uploads" },
-    { to: "/campaigns",     icon: Megaphone,   label: "Campaigns" },
-    { to: "/performance",   icon: BarChart3,   label: "Performance" },
-    { to: "/trending",      icon: Radar,       label: "Trending" },
+    { to: "/campaigns",     icon: CalendarClock, label: "Publishing Plans" },
+    { to: "/performance",   icon: LineChart,     label: "Insights" },
+    { to: "/trending",      icon: Compass,       label: "Topic Radar" },
     ...(user?.is_admin ? [{ to: "/admin", icon: Shield, label: "Admin" }] : []),
   ];
 
@@ -105,7 +115,7 @@ export default function NavBar() {
           <ThemeToggle />
         </div>
         {isAuthenticated ? (
-          <div ref={userMenuRef} className="relative">
+          <div data-user-menu="root" className="relative">
             <button
               onClick={() => setUserMenuOpen((v) => !v)}
               className="w-full flex items-center gap-2 px-2 py-2 rounded hover:bg-white/5 text-gray-200"

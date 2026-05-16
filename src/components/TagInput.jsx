@@ -76,19 +76,25 @@ export default function TagInput({ value = [], onChange, placeholder = "", hasht
       className="mt-1 flex flex-wrap items-center gap-1.5 bg-black/40 border border-border rounded px-2 py-1.5 min-h-[36px] focus-within:border-accent cursor-text"
     >
       {(value || []).map((tag, i) => (
+        // High-contrast chips that work in both light and dark themes.
+        // hashtagMode → accent-colored fill (red brand color) with
+        //               white text. Non-hashtag → solid slate-700
+        //               fill with white text. The previous gray-200-
+        //               on-gray-800 scheme was unreadable when the
+        //               theme provider's accents shifted.
         <span
           key={`${tag}-${i}`}
           className={`inline-flex items-center gap-1 text-xs rounded-full px-2 py-0.5 ${
             hashtagMode
-              ? "bg-accent/20 text-accent2 border border-accent/40"
-              : "bg-gray-800 text-gray-200 border border-gray-700"
+              ? "bg-accent text-white border border-accent2/60"
+              : "bg-slate-700 text-white border border-slate-600"
           }`}
         >
           <span className="max-w-[180px] truncate">{tag}</span>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); remove(i); }}
-            className="text-gray-400 hover:text-white"
+            className="text-white/70 hover:text-white"
             aria-label={`Remove ${tag}`}
           >
             <X size={11} />

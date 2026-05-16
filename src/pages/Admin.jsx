@@ -5,12 +5,17 @@ import {
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
   BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
+  Gauge, Terminal,
 } from "lucide-react";
 import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Input from "../components/ui/Input";
 import Modal from "../components/Modal";
+import AdminUsage from "./AdminUsage";
+import AdminCapacity from "./AdminCapacity";
+import AdminLogs from "./AdminLogs";
+import "../theme/admin-theme.css";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Small utilities
@@ -1599,8 +1604,11 @@ function AuditTab() {
 const TABS = [
   { path: "overview", label: "Overview",    icon: Activity,    comp: OverviewTab   },
   { path: "system",   label: "System",      icon: Cpu,         comp: SystemTab     },
+  { path: "capacity", label: "Capacity",    icon: Gauge,       comp: AdminCapacity },
+  { path: "logs",     label: "Logs",        icon: Terminal,    comp: AdminLogs     },
   { path: "users",    label: "Users",       icon: Users,       comp: UsersTab      },
   { path: "jobs",     label: "Jobs",        icon: Briefcase,   comp: JobsTab       },
+  { path: "usage",    label: "AI & quota",  icon: BarChart3,   comp: AdminUsage    },
   { path: "gemini",   label: "Gemini usage",icon: Sparkles,    comp: GeminiTab     },
   { path: "live",     label: "Live events", icon: Radio,       comp: LiveEventsTab },
   { path: "settings", label: "Settings",    icon: SettingsIcon, comp: SettingsTab  },
@@ -1609,34 +1617,48 @@ const TABS = [
 
 function AdminSidebar() {
   return (
-    <aside className="w-56 flex-shrink-0 border-r border-border bg-[#0a0a0a] min-h-[calc(100vh-3rem)]">
-      <div className="p-4 border-b border-border">
+    <aside className="adm-rail w-60 flex-shrink-0 min-h-[calc(100vh-3rem)] flex flex-col">
+      {/* Brand */}
+      <div className="px-4 pt-5 pb-4">
         <div className="flex items-center gap-2">
-          <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-xs tracking-widest">
+          <div
+            className="rounded-md px-2 py-1 text-white font-black text-[11px] tracking-[0.18em]"
+            style={{
+              background: "linear-gradient(135deg, var(--adm-violet) 0%, var(--adm-cyan) 100%)",
+              boxShadow: "0 4px 12px rgba(124,58,237,0.30)",
+            }}
+          >
             KAIZER
           </div>
-          <span className="text-[11px] text-accent2 font-bold tracking-[0.2em]">ADMIN</span>
+          <span className="text-[10px] font-semibold tracking-[0.22em]" style={{ color: "var(--adm-cyan-2)" }}>
+            ADMIN
+          </span>
+        </div>
+        <div className="text-[10px] mt-2 tracking-wider uppercase" style={{ color: "var(--adm-text-5)" }}>
+          control center
         </div>
       </div>
-      <nav className="p-2 flex flex-col gap-0.5">
+
+      <nav className="px-2 flex flex-col gap-0.5 flex-1">
         {TABS.map((t) => (
           <NavLink
             key={t.path}
             to={t.path}
-            className={({ isActive }) =>
-              `flex items-center gap-2 px-3 py-2 rounded text-sm ${
-                isActive
-                  ? "bg-accent/10 text-accent2 border-l-2 border-accent2 -ml-[2px] pl-[14px]"
-                  : "text-gray-400 hover:text-gray-100 hover:bg-white/5"
-              }`
-            }
+            className={({ isActive }) => `adm-rail-item ${isActive ? "is-active" : ""}`}
           >
-            <t.icon size={14} /> {t.label}
+            <t.icon size={14} />
+            <span className="truncate">{t.label}</span>
           </NavLink>
         ))}
       </nav>
-      <div className="p-3 border-t border-border mt-2">
-        <Link to="/app" className="text-[11px] text-gray-500 hover:text-gray-300 flex items-center gap-1">
+
+      {/* Footer */}
+      <div className="px-3 pt-3 pb-4 border-t" style={{ borderColor: "var(--adm-border)" }}>
+        <Link
+          to="/app"
+          className="text-[11px] flex items-center gap-1.5 hover:text-white transition-colors"
+          style={{ color: "var(--adm-text-4)" }}
+        >
           <ChevronLeft size={11} /> Back to app
         </Link>
       </div>
@@ -1646,11 +1668,25 @@ function AdminSidebar() {
 
 function AdminHeader({ tabLabel, onRefresh }) {
   return (
-    <header className="flex items-center justify-between px-5 py-3 border-b border-border bg-panel">
+    <header
+      className="flex items-center justify-between px-6 py-3.5 border-b"
+      style={{
+        borderColor: "var(--adm-border)",
+        background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(10,15,30,0.85) 100%)",
+        backdropFilter: "blur(12px)",
+      }}
+    >
       <div className="flex items-center gap-3 min-w-0">
-        <h1 className="text-sm font-bold tracking-[0.18em] text-gray-100">KAIZER ADMIN</h1>
-        <span className="text-gray-600">/</span>
-        <span className="text-sm text-gray-300 truncate">{tabLabel}</span>
+        <h1 className="text-[11px] font-bold tracking-[0.22em]" style={{ color: "var(--adm-text-3)" }}>
+          KAIZER · ADMIN
+        </h1>
+        <span style={{ color: "var(--adm-text-5)" }}>/</span>
+        <span className="text-sm font-medium truncate" style={{ color: "var(--adm-text)" }}>
+          {tabLabel}
+        </span>
+        <span className="adm-chip adm-chip--emerald ml-2">
+          <span className="adm-dot adm-dot--live" /> Live
+        </span>
       </div>
       <div className="flex items-center gap-2">
         {onRefresh && (
@@ -1667,9 +1703,9 @@ function AdminTabWrapper({ tab }) {
   const [refreshSig, setRefreshSig] = useState(0);
   const Comp = tab.comp;
   return (
-    <div className="flex flex-col min-h-[calc(100vh-3rem)]">
+    <div className="flex flex-col min-h-[calc(100vh-3rem)]" style={{ background: "var(--adm-bg)" }}>
       <AdminHeader tabLabel={tab.label} onRefresh={() => setRefreshSig((s) => s + 1)} />
-      <div className="flex-1 p-5 bg-dark">
+      <div className="flex-1 p-6">
         {/* key bumps to force a remount/refetch when the header Refresh is clicked */}
         <Comp key={refreshSig} />
       </div>
@@ -1679,7 +1715,7 @@ function AdminTabWrapper({ tab }) {
 
 export default function Admin() {
   return (
-    <div className="flex bg-dark text-gray-100">
+    <div data-admin-theme className="flex" style={{ background: "var(--adm-bg)", color: "var(--adm-text)" }}>
       <AdminSidebar />
       <div className="flex-1 min-w-0">
         <Routes>

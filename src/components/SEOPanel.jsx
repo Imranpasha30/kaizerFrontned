@@ -67,9 +67,14 @@ function BreakdownBar({ label, value, max }) {
  * Power-ups feed into generation: Google News, Google Trends, YouTube top-5.
  * Independent deterministic verifier scores the output; retry loop targets ≥95.
  */
-export default function SEOPanel({ clip, onSeoChange }) {
+export default function SEOPanel({ clip, onSeoChange, jobClips = [] }) {
   const [channels, setChannels]       = useState([]);
   const [channelsLoading, setChLoad]  = useState(true);
+  // Bulk-share state — for "Apply this SEO to all Shorts in this job".
+  // Tracked separately from single-clip ``saving`` so the UI can show
+  // per-clip progress without blocking the rest of the panel.
+  const [shareBusy, setShareBusy]     = useState(false);
+  const [shareProgress, setShareProgress] = useState({ done: 0, total: 0 });
 
   // Optional writing-voice reference.  null = content-pure, no voice borrowing.
   const [styleSourceId, setStyleSourceId] = useState(null);
@@ -223,6 +228,57 @@ export default function SEOPanel({ clip, onSeoChange }) {
     if (!seo) return;
     setDraft(toDraft(seo));
     setDirty(false);
+  }
+
+  // ── Bulk SEO share ──────────────────────────────────────────
+  // Copy the current clip's SEO (title / description / tags) to every
+  // OTHER Short in the same job. Solves the "I generated SEO on one
+  // clip but the others can't publish because they have no SEO" pain.
+  // Sequential to stay friendly to the backend; if one fails the rest
+  // still get applied.
+  async function handleApplyToAllShorts() {
+    if (!clip || !seo) return;
+    const targets = (jobClips || []).filter(
+      (c) =>
+        c.id !== clip.id &&
+        (c.frame_type || "").toLowerCase() !== "bulletin"
+    );
+    if (targets.length === 0) {
+      setError("No other Shorts in this job to share with.");
+      return;
+    }
+    if (!confirm(
+      `Apply this clip's SEO (title / description / tags) to ` +
+      `${targets.length} other Short${targets.length > 1 ? "s" : ""} ` +
+      `in this job? This will OVERWRITE their existing SEO.`
+    )) return;
+
+    setShareBusy(true);
+    setError("");
+    setShareProgress({ done: 0, total: targets.length });
+    // ── Single server-side call ─────────────────────────────────
+    // Uses /clips/{id}/seo/apply-to-job-shorts which does the upsert
+    // server-side — handles "target had no SEO yet" cleanly (the
+    // old per-clip PUT loop failed there because the PUT endpoint
+    // refuses to create new SEO rows). One round trip is also faster
+    // than N for big jobs.
+    try {
+      const res = await api.applySeoToJobShorts(clip.id);
+      setShareProgress({ done: res.total_applied || targets.length, total: targets.length });
+      onSeoChange?.(seo);
+      // Small banner-style feedback in the existing error slot
+      // (transient — clears on next user action).
+      const parts = [];
+      if (res.created) parts.push(`created on ${res.created}`);
+      if (res.updated) parts.push(`updated on ${res.updated}`);
+      if (res.skipped_bulletin) parts.push(`${res.skipped_bulletin} bulletin clip(s) skipped`);
+      if (res.skipped_identical) parts.push(`${res.skipped_identical} already had identical SEO`);
+      console.log(`[SEO bulk share] ${parts.join(", ") || "no changes"}`);
+    } catch (e) {
+      setError(`Bulk SEO share failed: ${e?.message || e}`);
+    } finally {
+      setShareBusy(false);
+    }
   }
 
   async function handleClear() {
@@ -567,23 +623,50 @@ export default function SEOPanel({ clip, onSeoChange }) {
 
       {/* Save bar */}
       {hasSeo && (
-        <div className="p-3 border-t border-border flex-shrink-0 flex gap-2">
-          <button
-            onClick={handleRevert}
-            disabled={!dirty || saving}
-            className="btn btn-secondary flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
-          >
-            <RotateCcw size={12} /> Revert
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className="btn btn-green flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
-          >
-            {saving
-              ? <><Loader2 size={12} className="animate-spin" /> Saving…</>
-              : <><Save size={12} /> Save edits</>}
-          </button>
+        <div className="p-3 border-t border-border flex-shrink-0 flex flex-col gap-2">
+          <div className="flex gap-2">
+            <button
+              onClick={handleRevert}
+              disabled={!dirty || saving}
+              className="btn btn-secondary flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+            >
+              <RotateCcw size={12} /> Revert
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              className="btn btn-green flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+            >
+              {saving
+                ? <><Loader2 size={12} className="animate-spin" /> Saving…</>
+                : <><Save size={12} /> Save edits</>}
+            </button>
+          </div>
+          {/* "Apply to all Shorts in this job" — shows only when there
+              IS something to share to (≥1 other Short in the job).
+              Solves the "I only generated SEO on clip 1 but the rest
+              can't publish because they don't have SEO" problem. */}
+          {(jobClips || []).filter(
+            (c) =>
+              c.id !== clip?.id &&
+              (c.frame_type || "").toLowerCase() !== "bulletin"
+          ).length > 0 && (
+            <button
+              onClick={handleApplyToAllShorts}
+              disabled={shareBusy || saving || dirty}
+              className="btn btn-secondary flex items-center justify-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+              title="Copy this clip's SEO (title / description / tags) to every other Short in this job"
+            >
+              {shareBusy
+                ? <><Loader2 size={12} className="animate-spin" /> Applying to {shareProgress.done}/{shareProgress.total}…</>
+                : <>📋 Apply this SEO to all Shorts in this job</>}
+            </button>
+          )}
+          {dirty && (
+            <p className="text-[10px] text-amber-400 leading-snug">
+              Save your edits first — bulk-apply uses the saved version.
+            </p>
+          )}
         </div>
       )}
     </div>

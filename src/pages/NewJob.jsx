@@ -24,17 +24,101 @@ export default function NewJob() {
   const [languages, setLanguages] = useState([]);
   const [useDefaultImage, setUseDefaultImage] = useState(false);
   const [defaultAsset, setDefaultAsset] = useState(null);
+  // Bulletin pre-selected images. Only relevant when the platform
+  // produces a bulletin (youtube_full or youtube_full_plus_shorts).
+  // When non-empty, the bulletin pass cycles through these instead of
+  // calling OpenAI gpt-image-1 per story.
+  const [userAssets, setUserAssets] = useState([]);
+  const [bulletinImageIds, setBulletinImageIds] = useState([]);
+  // Cached-images prompt: when the user picks a video file we hash it
+  // and ask the backend if previously-generated images exist for that
+  // exact source. Non-empty result drives the "reuse" / "regenerate"
+  // banner above the bulletin pre-select grid.
+  const [videoHash,        setVideoHash]        = useState("");
+  const [cachedAssets,     setCachedAssets]     = useState([]);
+  const [cachedDecision,   setCachedDecision]   = useState("");  // "" | "reuse" | "fresh"
+  const [hashingFile,      setHashingFile]      = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [uploadPct, setUploadPct]  = useState(0);
   const [error, setError]     = useState("");
   const dropRef = useRef(null);
+
+  // First-4-MiB SHA-256 of (size_string + first_4MiB_bytes), truncated
+  // to 32 hex chars — matches the Python ``gemini_cache.hash_file_prefix``
+  // exactly so the backend lookup hits the same key the runner stamped
+  // on the previously-generated UserAssets.
+  async function hashVideoFile(f) {
+    const PREFIX = 4 * 1024 * 1024;
+    const sizeBytes = new TextEncoder().encode(`${f.size}`);
+    const prefixBuf = await f.slice(0, PREFIX).arrayBuffer();
+    const combined = new Uint8Array(sizeBytes.length + prefixBuf.byteLength);
+    combined.set(sizeBytes, 0);
+    combined.set(new Uint8Array(prefixBuf), sizeBytes.length);
+    const hashBuf = await crypto.subtle.digest("SHA-256", combined);
+    return Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("")
+      .substring(0, 32);
+  }
 
   useEffect(() => {
     api.platforms().then(setPlatforms);
     api.frameLayouts().then(setFrames);
     api.listLanguages().then((list) => setLanguages(list || []));
     api.getDefaultAsset().then(setDefaultAsset).catch(() => setDefaultAsset(null));
+    // Fetch the user's image assets once — used by the bulletin
+    // pre-select grid. Filter to images (skip videos / fonts) and
+    // sort newest first so freshly-generated assets appear at top.
+    api.listAssets().then((all) => {
+      const imgs = (all || []).filter(a =>
+        (a.mime_type || "").startsWith("image/")
+      );
+      setUserAssets(imgs);
+    }).catch(() => setUserAssets([]));
   }, []);
+
+  // Hash the picked video and look up previously-generated assets for
+  // the same source. Runs once per file pick — re-picking the same
+  // File object is a no-op because the effect dep is the File reference.
+  useEffect(() => {
+    if (!file) {
+      setVideoHash(""); setCachedAssets([]); setCachedDecision("");
+      return;
+    }
+    let cancelled = false;
+    setHashingFile(true);
+    setCachedDecision("");
+    hashVideoFile(file)
+      .then((h) => {
+        if (cancelled) return;
+        setVideoHash(h);
+        return api.listAssetsByVideoHash(h);
+      })
+      .then((rows) => {
+        if (cancelled) return;
+        setCachedAssets(rows || []);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        console.warn("video-hash lookup failed:", e);
+        setCachedAssets([]);
+      })
+      .finally(() => { if (!cancelled) setHashingFile(false); });
+    return () => { cancelled = true; };
+  }, [file]);
+
+  // Which platforms render a bulletin and therefore benefit from
+  // bulletin pre-selected images.
+  const platformProducesBulletin =
+    platform === "youtube_full" || platform === "youtube_full_plus_shorts";
+
+  function toggleBulletinImage(assetId) {
+    setBulletinImageIds(prev =>
+      prev.includes(assetId)
+        ? prev.filter(id => id !== assetId)
+        : [...prev, assetId]
+    );
+  }
 
   // Drag & drop
   useEffect(() => {
@@ -66,6 +150,13 @@ export default function NewJob() {
       form.append("language", language);
       if (useDefaultImage && defaultAsset) {
         form.append("use_default_image", "true");
+      }
+      // Bulletin pre-selected images. Backend only honours these when
+      // the platform involves a bulletin (youtube_full or
+      // youtube_full_plus_shorts); harmless to send for Shorts-only
+      // platforms — the field is just ignored.
+      if (platformProducesBulletin && bulletinImageIds.length > 0) {
+        form.append("bulletin_image_ids", bulletinImageIds.join(","));
       }
       const { id } = await api.createJob(form, pct => setUploadPct(pct));
       navigate(`/jobs/${id}`);
@@ -299,6 +390,154 @@ export default function NewJob() {
                 </div>
               )}
             </div>
+
+            {/* Bulletin pre-selected images — only relevant when the
+                pipeline will render a bulletin (youtube_full or
+                youtube_full_plus_shorts). Skipping the OpenAI image-
+                gen step saves ~$0.04 per image, ~$0.20-0.40 per
+                bulletin, and avoids the 5-img/min rate-limit pause. */}
+            {platformProducesBulletin && (
+              <div className="bg-surface border border-border rounded p-3 mb-4">
+                <div className="text-sm font-medium text-gray-200 mb-1">
+                  Pre-select bulletin images <span className="text-[11px] text-gray-500 font-normal">(optional)</span>
+                </div>
+                <div className="text-[11px] text-gray-500 mb-3">
+                  Pick any number of images. The bulletin's per-story carousel will
+                  cycle through your selection instead of generating fresh images
+                  via OpenAI. Leave empty to keep auto-generation.
+                </div>
+
+                {/* "We've seen this video before — reuse its images?" prompt.
+                    Only renders while the user hasn't decided yet, the
+                    hash is computed, and the backend found prior
+                    generated assets for THIS exact source. */}
+                {hashingFile && (
+                  <div className="text-[11px] text-gray-500 mb-3 flex items-center gap-1.5">
+                    <Loader2 size={11} className="animate-spin" />
+                    Checking for previously-generated images for this video…
+                  </div>
+                )}
+                {!hashingFile && cachedAssets.length > 0 && !cachedDecision && (
+                  <div className="bg-accent2/10 border border-accent2/40 rounded p-3 mb-3">
+                    <div className="text-sm font-medium text-accent2 mb-1 flex items-center gap-1.5">
+                      <ImageIcon size={13} /> Same video detected
+                    </div>
+                    <div className="text-[12px] text-gray-300 mb-3">
+                      We already generated{" "}
+                      <span className="font-semibold text-white">{cachedAssets.length}</span>{" "}
+                      image{cachedAssets.length === 1 ? "" : "s"} for this exact
+                      source video in a previous job. Reuse them instead of
+                      calling OpenAI gpt-image-1 again ($ + rate-limit saved)?
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBulletinImageIds(cachedAssets.map(a => a.id));
+                          setCachedDecision("reuse");
+                        }}
+                        className="bg-accent2 hover:bg-accent text-white text-xs font-medium px-3 py-1.5 rounded"
+                      >
+                        Reuse {cachedAssets.length} image{cachedAssets.length === 1 ? "" : "s"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCachedDecision("fresh")}
+                        className="bg-black/40 hover:bg-black/60 border border-border text-gray-200 text-xs px-3 py-1.5 rounded"
+                      >
+                        Generate fresh
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!hashingFile && cachedDecision === "reuse" && (
+                  <div className="text-[11px] text-accent2 mb-3 flex items-center gap-1.5">
+                    ✓ Reusing {cachedAssets.length} image{cachedAssets.length === 1 ? "" : "s"} from previous job — no OpenAI call.
+                  </div>
+                )}
+                {!hashingFile && cachedDecision === "fresh" && (
+                  <div className="text-[11px] text-gray-500 mb-3">
+                    Generating fresh images this run.
+                    {" "}
+                    <button
+                      type="button"
+                      onClick={() => setCachedDecision("")}
+                      className="text-accent2 hover:text-white underline"
+                    >
+                      Reconsider
+                    </button>
+                  </div>
+                )}
+
+                {userAssets.length === 0 ? (
+                  <div className="text-[11px] text-gray-500">
+                    No image assets yet — upload some on the{" "}
+                    <Link to="/assets" className="text-accent2 hover:text-white underline">
+                      Assets
+                    </Link>{" "}
+                    page first.
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-64 overflow-y-auto pr-1">
+                      {userAssets.map((a) => {
+                        const selected = bulletinImageIds.includes(a.id);
+                        const order = bulletinImageIds.indexOf(a.id) + 1;
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => toggleBulletinImage(a.id)}
+                            className={`relative aspect-square rounded overflow-hidden border-2 transition-all ${
+                              selected
+                                ? "border-accent2 ring-2 ring-accent2/40"
+                                : "border-border hover:border-gray-500"
+                            }`}
+                            title={a.filename}
+                          >
+                            {a.thumb_url ? (
+                              <img
+                                src={api.mediaUrl(a.thumb_url)}
+                                alt={a.filename}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-black/40 flex items-center justify-center">
+                                <ImageIcon size={14} className="text-gray-600" />
+                              </div>
+                            )}
+                            {selected && (
+                              <span className="absolute top-1 left-1 bg-accent2 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                                {order}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {bulletinImageIds.length > 0 && (
+                      <div className="text-[11px] text-gray-400 mt-2 flex items-center justify-between">
+                        <span>
+                          <span className="text-accent2 font-medium">
+                            {bulletinImageIds.length}
+                          </span>{" "}
+                          image{bulletinImageIds.length === 1 ? "" : "s"} selected
+                          {" · "}cycle order matches the numbers
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setBulletinImageIds([])}
+                          className="text-gray-500 hover:text-white underline"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
 
             {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
             {submitting && (

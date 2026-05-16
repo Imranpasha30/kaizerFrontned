@@ -375,6 +375,55 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                   </button>
                 </div>
 
+                {/* Per-YT-account upload route. Optimistic update —
+                    we flip the local row immediately, then send the
+                    PATCH; on failure we revert + surface the error. */}
+                <div className="flex items-center gap-2 mb-2 p-1.5 rounded border border-border bg-black/30">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Upload via</div>
+                    <div className="text-[11px] text-gray-500">
+                      {!acc.upload_provider && "Inherits system default (Admin → Settings)"}
+                      {acc.upload_provider === "postiz" && "Always Postiz (cross-platform)"}
+                      {acc.upload_provider === "kaizer" && "Always Native YouTube (OAuth direct)"}
+                      {acc.upload_provider === "native_rtmp" && "Always Native RTMP live (quota-friendly past-stream)"}
+                    </div>
+                  </div>
+                  <select
+                    value={acc.upload_provider || ""}
+                    onChange={async (e) => {
+                      if (!acc.primary_profile_id) return;
+                      const next = e.target.value || null;
+                      const prev = acc.upload_provider || null;
+                      // Optimistic flip
+                      setAccounts((list) => list.map((a) => (
+                        a.primary_profile_id === acc.primary_profile_id
+                          ? { ...a, upload_provider: next }
+                          : a
+                      )));
+                      setError(""); setNotice("");
+                      try {
+                        await api.setYtAccountUploadProvider(acc.primary_profile_id, next);
+                        setNotice(`Upload route for ${acc.youtube_channel_title || "this account"} → ${next || "system default"}.`);
+                      } catch (err) {
+                        // Revert on failure
+                        setAccounts((list) => list.map((a) => (
+                          a.primary_profile_id === acc.primary_profile_id
+                            ? { ...a, upload_provider: prev }
+                            : a
+                        )));
+                        setError(err.message || "Failed to set upload route");
+                      }
+                    }}
+                    className="bg-black/40 border border-border rounded px-1.5 py-1 text-[11px] text-gray-200 focus:border-accent2 focus:outline-none"
+                    title="Where uploads for this YouTube account should go"
+                  >
+                    <option value="">System default</option>
+                    <option value="postiz">Postiz</option>
+                    <option value="kaizer">Native YouTube</option>
+                    <option value="native_rtmp">Native RTMP-live (~6× quota savings)</option>
+                  </select>
+                </div>
+
                 {/* Brand Accounts on this Google login — multi-channel
                     picker. Populated by exchange_code at OAuth time so
                     every Brand Account the email owns appears here as

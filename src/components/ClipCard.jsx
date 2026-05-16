@@ -47,29 +47,40 @@ export default function ClipCard({ clip, jobId, index }) {
         <p className="text-xs text-gray-300 line-clamp-2 leading-relaxed min-h-[2.5rem]">
           {clip.text || <span className="text-gray-600">No text</span>}
         </p>
-        <div className="flex gap-1.5">
+        {/* Button row — Edit grows but is allowed to shrink below its
+            content width via ``min-w-0`` + ``truncate``, so the two
+            icon-only action buttons (Publish / Download) on the right
+            never get clipped by the card's ``overflow-hidden``. The
+            ``shrink-0`` on the icon buttons pins their width so they
+            stay perfectly square even when the row is tight. */}
+        <div className="flex gap-1 items-stretch">
           <Link
             to={`/jobs/${jobId}/edit/${clip.id}`}
-            className="btn btn-secondary flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5"
+            className="btn btn-secondary flex-1 min-w-0 flex items-center justify-center gap-1.5 text-xs py-1.5"
             title={hasSeo ? "Edit clip" : "Edit clip — generate SEO here"}
           >
-            <Edit2 size={12} /> Edit
-            {hasSeo && <Sparkles size={10} className="text-accent2" />}
+            <Edit2 size={12} className="shrink-0" />
+            <span className="truncate">Edit</span>
+            {hasSeo && <Sparkles size={10} className="text-accent2 shrink-0" />}
           </Link>
           {videoUrl && (
             <button
+              type="button"
               onClick={() => setShowPublish(true)}
-              className="btn flex items-center justify-center gap-1 text-xs py-1.5 px-2 bg-accent/80 hover:bg-accent text-white border-transparent"
+              className="btn shrink-0 flex items-center justify-center text-xs py-1.5 px-2 bg-accent/80 hover:bg-accent text-white border-transparent"
               title="Publish to YouTube"
+              aria-label="Publish to YouTube"
             >
               <Youtube size={12} />
             </button>
           )}
           {videoUrl && (
             <button
+              type="button"
               onClick={() => setShowDownload(true)}
-              className="btn btn-secondary flex items-center justify-center gap-1 text-xs py-1.5 px-2"
+              className="btn btn-secondary shrink-0 flex items-center justify-center text-xs py-1.5 px-2"
               title="Download with channel logo"
+              aria-label="Download with channel logo"
             >
               <Download size={12} />
             </button>

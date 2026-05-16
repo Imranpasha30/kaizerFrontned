@@ -70,6 +70,11 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   // be used for this upload. Empty string = use this clip's own SEO.
   const [siblings, setSiblings] = useState([]);
   const [donorClipId, setDonorClipId] = useState("");
+  // Per-publish upload route override.  "" = let the backend resolve
+  // via Channel.upload_provider → system default.  Otherwise force
+  // every destination on THIS publish to the chosen path. Useful
+  // for side-by-side comparison runs.
+  const [publishProvider, setPublishProvider] = useState("");
 
   // Publish presets: "global" | "individual" | "<group_id>"
   // - global   = every connected YT account auto-selected (default)
@@ -121,6 +126,7 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     // Load the user's named publish presets — shows up as preset buttons.
     api.listChannelGroups().then(setGroups).catch(() => setGroups([]));
     setPreset("global");
+    setPublishProvider("");
 
     // Load sibling clips so user can borrow another clip's SEO.
     setDonorClipId("");
@@ -336,6 +342,11 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     if (needsPrivateForSchedule) {
       // datetime-local → treat as local, convert to ISO UTC
       payload.publish_at = new Date(publishAt).toISOString();
+    }
+    if (publishProvider) {
+      // Forces this whole publish to the chosen route, overriding
+      // both the per-channel default and the system default.
+      payload.upload_provider = publishProvider;
     }
 
     try {
@@ -665,6 +676,34 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
                       ? `All destinations will use "${channels.find((c) => c.id === v.channelId)?.name || "selected"}" variant (score ${v.score}/100).`
                       : "Selected variant will be used for every destination.";
                   })()}
+            </p>
+          </div>
+        )}
+
+        {/* Per-publish upload provider override.  Hidden for non-admins
+            because regular users shouldn't need to know this exists —
+            the channel default already does the right thing. */}
+        {user?.is_admin && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-gray-300">Upload via (override)</label>
+            <select
+              value={publishProvider}
+              onChange={(e) => setPublishProvider(e.target.value)}
+              className="bg-surface border border-border rounded px-2 py-1.5 text-xs text-gray-200"
+            >
+              <option value="">Channel / system default</option>
+              <option value="postiz">Force Postiz</option>
+              <option value="kaizer">Force Native YouTube</option>
+              <option value="native_rtmp">Force Native RTMP-live (quota-friendly)</option>
+            </select>
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              For comparison runs — publish the same clip twice (once via
+              each path) and diff the [compare:native] vs [compare:postiz]
+              log lines on the Uploads page.
+              <br />
+              <strong className="text-gray-400">Native RTMP-live</strong> saves
+              ~6× quota (250 units vs 1,600) but takes the video's real-time
+              duration to push and lands as a "past stream" on the channel.
             </p>
           </div>
         )}

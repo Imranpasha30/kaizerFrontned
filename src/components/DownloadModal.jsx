@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Download, Loader2, Check, AlertCircle } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Download, Loader2, Check, AlertCircle, FileText } from "lucide-react";
 import { api } from "../api/client";
 import Modal from "./Modal";
 
@@ -21,6 +21,21 @@ export default function DownloadModal({ open, onClose, clip }) {
   const [perCh, setPerCh] = useState({});
   const [running, setRunning] = useState(false);
   const [topError, setTopError] = useState("");
+  // Throttle the per-channel progress callback. XHR's onprogress fires
+  // dozens of times per second on a fast connection — left raw, every
+  // tick triggered a setPerCh which re-rendered the full channel list
+  // (and rippled through any parent component listening on the modal).
+  // We commit a new state only when the integer % bumps AND when at
+  // least ``THROTTLE_MS`` has elapsed since the last commit for that
+  // channel.  Result: at most ~5 renders/sec/channel during a download.
+  const lastProgressRef = useRef({});   // { [channelId]: { pct, ts } }
+  const THROTTLE_MS = 200;
+  // SEO download state — independent of the per-channel video download
+  // loop so the user can fetch SEO even while a video render is
+  // streaming.  null = idle, "running" = in flight, "done"/"error" =
+  // terminal.  Surfaced inline below the action row.
+  const [seoStatus, setSeoStatus] = useState(null);
+  const [seoError,  setSeoError]  = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -74,11 +89,38 @@ export default function DownloadModal({ open, onClose, clip }) {
     );
   }, [running, perCh, selectedIds]);
 
+  // SEO download — fires one HTTP per selected channel so the user
+  // gets per-channel composed SEO (with channel footer + mandatory
+  // hashtags applied).  When no channel is selected, falls back to
+  // a single generic SEO download keyed only on the clip.
+  async function handleDownloadSeo() {
+    if (!clip) return;
+    setSeoStatus("running");
+    setSeoError("");
+    try {
+      if (selectedCount === 0) {
+        await api.downloadClipSeo(clip.id);
+      } else {
+        for (const channelId of selectedIds) {
+          await api.downloadClipSeo(clip.id, { channelId });
+        }
+      }
+      setSeoStatus("done");
+      // Auto-clear the "done" badge after a moment so the modal looks
+      // idle if the user wants to download again.
+      setTimeout(() => setSeoStatus(null), 2500);
+    } catch (e) {
+      setSeoStatus("error");
+      setSeoError(e.message || "SEO download failed");
+    }
+  }
+
   async function handleDownload() {
     if (selectedCount === 0 || !clip) return;
     setRunning(true);
     setTopError("");
     setPerCh({});
+    lastProgressRef.current = {};
 
     const ids = [...selectedIds];
     // Sequential rather than parallel — the server's ffmpeg is single-
@@ -88,11 +130,23 @@ export default function DownloadModal({ open, onClose, clip }) {
       const safeName = (ch?.name || `ch${channelId}`).replace(/[^A-Za-z0-9_-]/g, "_");
       const fname = `${safeName}_${clip.filename || `clip_${clip.id}.mp4`}`;
       setPerCh((s) => ({ ...s, [channelId]: { status: "downloading", pct: 0 } }));
+      lastProgressRef.current[channelId] = { pct: 0, ts: Date.now() };
       try {
         await api.downloadWithLogo(clip.id, channelId, fname, (pct) => {
+          // Throttled progress write — only commit state when:
+          //  (a) the integer % moved, AND
+          //  (b) THROTTLE_MS elapsed since the last commit on this channel,
+          //  OR the download just hit 100% (always show the final tick).
+          const next = pct < 0 ? -1 : pct;
+          const prev = lastProgressRef.current[channelId] || { pct: -2, ts: 0 };
+          const now  = Date.now();
+          const stale = (now - prev.ts) >= THROTTLE_MS;
+          if (next === prev.pct) return;
+          if (!stale && next !== 100 && next !== -1) return;
+          lastProgressRef.current[channelId] = { pct: next, ts: now };
           setPerCh((s) => ({
             ...s,
-            [channelId]: { status: "downloading", pct: pct < 0 ? -1 : pct },
+            [channelId]: { status: "downloading", pct: next },
           }));
         });
         setPerCh((s) => ({ ...s, [channelId]: { status: "done", pct: 100 } }));
@@ -199,6 +253,26 @@ export default function DownloadModal({ open, onClose, clip }) {
           </button>
           <button
             type="button"
+            onClick={handleDownloadSeo}
+            disabled={!clip || seoStatus === "running"}
+            title={
+              selectedCount > 0
+                ? `Download SEO composed for ${selectedCount} selected channel${selectedCount === 1 ? "" : "s"} (one .txt each)`
+                : "Download the generic SEO for this clip"
+            }
+            className="btn btn-secondary text-xs py-1.5 flex items-center gap-1.5"
+          >
+            {seoStatus === "running"
+              ? <Loader2 size={12} className="animate-spin" />
+              : seoStatus === "done"
+                ? <Check size={12} className="text-green-400" />
+                : <FileText size={12} />}
+            {seoStatus === "running" ? "SEO…"
+              : seoStatus === "done" ? "SEO saved"
+              : selectedCount > 0 ? `SEO (${selectedCount})` : "SEO"}
+          </button>
+          <button
+            type="button"
             onClick={handleDownload}
             disabled={selectedCount === 0 || running}
             className="btn btn-primary text-xs py-1.5 flex items-center gap-1.5"
@@ -209,6 +283,12 @@ export default function DownloadModal({ open, onClose, clip }) {
             {running ? "Preparing…" : `Download ${selectedCount} ${selectedCount === 1 ? "copy" : "copies"}`}
           </button>
         </div>
+        {seoStatus === "error" && (
+          <div className="flex items-start gap-2 text-xs text-red-400 bg-red-900/20 border border-red-900/40 rounded p-2">
+            <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+            <span>{seoError}</span>
+          </div>
+        )}
       </div>
     </Modal>
   );
