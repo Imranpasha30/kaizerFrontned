@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock,
-  Clapperboard, CheckSquare, Square,
+  Clapperboard, CheckSquare, Square, StopCircle,
 } from "lucide-react";
 import { api } from "../api/client";
 import ProgressLog from "../components/ProgressLog";
@@ -48,7 +48,9 @@ export default function JobDetail() {
     const t = setInterval(() => {
       api.getJobStatus(jobId).then(s => {
         setStatus(s);
-        if (s?.status === "done" || s?.status === "failed") {
+        // Stop polling on ALL terminal states — including the new
+        // "cancelled" one set by the Stop button.
+        if (s?.status === "done" || s?.status === "failed" || s?.status === "cancelled") {
           clearInterval(t);
           loadJob();
         }
@@ -81,6 +83,29 @@ export default function JobDetail() {
     }
   }
 
+  // ─── Cancel / Stop ────────────────────────────────────────────────
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  async function doCancel() {
+    if (!window.confirm(
+      "Stop this job?\n\n" +
+      "The pipeline subprocess and any running ffmpeg renders will be " +
+      "killed immediately. Any clips that finished before the stop will " +
+      "still appear on the job page; in-progress files will be discarded."
+    )) return;
+    setCancelling(true);
+    setCancelError("");
+    try {
+      await api.cancelJob(jobId);
+      await loadJob();
+      await pollStatus();
+    } catch (e) {
+      setCancelError(e.message || "Cancel failed");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (!job) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-600">
@@ -90,9 +115,10 @@ export default function JobDetail() {
   }
 
   const currentStatus = status?.status || job.status;
-  const isRunning = currentStatus === "running" || currentStatus === "pending";
-  const isDone    = currentStatus === "done";
-  const isFailed  = currentStatus === "failed";
+  const isRunning   = currentStatus === "running" || currentStatus === "pending";
+  const isDone      = currentStatus === "done";
+  const isFailed    = currentStatus === "failed";
+  const isCancelled = currentStatus === "cancelled";
   const pct       = status?.progress_pct ?? job.progress_pct;
   const logLines  = status?.log_lines ?? job.log?.split("\n") ?? [];
 
@@ -133,7 +159,34 @@ export default function JobDetail() {
             </button>
           </div>
         )}
+        {isRunning && (
+          <div className="flex gap-2 self-start flex-shrink-0">
+            <button
+              onClick={doCancel}
+              disabled={cancelling}
+              className="btn btn-red flex items-center gap-1.5 text-sm"
+              title="Kill the pipeline subprocess and stop processing this job"
+            >
+              {cancelling
+                ? <Loader2 size={14} className="animate-spin" />
+                : <StopCircle size={14} />}
+              {cancelling ? "Stopping…" : "Stop Job"}
+            </button>
+          </div>
+        )}
       </div>
+
+      {cancelError && (
+        <div className="card p-3 mb-4 text-sm text-red-300 flex items-center gap-2">
+          <AlertCircle size={14} /> {cancelError}
+        </div>
+      )}
+      {isCancelled && (
+        <div className="card p-3 mb-4 text-sm text-amber-300 flex items-center gap-2">
+          <StopCircle size={14} /> Job cancelled. Clips that finished
+          before the stop are listed below (if any).
+        </div>
+      )}
 
       {exportDone && (
         <div className="card p-3 mb-4 text-sm text-green-300 flex items-center gap-2">

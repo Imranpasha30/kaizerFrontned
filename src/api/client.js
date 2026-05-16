@@ -99,6 +99,11 @@ export const api = {
   exportJob:     (id)         => req("POST",   `/jobs/${id}/export/`),
   deleteJob:     (id)         => req("DELETE", `/jobs/${id}/delete/`),
   reimportClips: (id)         => req("POST",   `/jobs/${id}/reimport/`),
+  // Stop a running/queued job. Backend tree-kills the pipeline
+  // subprocess + any ffmpeg children and marks the job as cancelled.
+  // Idempotent — calling on an already-terminal job returns the
+  // current status with {already_final: true}.
+  cancelJob:     (id)         => req("POST",   `/jobs/${id}/cancel/`),
 
   // Clips
   getClip:      (id)         => req("GET",  `/clips/${id}/`),

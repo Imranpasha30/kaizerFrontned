@@ -1,20 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, Trash2, Edit2, Loader2, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Plus, Trash2, Edit2, Loader2, CheckCircle, XCircle, Clock, StopCircle } from "lucide-react";
 import { api } from "../api/client";
 
 const STATUS_ICON = {
-  pending: <Clock  size={14} className="text-gray-400" />,
-  running: <Loader2 size={14} className="text-yellow-400 animate-spin" />,
-  done:    <CheckCircle size={14} className="text-green-400" />,
-  failed:  <XCircle size={14} className="text-red-400" />,
+  pending:   <Clock  size={14} className="text-gray-400" />,
+  running:   <Loader2 size={14} className="text-yellow-400 animate-spin" />,
+  done:      <CheckCircle size={14} className="text-green-400" />,
+  failed:    <XCircle size={14} className="text-red-400" />,
+  cancelled: <StopCircle size={14} className="text-amber-400" />,
 };
 
 const STATUS_BADGE = {
-  pending: "bg-gray-800/60 text-gray-400 border-gray-700/50",
-  running: "bg-yellow-900/40 text-yellow-400 border-yellow-700/40",
-  done:    "bg-green-900/40 text-green-400 border-green-700/40",
-  failed:  "bg-red-900/40 text-red-400 border-red-700/40",
+  pending:   "bg-gray-800/60 text-gray-400 border-gray-700/50",
+  running:   "bg-yellow-900/40 text-yellow-400 border-yellow-700/40",
+  done:      "bg-green-900/40 text-green-400 border-green-700/40",
+  failed:    "bg-red-900/40 text-red-400 border-red-700/40",
+  cancelled: "bg-amber-900/40 text-amber-400 border-amber-700/40",
 };
 
 const PLATFORM_LABEL = {
@@ -50,6 +52,25 @@ export default function Home() {
     if (!confirm("Delete this job?")) return;
     await api.deleteJob(id);
     setJobs(j => j.filter(x => x.id !== id));
+  }
+
+  async function cancelJob(id, e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(
+      "Stop this job?\n\n" +
+      "The pipeline subprocess and any running ffmpeg renders will be " +
+      "killed immediately. Any clips that finished before the stop will " +
+      "still appear on the job page."
+    )) return;
+    try {
+      await api.cancelJob(id);
+      // Optimistic UI — flip the status locally; the next poll will
+      // reconcile with the server's authoritative value.
+      setJobs(j => j.map(x => x.id === id ? { ...x, status: "cancelled" } : x));
+    } catch (err) {
+      alert("Cancel failed: " + (err.message || "unknown error"));
+    }
   }
 
   if (loading) {
@@ -137,6 +158,16 @@ export default function Home() {
                     className="btn btn-secondary py-1.5 px-2.5 flex items-center gap-1 text-xs"
                   >
                     <Edit2 size={12} /> <span className="hidden sm:inline">Editor</span>
+                  </button>
+                )}
+                {(job.status === "running" || job.status === "pending") && (
+                  <button
+                    type="button"
+                    onClick={(e) => cancelJob(job.id, e)}
+                    className="btn btn-secondary py-1.5 px-2.5 hover:border-amber-700 hover:text-amber-400 flex items-center gap-1 text-xs"
+                    title="Stop this job and kill its renders"
+                  >
+                    <StopCircle size={12} /> <span className="hidden sm:inline">Stop</span>
                   </button>
                 )}
                 <button
