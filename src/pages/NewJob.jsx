@@ -1,15 +1,25 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Upload, ChevronRight, ChevronLeft, Loader2, Film, Languages, Image as ImageIcon, Star } from "lucide-react";
+import { Upload, ChevronRight, ChevronLeft, Loader2, Film, Languages, Image as ImageIcon, Star, Mic } from "lucide-react";
 import { api } from "../api/client";
 
 const STEPS         = ["Upload Video", "Choose Platform", "Choose Frame",   "Choose Language", "Confirm"];
 const STEPS_LONGFORM = ["Upload Video", "Choose Platform", "Long-form mode", "Choose Language", "Confirm"];
+// V2 wizard inserts one extra "Choose STT" step between Language and Confirm.
+const STEPS_V2      = ["Upload Video", "Choose Platform", "Choose Frame",   "Choose Language", "Choose STT", "Confirm"];
 
 // Platforms that skip the per-clip frame layout (16:9 long-form only).
 const LONGFORM_PLATFORMS = new Set(["youtube_full"]);
 function isLongForm(platform) {
   return LONGFORM_PLATFORMS.has(platform);
+}
+
+// V2 platform key (Step 11). Constants kept inline (single source =
+// PLATFORMS["full_video_shorts_v2"] on the backend) so a typo here
+// would surface immediately in the "wrong step count" UI bug.
+const V2_PLATFORM_KEY = "full_video_shorts_v2";
+function isV2(platform) {
+  return platform === V2_PLATFORM_KEY;
 }
 
 export default function NewJob() {
@@ -43,6 +53,15 @@ export default function NewJob() {
   const [error, setError]     = useState("");
   const dropRef = useRef(null);
 
+  // V2 STT provider state (Step 11.3). Fetched on first render and
+  // only displayed when the user selects the V2 platform. The
+  // backend's /api/v2/stt/providers endpoint returns all 3 providers
+  // with a ``configured`` flag; we filter the picker to the
+  // configured subset so users don't pick a provider that will then
+  // fail at Stage 1 with "API key unset".
+  const [sttProviders, setSttProviders] = useState([]);
+  const [sttProvider, setSttProvider]   = useState("");
+
   // First-4-MiB SHA-256 of (size_string + first_4MiB_bytes), truncated
   // to 32 hex chars — matches the Python ``gemini_cache.hash_file_prefix``
   // exactly so the backend lookup hits the same key the runner stamped
@@ -66,6 +85,15 @@ export default function NewJob() {
     api.frameLayouts().then(setFrames);
     api.listLanguages().then((list) => setLanguages(list || []));
     api.getDefaultAsset().then(setDefaultAsset).catch(() => setDefaultAsset(null));
+    // V2 STT providers (Step 11.3). The endpoint is harmless to call
+    // for users who never pick V2 -- just a tiny GET. Default the
+    // selection to the first ``configured`` provider so V2 users
+    // don't have to make a choice unless they want to.
+    api.v2SttProviders().then((rows) => {
+      setSttProviders(rows || []);
+      const firstConfigured = (rows || []).find((p) => p.configured);
+      if (firstConfigured) setSttProvider(firstConfigured.id);
+    }).catch(() => setSttProviders([]));
     // Fetch the user's image assets once — used by the bulletin
     // pre-select grid. Filter to images (skip videos / fonts) and
     // sort newest first so freshly-generated assets appear at top.
@@ -158,6 +186,12 @@ export default function NewJob() {
       if (platformProducesBulletin && bulletinImageIds.length > 0) {
         form.append("bulletin_image_ids", bulletinImageIds.join(","));
       }
+      // V2 STT provider (Step 11.3). Only meaningful for the V2
+      // platform; harmless for V1 platforms — the backend ignores
+      // the field unless platform=full_video_shorts_v2.
+      if (isV2(platform) && sttProvider) {
+        form.append("stt_provider", sttProvider);
+      }
       const { id } = await api.createJob(form, pct => setUploadPct(pct));
       navigate(`/jobs/${id}`);
     } catch (e) {
@@ -166,16 +200,25 @@ export default function NewJob() {
     }
   }
 
-  const canNext = [!!file, !!platform, !!frame, !!language, true][step];
+  // canNext indexed by step. V2 has 6 steps (0-5); V1 has 5 (0-4).
+  // Step 4 is "Choose STT" for V2, "Confirm" for V1.
+  const canNext = isV2(platform)
+    ? [!!file, !!platform, !!frame, !!language, !!sttProvider, true][step]
+    : [!!file, !!platform, !!frame, !!language, true][step];
+  const lastStep = isV2(platform) ? 5 : 4;
+  const stepLabels = isV2(platform)
+    ? STEPS_V2
+    : (isLongForm(platform) ? STEPS_LONGFORM : STEPS);
 
   return (
     <div className="max-w-2xl lg:max-w-3xl xl:max-w-4xl mx-auto px-4 sm:px-6 py-6">
       <h1 className="text-xl font-bold text-white mb-6">New Job</h1>
 
-      {/* Step indicators — labels swap in long-form mode so users don't see
-          a "Choose Frame" step they're never asked to interact with. */}
+      {/* Step indicators — labels swap based on platform.
+          V1 4-platform path: STEPS or STEPS_LONGFORM (5 entries).
+          V2 path: STEPS_V2 (6 entries — extra "Choose STT" step). */}
       <div className="flex items-center gap-2 mb-8">
-        {(isLongForm(platform) ? STEPS_LONGFORM : STEPS).map((label, i) => (
+        {stepLabels.map((label, i) => (
           <React.Fragment key={i}>
             <button
               onClick={() => i < step && setStep(i)}
@@ -189,7 +232,7 @@ export default function NewJob() {
               </div>
               <span className="hidden sm:inline">{label}</span>
             </button>
-            {i < STEPS.length - 1 && <div className="flex-1 h-px bg-border" />}
+            {i < stepLabels.length - 1 && <div className="flex-1 h-px bg-border" />}
           </React.Fragment>
         ))}
       </div>
@@ -322,7 +365,7 @@ export default function NewJob() {
               {languages.map((l) => (
                 <button
                   key={l.code}
-                  onClick={() => { setLanguage(l.code); setStep(4); }}
+                  onClick={() => { setLanguage(l.code); setStep(4); /* V2: next step = STT picker; V1: next step = Confirm */ }}
                   className={`p-4 rounded-lg border text-left transition-all
                     ${language === l.code
                       ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
@@ -337,8 +380,72 @@ export default function NewJob() {
           </div>
         )}
 
-        {/* Step 4: Confirm */}
-        {step === 4 && (
+        {/* Step 4 (V2 only): Choose STT provider.
+            V1 platforms skip this step entirely -- on V1 step===4 is
+            the Confirm screen below. */}
+        {step === 4 && isV2(platform) && (
+          <div>
+            <h2 className="font-semibold text-white mb-4 flex items-center gap-2">
+              <Mic size={18} className="text-accent2" /> Choose Speech-to-Text Provider
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              V2 supports multiple STT providers with different cost / quality
+              trade-offs. Defaults to the first configured provider. Unconfigured
+              providers are visible but disabled — your operator needs to set the
+              corresponding API key env var to enable them.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {sttProviders.length === 0 && (
+                <span className="text-gray-500 text-sm">Loading providers…</span>
+              )}
+              {sttProviders.map((p) => {
+                const selected = sttProvider === p.id;
+                const disabled = !p.configured;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => { if (!disabled) { setSttProvider(p.id); setStep(5); } }}
+                    disabled={disabled}
+                    className={`p-4 rounded-lg border text-left transition-all
+                      ${selected
+                        ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
+                        : disabled
+                          ? "border-border bg-black/20 text-gray-600 cursor-not-allowed"
+                          : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium">{p.display_name}</div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase
+                        ${p.tier === "free" ? "bg-green-900/40 text-green-300"
+                          : p.tier === "mid" ? "bg-blue-900/40 text-blue-300"
+                          : "bg-purple-900/40 text-purple-300"}`}>
+                        {p.tier}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {p.cost_per_min_usd === 0
+                        ? "Free"
+                        : `~$${(p.cost_per_min_usd).toFixed(4)}/min`}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1.5 leading-snug">
+                      {p.description}
+                    </div>
+                    {!p.configured && (
+                      <div className="text-[10px] text-yellow-400/80 mt-1.5">
+                        Not configured (operator must set API key env var)
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Confirm step — index depends on platform.
+            V1 platforms: step === 4 (5-step wizard).
+            V2 platform:  step === 5 (6-step wizard, STT is step 4). */}
+        {((step === 4 && !isV2(platform)) || (step === 5 && isV2(platform))) && (
           <div>
             <h2 className="font-semibold text-white mb-4">Confirm & Start</h2>
             <div className="bg-black/40 rounded-lg p-4 flex flex-col gap-3 mb-4 text-sm">
@@ -352,6 +459,12 @@ export default function NewJob() {
                 const l = languages.find((x) => x.code === language);
                 return l ? `${l.native} (${l.english})` : language;
               })()} />
+              {isV2(platform) && (
+                <ConfirmRow
+                  label="STT Provider"
+                  value={sttProviders.find((p) => p.id === sttProvider)?.display_name || sttProvider}
+                />
+              )}
             </div>
 
             {/* Default image toggle */}
@@ -576,7 +689,7 @@ export default function NewJob() {
         >
           <ChevronLeft size={16} /> Back
         </button>
-        {step < 4 && (
+        {step < lastStep && (
           <button
             onClick={() => setStep(s => s + 1)}
             disabled={!canNext}

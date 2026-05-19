@@ -2,17 +2,43 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock,
-  Clapperboard, CheckSquare, Square, StopCircle,
+  Clapperboard, CheckSquare, Square, StopCircle, ExternalLink,
 } from "lucide-react";
 import { api } from "../api/client";
+import { parseV2Error } from "../api/errorMessages";
+import { useAuth } from "../auth/AuthProvider";
 import ProgressLog from "../components/ProgressLog";
 import ClipCard from "../components/ClipCard";
 import BulkPublishModal from "../components/BulkPublishModal";
 
 const PLATFORM_LABEL = {
-  instagram_reel: "Instagram Reel",
-  youtube_short:  "YouTube Short",
-  youtube_full:   "YouTube Full",
+  instagram_reel:         "Instagram Reel",
+  youtube_short:          "YouTube Short",
+  youtube_full:           "YouTube Full",
+  youtube_full_plus_shorts: "Full Video + Shorts",
+  full_video_shorts_v2:   "Full Video + Shorts (V2 Beta)",
+};
+
+// V2 per-step progress label map (Step 11.5, D-11.9). Slugs are
+// written by the V2 orchestrator at the start of each Inngest step
+// (see Job.current_stage column from Step 10.7 / D-10.7).
+const V2_STAGE_ORDER = [
+  "stage_0_ingest",
+  "stage_1_transcribe",
+  "stage_2_continuity",
+  "stage_2_5_entities",
+  "stage_3_fanout",
+  "stage_4_render",
+  "finalize",
+];
+const V2_STAGE_LABELS = {
+  stage_0_ingest:     "Ingesting video",
+  stage_1_transcribe: "Transcribing audio",
+  stage_2_continuity: "Identifying cuts",
+  stage_2_5_entities: "Canonicalizing entities",
+  stage_3_fanout:     "Generating shorts + metadata + image plan",
+  stage_4_render:     "Rendering bulletin + shorts",
+  finalize:           "Finishing up",
 };
 
 const LANG_LABEL = {
@@ -24,6 +50,7 @@ const LANG_LABEL = {
 export default function JobDetail() {
   const { jobId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [job, setJob]           = useState(null);
   const [status, setStatus]     = useState(null);
   const [exporting, setExporting] = useState(false);
@@ -204,6 +231,22 @@ export default function JobDetail() {
         />
       )}
 
+      {/* V2 per-step progress (Step 11.5). Only renders when the
+          V2 orchestrator has written Job.current_stage. V1 jobs +
+          V2 jobs at start/end leave this null -> hidden. */}
+      {status?.current_stage && V2_STAGE_LABELS[status.current_stage] && (
+        <V2StagePill currentStage={status.current_stage} />
+      )}
+
+      {/* V2 Inngest dashboard deep-link -- admin-gated per D-11.10
+          REFINEMENT. End users don't need to see raw Inngest traces;
+          showing them creates support burden + confusion. */}
+      {user?.is_admin
+       && (status?.platform === "full_video_shorts_v2"
+           || job?.platform   === "full_video_shorts_v2") && (
+        <V2InngestDeepLink jobId={jobId} />
+      )}
+
       {/* Progress */}
       {(isRunning || isFailed || (isDone && logLines.length > 0)) && (
         <div className="mb-6">
@@ -212,10 +255,7 @@ export default function JobDetail() {
       )}
 
       {isFailed && status?.error && (
-        <div className="card p-4 mb-6 border-red-900">
-          <p className="text-red-400 text-sm font-medium mb-1">Pipeline failed</p>
-          <pre className="text-xs text-red-300 whitespace-pre-wrap">{status.error}</pre>
-        </div>
+        <FailureCard rawError={status.error} />
       )}
 
       {/* Clips */}
@@ -404,4 +444,111 @@ function formatDuration(sec) {
   if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(ss).padStart(2, "0")}s`;
   if (m > 0) return `${m}m ${String(ss).padStart(2, "0")}s`;
   return `${ss}s`;
+}
+
+
+/**
+ * Failure card with V2 error-slug parsing (Step 11.6, D-11.11).
+ *
+ * If the raw error matches a V2 permanent-failure prefix
+ * ("permanent: <slug>: ..." or "permanent render: <slug>: ..."), we
+ * show the human message + a collapsed "Technical details" expander
+ * with the raw error for support debugging. V1 errors (and V2
+ * errors that don't match the prefix) show the raw error verbatim
+ * with no expander.
+ */
+function FailureCard({ rawError }) {
+  const [showRaw, setShowRaw] = useState(false);
+  const parsed = parseV2Error(rawError);
+  const hasHumanMessage = parsed.slug !== null;
+
+  return (
+    <div className="card p-4 mb-6 border-red-900">
+      <p className="text-red-400 text-sm font-medium mb-1">Pipeline failed</p>
+      {hasHumanMessage ? (
+        <>
+          <p className="text-sm text-red-200 mb-2">{parsed.message}</p>
+          <button
+            onClick={() => setShowRaw((v) => !v)}
+            className="text-[11px] text-gray-500 hover:text-gray-300 underline"
+          >
+            {showRaw ? "Hide" : "Show"} technical details
+          </button>
+          {showRaw && (
+            <pre className="text-xs text-red-300 whitespace-pre-wrap mt-2">
+              {rawError}
+            </pre>
+          )}
+        </>
+      ) : (
+        <pre className="text-xs text-red-300 whitespace-pre-wrap">
+          {rawError}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+
+/**
+ * V2 per-stage progress pill (Step 11.5, D-11.9).
+ * Renders "Stage X of 7: <human label>" when the V2 orchestrator
+ * has written Job.current_stage. Hidden for V1 jobs + V2 jobs at
+ * start/end (when current_stage is null).
+ */
+function V2StagePill({ currentStage }) {
+  const stageIndex = V2_STAGE_ORDER.indexOf(currentStage);
+  if (stageIndex < 0) return null;
+  const stageNum = stageIndex + 1;
+  const total = V2_STAGE_ORDER.length;
+  const label = V2_STAGE_LABELS[currentStage] || currentStage;
+  return (
+    <div className="inline-flex items-center gap-2 mb-3 px-3 py-1.5 rounded-full bg-accent2/10 border border-accent2/20 text-xs">
+      <Loader2 size={11} className="animate-spin text-accent2" />
+      <span className="text-gray-300">
+        Stage {stageNum} of {total}:{" "}
+        <span className="text-accent2 font-medium">{label}</span>
+      </span>
+    </div>
+  );
+}
+
+
+/**
+ * V2 Inngest dashboard deep-link button (Step 11.5, D-11.10
+ * REFINEMENT). Admin-only -- end users don't see raw Inngest traces.
+ *
+ * fn_id uses the Inngest 0.5.18 prefix pattern ``<app_id>-<fn_id>``
+ * per backlog item 48 (Step 10.1 finding pinned by the orchestrator
+ * test ``test_has_expected_fn_id``). URL is from
+ * ``VITE_INNGEST_DASHBOARD_URL`` (set per-deployment in the
+ * frontend env); when unset the button is hidden so a misconfigured
+ * dev env doesn't surface a broken link.
+ */
+function V2InngestDeepLink({ jobId }) {
+  const baseUrl = import.meta.env.VITE_INNGEST_DASHBOARD_URL || "";
+  if (!baseUrl) return null;
+  // Query format chosen for human-readability; Inngest's search
+  // accepts both fn_id + event-data-substring filters.
+  const url = (
+    `${baseUrl.replace(/\/$/, "")}/runs` +
+    `?q=fn_id%3Akaizer-v2-process-video-v2` +
+    `+job_id%3A${encodeURIComponent(jobId)}`
+  );
+  return (
+    <div className="mb-4">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
+                   border border-border bg-surface text-xs text-gray-300
+                   hover:text-white hover:border-gray-500 transition-colors"
+        title="Admin only: opens the Inngest dashboard's run page for this V2 job"
+      >
+        <ExternalLink size={12} /> Open in Inngest
+        <span className="text-[10px] text-gray-600 ml-1">(admin)</span>
+      </a>
+    </div>
+  );
 }

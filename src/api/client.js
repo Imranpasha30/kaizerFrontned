@@ -66,6 +66,9 @@ export const api = {
   platforms:     () => req("GET", "/platforms/"),
   frameLayouts:  () => req("GET", "/frame-layouts/"),
   listLanguages: () => req("GET", "/languages/"),
+  // V2 (Step 11.2) — STT provider catalog for the "Full Video +
+  // Shorts (V2 Beta)" wizard's provider-picker step.
+  v2SttProviders: () => req("GET", "/v2/stt/providers/"),
 
   // Jobs
   listJobs:     ()           => req("GET",    "/jobs/"),
