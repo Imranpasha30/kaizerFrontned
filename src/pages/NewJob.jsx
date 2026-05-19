@@ -22,6 +22,19 @@ function isV2(platform) {
   return platform === V2_PLATFORM_KEY;
 }
 
+// Step 12.5 / backlog 59: language codes the V2 wizard treats as
+// "Indian-language" for STT-provider recommendation. When the user
+// has picked one of these AND is considering Whisper-Groq, we surface
+// the empirical timestamp-issue warning from the provider's
+// `warnings` array (backend item 57). Deepgram is concurrently
+// surfaced with a "Recommended" badge.
+const INDIAN_LANG_CODES = new Set([
+  "te", "hi", "ta", "kn", "ml", "bn", "mr", "gu",
+]);
+function isIndianLanguage(code) {
+  return INDIAN_LANG_CODES.has(code);
+}
+
 export default function NewJob() {
   const navigate = useNavigate();
   const [step, setStep]       = useState(0);
@@ -401,6 +414,15 @@ export default function NewJob() {
               {sttProviders.map((p) => {
                 const selected = sttProvider === p.id;
                 const disabled = !p.configured;
+                // Step 12.5: surface the recommendation + warning
+                // only when the user has picked an Indian-language
+                // code at the prior step. For English etc., the
+                // catalog renders unchanged.
+                const indianLang   = isIndianLanguage(language);
+                const isRecommended = indianLang && p.id === "deepgram";
+                const showWarnings  = indianLang
+                  && Array.isArray(p.warnings)
+                  && p.warnings.length > 0;
                 return (
                   <button
                     key={p.id}
@@ -411,7 +433,9 @@ export default function NewJob() {
                         ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
                         : disabled
                           ? "border-border bg-black/20 text-gray-600 cursor-not-allowed"
-                          : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
+                          : isRecommended
+                            ? "border-green-500/60 hover:border-green-400 hover:bg-green-500/[0.04] text-gray-300"
+                            : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="font-medium">{p.display_name}</div>
@@ -422,6 +446,11 @@ export default function NewJob() {
                         {p.tier}
                       </span>
                     </div>
+                    {isRecommended && (
+                      <div className="text-[10px] text-green-300 mt-1 font-semibold uppercase tracking-wider">
+                        Recommended for Telugu / Hindi
+                      </div>
+                    )}
                     <div className="text-xs text-gray-500 mt-1">
                       {p.cost_per_min_usd === 0
                         ? "Free"
@@ -433,6 +462,13 @@ export default function NewJob() {
                     {!p.configured && (
                       <div className="text-[10px] text-yellow-400/80 mt-1.5">
                         Not configured (operator must set API key env var)
+                      </div>
+                    )}
+                    {showWarnings && (
+                      <div className="text-[10px] text-amber-400/90 mt-1.5 leading-snug border-t border-amber-900/40 pt-1.5">
+                        {p.warnings.map((w, idx) => (
+                          <div key={idx}>⚠ {w}</div>
+                        ))}
                       </div>
                     )}
                   </button>

@@ -233,9 +233,20 @@ export default function JobDetail() {
 
       {/* V2 per-step progress (Step 11.5). Only renders when the
           V2 orchestrator has written Job.current_stage. V1 jobs +
-          V2 jobs at start/end leave this null -> hidden. */}
+          V2 jobs at start/end leave this null -> hidden.
+
+          Step 12.5 / backlog 75: when the user has clicked Cancel
+          (status.cancel_requested=true) AND the run is still
+          executing, the pill shifts to a "Cancellation requested
+          - finishing <stage>" state so the user understands the
+          latency between click and Job.status flipping to failed
+          (up to 60-90s for non-Stage-4 stages while the current
+          step finishes). */}
       {status?.current_stage && V2_STAGE_LABELS[status.current_stage] && (
-        <V2StagePill currentStage={status.current_stage} />
+        <V2StagePill
+          currentStage={status.current_stage}
+          cancelRequested={Boolean(status?.cancel_requested)}
+        />
       )}
 
       {/* V2 Inngest dashboard deep-link -- admin-gated per D-11.10
@@ -495,13 +506,33 @@ function FailureCard({ rawError }) {
  * Renders "Stage X of 7: <human label>" when the V2 orchestrator
  * has written Job.current_stage. Hidden for V1 jobs + V2 jobs at
  * start/end (when current_stage is null).
+ *
+ * Step 12.5 / backlog 75: when ``cancelRequested`` is true, the pill
+ * shifts to an amber "Cancellation requested - finishing X" state.
+ * This communicates that the user's cancel was registered but the
+ * pipeline is finishing the current Inngest step before the
+ * cooperative ``_check_cancelled`` at the next step boundary fires.
+ * Empirically that gap is ~14s for Stage 1 and up to ~60-90s for
+ * Stage 2's Gemini Pro call (see Step 12.3 Test 1 manifest).
  */
-function V2StagePill({ currentStage }) {
+function V2StagePill({ currentStage, cancelRequested = false }) {
   const stageIndex = V2_STAGE_ORDER.indexOf(currentStage);
   if (stageIndex < 0) return null;
   const stageNum = stageIndex + 1;
   const total = V2_STAGE_ORDER.length;
   const label = V2_STAGE_LABELS[currentStage] || currentStage;
+  if (cancelRequested) {
+    return (
+      <div className="inline-flex items-center gap-2 mb-3 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-xs">
+        <Loader2 size={11} className="animate-spin text-amber-300" />
+        <span className="text-gray-300">
+          Cancellation requested — finishing{" "}
+          <span className="text-amber-300 font-medium">{label}</span>
+          {" "}(stage {stageNum} of {total})…
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="inline-flex items-center gap-2 mb-3 px-3 py-1.5 rounded-full bg-accent2/10 border border-accent2/20 text-xs">
       <Loader2 size={11} className="animate-spin text-accent2" />
