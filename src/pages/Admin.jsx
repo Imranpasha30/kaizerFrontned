@@ -5,7 +5,7 @@ import {
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
   BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
-  Gauge, Terminal,
+  Gauge, Terminal, Star,
 } from "lucide-react";
 import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
@@ -15,6 +15,7 @@ import Modal from "../components/Modal";
 import AdminUsage from "./AdminUsage";
 import AdminCapacity from "./AdminCapacity";
 import AdminLogs from "./AdminLogs";
+import AdminV2Dashboard from "./AdminV2Dashboard";
 import "../theme/admin-theme.css";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1610,6 +1611,7 @@ const TABS = [
   { path: "jobs",     label: "Jobs",        icon: Briefcase,   comp: JobsTab       },
   { path: "usage",    label: "AI & quota",  icon: BarChart3,   comp: AdminUsage    },
   { path: "gemini",   label: "Gemini usage",icon: Sparkles,    comp: GeminiTab     },
+  { path: "v2",       label: "V2 Beta",     icon: Star,        comp: AdminV2Dashboard },
   { path: "live",     label: "Live events", icon: Radio,       comp: LiveEventsTab },
   { path: "settings", label: "Settings",    icon: SettingsIcon, comp: SettingsTab  },
   { path: "audit",    label: "Audit log",   icon: Shield,      comp: AuditTab      },

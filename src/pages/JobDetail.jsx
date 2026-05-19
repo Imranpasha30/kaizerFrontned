@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock,
   Clapperboard, CheckSquare, Square, StopCircle, ExternalLink,
+  Check, X, Star, Pencil,
 } from "lucide-react";
 import { api } from "../api/client";
 import { parseV2Error } from "../api/errorMessages";
@@ -157,7 +158,13 @@ export default function JobDetail() {
           <ArrowLeft size={14} />
         </Link>
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg sm:text-xl font-bold text-white truncate">{job.video_name}</h1>
+          {/* Phase 14 / V2 Beta (D-13.14): name with inline rename. */}
+          <RenamableTitle
+            jobId={jobId}
+            initialName={job.name || job.video_name || ""}
+            videoName={job.video_name || ""}
+            onRenamed={(nm) => setJob((j) => ({ ...j, name: nm }))}
+          />
           <div className="text-sm text-gray-500 mt-0.5 flex gap-2 sm:gap-3 flex-wrap">
             <span>{PLATFORM_LABEL[job.platform] || job.platform}</span>
             <span className="text-gray-700">|</span>
@@ -167,6 +174,14 @@ export default function JobDetail() {
             <span className="text-gray-700">|</span>
             <span>{new Date(job.created_at).toLocaleString()}</span>
           </div>
+          {/* Show the underlying filename in small text when the
+              user has set a custom name, so they can still see what
+              the source file was. */}
+          {job.name && job.video_name && job.name !== job.video_name && (
+            <div className="text-[11px] text-gray-600 mt-1 truncate">
+              File: <span className="text-gray-500">{job.video_name}</span>
+            </div>
+          )}
         </div>
 
         {isDone && (
@@ -378,6 +393,13 @@ export default function JobDetail() {
         </div>
       )}
 
+      {/* Phase 14 / V2 Beta (D-13.13): feedback panel. Only on
+          completed jobs the current user owns. Backend's POST
+          /feedback also enforces ownership + done-status. */}
+      {isDone && (
+        <FeedbackPanel jobId={jobId} />
+      )}
+
       {/* Bulk-publish modal — opened from the "Publish N selected" header
           button. Clips are passed in job-order so scheduled publishes go
           out in the order the editor sees them. */}
@@ -580,6 +602,220 @@ function V2InngestDeepLink({ jobId }) {
         <ExternalLink size={12} /> Open in Inngest
         <span className="text-[10px] text-gray-600 ml-1">(admin)</span>
       </a>
+    </div>
+  );
+}
+
+
+/**
+ * Inline-editable job title (Phase 14 / V2 Beta — D-13.14).
+ *
+ * Click the pencil → input + save/cancel buttons. PATCH on save.
+ * Empty / over-120-char inputs are bounced by the backend with a 400;
+ * we surface that into a small inline error.
+ */
+function RenamableTitle({ jobId, initialName, videoName, onRenamed }) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState(initialName);
+  const [saving,  setSaving]  = useState(false);
+  const [errMsg,  setErrMsg]  = useState("");
+
+  // Re-sync draft when the parent passes a fresh initialName (poll
+  // re-fetch after a successful rename, or hard navigation).
+  useEffect(() => { setDraft(initialName); }, [initialName]);
+
+  async function save() {
+    const trimmed = (draft || "").trim();
+    if (!trimmed) { setErrMsg("Name can't be empty"); return; }
+    if (trimmed.length > 120) { setErrMsg("Name too long (max 120)"); return; }
+    setSaving(true);
+    setErrMsg("");
+    try {
+      const res = await api.renameJob(jobId, trimmed);
+      onRenamed(res.name);
+      setEditing(false);
+    } catch (e) {
+      setErrMsg(e.message || "Rename failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2 min-w-0">
+        <h1 className="text-lg sm:text-xl font-bold text-white truncate">
+          {initialName || videoName || "Untitled job"}
+        </h1>
+        <button
+          type="button"
+          onClick={() => { setDraft(initialName); setErrMsg(""); setEditing(true); }}
+          className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/5
+                     transition-colors flex-shrink-0"
+          title="Rename this job"
+          aria-label="Rename job"
+        >
+          <Pencil size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <div className="flex items-center gap-2">
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 120))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          maxLength={120}
+          disabled={saving}
+          placeholder="Job name…"
+          className="flex-1 min-w-0 px-2 py-1 bg-black/40 border border-border rounded
+                     text-base sm:text-lg font-bold text-white
+                     focus:outline-none focus:border-accent2 disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="p-1.5 rounded bg-accent2/20 border border-accent2/40
+                     text-accent2 hover:bg-accent2/30 disabled:opacity-50"
+          title="Save"
+          aria-label="Save rename"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setEditing(false); setErrMsg(""); }}
+          disabled={saving}
+          className="p-1.5 rounded border border-border text-gray-400
+                     hover:text-white hover:border-gray-500 disabled:opacity-50"
+          title="Cancel"
+          aria-label="Cancel rename"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      {errMsg && (
+        <div className="text-[11px] text-red-400">{errMsg}</div>
+      )}
+    </div>
+  );
+}
+
+
+/**
+ * 0–100 rating + optional comment, one feedback per job per user.
+ * Backend returns 409 if the user already submitted — UI gracefully
+ * collapses to a "you've already rated" notice in that case.
+ */
+function FeedbackPanel({ jobId }) {
+  const [rating,    setRating]    = useState(70);
+  const [comment,   setComment]   = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  // status: "idle" | "submitted" | "already" | "error"
+  const [status,    setStatus]    = useState("idle");
+  const [errMsg,    setErrMsg]    = useState("");
+
+  async function submit() {
+    setSubmitting(true);
+    setErrMsg("");
+    try {
+      await api.submitJobFeedback(jobId, Number(rating), comment.trim());
+      setStatus("submitted");
+    } catch (e) {
+      const msg = e.message || "Submit failed";
+      // Backend returns 409 when the user already submitted feedback.
+      if (/already/i.test(msg)) {
+        setStatus("already");
+      } else {
+        setStatus("error");
+        setErrMsg(msg);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (status === "submitted") {
+    return (
+      <div className="card p-4 mb-6 border-green-900 bg-green-950/20 text-sm text-green-300
+                      flex items-start gap-2">
+        <Star size={14} className="text-green-400 mt-0.5 flex-shrink-0" />
+        <span>Thanks! Your feedback helps improve V2 Beta.</span>
+      </div>
+    );
+  }
+  if (status === "already") {
+    return (
+      <div className="card p-4 mb-6 text-sm text-gray-400 flex items-start gap-2">
+        <Star size={14} className="text-gray-500 mt-0.5 flex-shrink-0" />
+        <span>You've already rated this job.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-4 sm:p-5 mb-6">
+      <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+        <Star size={14} className="text-amber-400" />
+        Rate this job
+      </h3>
+      <p className="text-[12px] text-gray-500 mb-3">
+        How did the V2 Beta do? Your rating + comment goes straight to the
+        operator triaging Beta health.
+      </p>
+
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={rating}
+          onChange={(e) => setRating(e.target.value)}
+          className="flex-1 accent-accent2"
+          disabled={submitting}
+        />
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="font-mono tabular-nums text-2xl font-bold text-white w-12 text-right">
+            {rating}
+          </span>
+          <span className="text-xs text-gray-500">/ 100</span>
+        </div>
+      </div>
+
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        disabled={submitting}
+        rows={3}
+        placeholder="What worked, what didn't? (optional)"
+        className="w-full px-3 py-2 mb-3 bg-black/40 border border-border rounded
+                   text-sm text-white placeholder-gray-600
+                   focus:outline-none focus:border-accent2 disabled:opacity-50"
+      />
+
+      {status === "error" && errMsg && (
+        <div className="text-[11px] text-red-400 mb-3">{errMsg}</div>
+      )}
+
+      <button
+        type="button"
+        onClick={submit}
+        disabled={submitting}
+        className="btn btn-primary text-sm inline-flex items-center gap-1.5"
+      >
+        {submitting
+          ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
+          : <>Submit feedback</>}
+      </button>
     </div>
   );
 }

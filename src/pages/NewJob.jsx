@@ -65,6 +65,9 @@ export default function NewJob() {
   const [uploadPct, setUploadPct]  = useState(0);
   const [error, setError]     = useState("");
   const dropRef = useRef(null);
+  // Phase 14 / V2 Beta (D-13.11): optional human-readable name.
+  // Blank submits trigger the backend's filename-fallback default.
+  const [jobName, setJobName] = useState("");
 
   // V2 STT provider state (Step 11.3). Fetched on first render and
   // only displayed when the user selects the V2 platform. The
@@ -205,6 +208,12 @@ export default function NewJob() {
       if (isV2(platform) && sttProvider) {
         form.append("stt_provider", sttProvider);
       }
+      // Phase 14 / V2 Beta (D-13.11): optional name. Backend caps at
+      // 120 chars and falls back to the filename when blank.
+      const trimmedName = (jobName || "").trim();
+      if (trimmedName) {
+        form.append("name", trimmedName);
+      }
       const { id } = await api.createJob(form, pct => setUploadPct(pct));
       navigate(`/jobs/${id}`);
     } catch (e) {
@@ -307,11 +316,23 @@ export default function NewJob() {
                       setStep(2);
                     }
                   }}
-                  className={`p-4 rounded-lg border text-left transition-all
+                  className={`relative p-4 rounded-lg border text-left transition-all
                     ${platform === key
                       ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
                       : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
                 >
+                  {/* Phase 14 / V2 Beta (D-13.7): amber BETA pill so the
+                      V2 option is visually distinct from the four
+                      production-stable V1 platforms. */}
+                  {isV2(key) && (
+                    <span
+                      className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full
+                                 text-[9px] font-bold tracking-widest uppercase
+                                 bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                    >
+                      Beta
+                    </span>
+                  )}
                   <div className="font-medium">{info.label}</div>
                   <div className="text-xs text-gray-500 mt-0.5">{info.width} x {info.height}</div>
                 </button>
@@ -501,6 +522,30 @@ export default function NewJob() {
                   value={sttProviders.find((p) => p.id === sttProvider)?.display_name || sttProvider}
                 />
               )}
+            </div>
+
+            {/* Phase 14 / V2 Beta (D-13.11): optional human-readable
+                name. Caps at 120 chars; blank falls back to the
+                filename. Renamable mid-flight from JobDetail. */}
+            <div className="bg-surface border border-border rounded p-3 mb-4">
+              <label htmlFor="job-name" className="text-sm font-medium text-gray-200 block mb-1.5">
+                Name this job <span className="text-[11px] text-gray-500 font-normal">(optional)</span>
+              </label>
+              <input
+                id="job-name"
+                type="text"
+                value={jobName}
+                onChange={(e) => setJobName(e.target.value.slice(0, 120))}
+                maxLength={120}
+                placeholder={file?.name ? file.name.slice(0, 80) : "Bandi Bhagirath bulletin"}
+                className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                           text-sm text-white placeholder-gray-600
+                           focus:outline-none focus:border-accent2"
+              />
+              <div className="text-[11px] text-gray-500 mt-1.5">
+                Shown on the jobs list + job detail page. Leave blank to use the filename.
+                Editable later.
+              </div>
             </div>
 
             {/* Default image toggle */}

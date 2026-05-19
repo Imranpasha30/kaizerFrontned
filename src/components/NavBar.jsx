@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home, Plus, Menu, X, Palette, UploadCloud, CalendarClock, LineChart,
   Compass, Zap, LogOut, LogIn, UserPlus, Image as ImageIcon,
-  Settings as SettingsIcon, CreditCard, Radio, Shield, Rocket,
+  Settings as SettingsIcon, CreditCard, Radio, Shield, Rocket, BarChart3,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import ThemeToggle from "./ThemeToggle";
@@ -56,6 +56,7 @@ export default function NavBar() {
     { to: "/campaigns",     icon: CalendarClock, label: "Publishing Plans" },
     { to: "/performance",   icon: LineChart,     label: "Insights" },
     { to: "/trending",      icon: Compass,       label: "Topic Radar" },
+    { to: "/v2-stats",      icon: BarChart3,     label: "V2 Beta stats", badge: "BETA" },
     ...(user?.is_admin ? [{ to: "/admin", icon: Shield, label: "Admin" }] : []),
   ];
 

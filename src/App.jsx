@@ -4,6 +4,7 @@ import NavBar   from "./components/NavBar";
 import Home     from "./pages/Home";
 import NewJob   from "./pages/NewJob";
 import JobDetail from "./pages/JobDetail";
+import JobsStats from "./pages/JobsStats";
 import Editor   from "./pages/Editor";
 import Channels from "./pages/Channels";
 import Uploads  from "./pages/Uploads";
@@ -120,6 +121,7 @@ export default function App() {
           <Route path="/campaigns"                     element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
           <Route path="/performance"                   element={<ProtectedRoute><Performance /></ProtectedRoute>} />
           <Route path="/trending"                      element={<ProtectedRoute><Trending /></ProtectedRoute>} />
+          <Route path="/v2-stats"                      element={<ProtectedRoute><JobsStats /></ProtectedRoute>} />
           <Route path="/billing"                       element={<ProtectedRoute><Billing /></ProtectedRoute>} />
           <Route path="/live"                          element={<ProtectedRoute><LiveDirector /></ProtectedRoute>} />
           <Route path="/program/:eventId"              element={<ProtectedRoute><ProgramMonitor /></ProtectedRoute>} />

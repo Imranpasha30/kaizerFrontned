@@ -108,6 +108,12 @@ export const api = {
   // current status with {already_final: true}.
   cancelJob:     (id)         => req("POST",   `/jobs/${id}/cancel/`),
 
+  // Phase 14 / V2 Beta (D-13.14 + D-13.13 + D-13.12).
+  renameJob:     (id, name)             => req("PATCH", `/jobs/${id}/rename/`,   { name }),
+  submitJobFeedback: (id, rating, comment = "") =>
+                                            req("POST",  `/jobs/${id}/feedback/`, { rating, comment }),
+  getV2UserStats: ()                    => req("GET",   "/v2/stats/"),
+
   // Clips
   getClip:      (id)         => req("GET",  `/clips/${id}/`),
 
@@ -627,6 +633,10 @@ export const adminApi = {
     return req("GET", `/admin/jobs${q ? `?${q}` : ""}`);
   },
   getJob:       (id)                        => req("GET",  `/admin/jobs/${id}`),
+  // Phase 14 / V2 Beta (D-13.8 + D-13.12 admin-facing).
+  v2Feedback:   (limit = 50, offset = 0) =>
+    req("GET", `/admin/v2-feedback?limit=${limit}&offset=${offset}`),
+  v2Stats:      ()                          => req("GET",  "/admin/v2-stats"),
   geminiUsage:  (days = 30, userId = null)  =>
     req("GET", `/admin/gemini-usage?days=${days}${userId ? `&user_id=${userId}` : ""}`),
   // Multi-provider live dashboard — Gemini + OpenAI + YouTube quota in one shot.

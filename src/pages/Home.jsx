@@ -119,8 +119,18 @@ export default function Home() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium text-white truncate max-w-[200px] sm:max-w-none">
-                    {job.video_name}
+                    {/* Phase 14 / V2 Beta (D-13.11): prefer the user's
+                        human-readable name; fall back to the filename
+                        so pre-Phase-14 jobs render unchanged. */}
+                    {job.name || job.video_name}
                   </span>
+                  {job.platform === "full_video_shorts_v2" && (
+                    <span className="text-[9px] font-bold tracking-widest uppercase
+                                     px-1.5 py-0.5 rounded-full bg-amber-500/15
+                                     text-amber-300 border border-amber-500/40">
+                      Beta
+                    </span>
+                  )}
                   <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full border ${STATUS_BADGE[job.status]}`}>
                     {job.status}
                   </span>
