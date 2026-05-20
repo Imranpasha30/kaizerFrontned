@@ -37,16 +37,39 @@ export default function ClipCard({ clip, jobId, index }) {
         <div className="absolute top-1.5 left-1.5 bg-black/70 text-xs px-1.5 py-0.5 rounded text-gray-300 tabular-nums">
           #{index + 1}
         </div>
-        {/* Bulletin clips get a distinct amber badge so they're
-            visually unmistakable next to the 9:16 shorts. Backlog 91. */}
-        <div className={`absolute top-1.5 right-1.5 text-xs px-1.5 py-0.5 rounded
-          ${clip.frame_type === "bulletin"
-            ? "bg-amber-500/90 text-black font-bold tracking-wider uppercase"
-            : "bg-accent/80 text-white capitalize"}`}>
-          {clip.frame_type === "bulletin"
-            ? "Bulletin"
-            : clip.frame_type?.replace("_", " ")}
-        </div>
+        {/* Primary "type" tag — large + bold so the operator can
+            differentiate a bulletin from a short at a glance.
+            BULLETIN: emerald (it's the lead asset, 16:9 long-form).
+            SHORT: rose (the high-density action item).
+            Frame layout (torn_card / split_frame / etc.) is now a
+            smaller secondary chip below, since it's less load-bearing
+            than the type. Backlog item 91 follow-up. */}
+        {clip.frame_type === "bulletin" ? (
+          <div className="absolute top-1.5 right-1.5 text-[11px] font-extrabold tracking-widest uppercase
+                          px-2 py-1 rounded-md
+                          bg-emerald-500/95 text-black
+                          shadow-lg shadow-emerald-900/40
+                          ring-1 ring-emerald-300/40">
+            ★ Bulletin
+          </div>
+        ) : (
+          <>
+            <div className="absolute top-1.5 right-1.5 text-[11px] font-extrabold tracking-widest uppercase
+                            px-2 py-1 rounded-md
+                            bg-rose-500/95 text-white
+                            shadow-lg shadow-rose-900/40
+                            ring-1 ring-rose-300/40">
+              Short
+            </div>
+            {clip.frame_type && (
+              <div className="absolute bottom-1.5 right-1.5 text-[9px] uppercase tracking-wider
+                              px-1.5 py-0.5 rounded
+                              bg-black/70 text-gray-400">
+                {clip.frame_type.replace("_", " ")}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Info */}
