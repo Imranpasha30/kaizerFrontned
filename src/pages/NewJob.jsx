@@ -35,6 +35,22 @@ function isIndianLanguage(code) {
   return INDIAN_LANG_CODES.has(code);
 }
 
+// Item 104: bulletin transition catalog. Mirrors
+// kaizer/KaizerBackend/pipeline_v2/pipeline_v2/transitions.py one-to-one
+// -- backend is the source of truth; the UI just renders the labels.
+// Stays inline (not /api/transitions-fetched) because the catalog is
+// static + tiny + the wizard wants no extra round-trip.
+const TRANSITION_CATALOG = [
+  { name: "smart_cut",    label: "Smart Cut",     description: "Hard cut. Fastest. The default.",                        implemented: true  },
+  { name: "crossfade",    label: "Crossfade",     description: "0.5s video + audio crossfade between clips.",            implemented: false },
+  { name: "fade_to_black",label: "Fade to Black", description: "Fade out to black + fade in (~0.6s).",                   implemented: false },
+  { name: "dip_to_white", label: "Dip to White",  description: "Fade out to white + fade in (~0.6s).",                   implemented: false },
+  { name: "slide_left",   label: "Slide Left",    description: "Outgoing slides left, incoming slides in (~0.4s).",       implemented: false },
+  { name: "wipe_right",   label: "Wipe Right",    description: "Vertical wipe revealing incoming clip (~0.4s).",          implemented: false },
+  { name: "dissolve",     label: "Dissolve",      description: "Longer soft alpha dissolve (~1.0s).",                     implemented: false },
+];
+const DEFAULT_TRANSITION = "smart_cut";
+
 export default function NewJob() {
   const navigate = useNavigate();
   const [step, setStep]       = useState(0);
@@ -77,6 +93,13 @@ export default function NewJob() {
   // fail at Stage 1 with "API key unset".
   const [sttProviders, setSttProviders] = useState([]);
   const [sttProvider, setSttProvider]   = useState("");
+
+  // Item 104: V2 bulletin transition selection. Only meaningful for
+  // the V2 platform; harmless for V1 platforms (the backend ignores
+  // the form field unless platform=full_video_shorts_v2). Defaults
+  // to "smart_cut" -- the catalog's only fully-implemented entry at
+  // ship time. The dropdown surfaces the other six as "Coming soon".
+  const [transitionStyle, setTransitionStyle] = useState(DEFAULT_TRANSITION);
 
   // First-4-MiB SHA-256 of (size_string + first_4MiB_bytes), truncated
   // to 32 hex chars — matches the Python ``gemini_cache.hash_file_prefix``
@@ -207,6 +230,12 @@ export default function NewJob() {
       // the field unless platform=full_video_shorts_v2.
       if (isV2(platform) && sttProvider) {
         form.append("stt_provider", sttProvider);
+      }
+      // Item 104: V2 bulletin transition selection. Backend coerces
+      // unknown values to "smart_cut"; we only send a non-default
+      // value when the user actually picked one.
+      if (isV2(platform) && transitionStyle && transitionStyle !== DEFAULT_TRANSITION) {
+        form.append("transition_style", transitionStyle);
       }
       // Phase 14 / V2 Beta (D-13.11): optional name. Backend caps at
       // 120 chars and falls back to the filename when blank.
@@ -522,7 +551,53 @@ export default function NewJob() {
                   value={sttProviders.find((p) => p.id === sttProvider)?.display_name || sttProvider}
                 />
               )}
+              {isV2(platform) && (
+                <ConfirmRow
+                  label="Transition"
+                  value={TRANSITION_CATALOG.find((t) => t.name === transitionStyle)?.label || transitionStyle}
+                />
+              )}
             </div>
+
+            {/* Item 104: V2 bulletin transition selection. Only shown
+                for V2 -- the V1 stitcher does not support transitions. */}
+            {isV2(platform) && (
+              <div className="bg-surface border border-border rounded p-3 mb-4">
+                <label htmlFor="transition-style"
+                       className="text-sm font-medium text-gray-200 block mb-1.5">
+                  Bulletin transition
+                </label>
+                <select
+                  id="transition-style"
+                  value={transitionStyle}
+                  onChange={(e) => setTransitionStyle(e.target.value)}
+                  className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                             text-sm text-white
+                             focus:outline-none focus:border-accent2"
+                >
+                  {TRANSITION_CATALOG.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.label}{t.implemented ? "" : "  (Coming soon)"}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-[11px] text-gray-500 mt-1.5">
+                  {(TRANSITION_CATALOG.find((t) => t.name === transitionStyle)?.description) || ""}
+                  {(() => {
+                    const sel = TRANSITION_CATALOG.find((t) => t.name === transitionStyle);
+                    if (sel && !sel.implemented) {
+                      return (
+                        <div className="text-amber-400 mt-1">
+                          Not yet implemented — will fall back to <b>Smart Cut</b> for this job.
+                          Your choice is preserved on the job for when this transition ships.
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+            )}
 
             {/* Phase 14 / V2 Beta (D-13.11): optional human-readable
                 name. Caps at 120 chars; blank falls back to the

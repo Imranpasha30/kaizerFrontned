@@ -171,6 +171,15 @@ export default function JobDetail() {
             <span className="capitalize">{job.frame_layout?.replace("_", " ")}</span>
             <span className="text-gray-700">|</span>
             <span className="text-accent2">{LANG_LABEL[job.language] || job.language?.toUpperCase() || "TE"}</span>
+            {/* Item 104: surface the bulletin transition the operator
+                picked. Only meaningful for V2 jobs (V1 stitcher does
+                not support transitions). */}
+            {job.platform === "full_video_shorts_v2" && job.transition_style && (
+              <>
+                <span className="text-gray-700">|</span>
+                <span className="capitalize">{job.transition_style.replace(/_/g, " ")}</span>
+              </>
+            )}
             <span className="text-gray-700">|</span>
             <span>{new Date(job.created_at).toLocaleString()}</span>
           </div>
