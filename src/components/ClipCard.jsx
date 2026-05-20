@@ -37,8 +37,15 @@ export default function ClipCard({ clip, jobId, index }) {
         <div className="absolute top-1.5 left-1.5 bg-black/70 text-xs px-1.5 py-0.5 rounded text-gray-300 tabular-nums">
           #{index + 1}
         </div>
-        <div className="absolute top-1.5 right-1.5 bg-accent/80 text-xs px-1.5 py-0.5 rounded text-white capitalize">
-          {clip.frame_type?.replace("_", " ")}
+        {/* Bulletin clips get a distinct amber badge so they're
+            visually unmistakable next to the 9:16 shorts. Backlog 91. */}
+        <div className={`absolute top-1.5 right-1.5 text-xs px-1.5 py-0.5 rounded
+          ${clip.frame_type === "bulletin"
+            ? "bg-amber-500/90 text-black font-bold tracking-wider uppercase"
+            : "bg-accent/80 text-white capitalize"}`}>
+          {clip.frame_type === "bulletin"
+            ? "Bulletin"
+            : clip.frame_type?.replace("_", " ")}
         </div>
       </div>
 
