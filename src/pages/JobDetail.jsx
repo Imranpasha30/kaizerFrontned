@@ -180,6 +180,19 @@ export default function JobDetail() {
                 <span className="capitalize">{job.transition_style.replace(/_/g, " ")}</span>
               </>
             )}
+            {/* Item 114: surface the Stage 2 provider on V2 jobs. */}
+            {job.platform === "full_video_shorts_v2" && job.stage_2_provider && (
+              <>
+                <span className="text-gray-700">|</span>
+                <span className="capitalize">{
+                  job.stage_2_provider === "claude"
+                    ? "Claude Sonnet 4.6"
+                    : job.stage_2_provider === "gemini"
+                      ? "Gemini 2.5 Pro"
+                      : job.stage_2_provider
+                }</span>
+              </>
+            )}
             <span className="text-gray-700">|</span>
             <span>{new Date(job.created_at).toLocaleString()}</span>
           </div>

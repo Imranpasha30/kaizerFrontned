@@ -51,6 +51,15 @@ const TRANSITION_CATALOG = [
 ];
 const DEFAULT_TRANSITION = "smart_cut";
 
+// Item 114: Stage 2 provider catalog. Mirrors
+// kaizer/KaizerBackend/pipeline_v2/pipeline_v2/stages/stage_2_providers.py
+// (VALID_PROVIDERS). Backend is source of truth; UI just labels.
+const STAGE_2_PROVIDER_CATALOG = [
+  { name: "gemini", label: "Gemini 2.5 Pro (default)", description: "Google's most capable model. Strong on Telugu / code-mixed transcripts. Default since V2 ship." },
+  { name: "claude", label: "Claude Sonnet 4.6",        description: "Anthropic's alt option. Deterministic (T=0). Prompt caching reduces per-job cost after first run." },
+];
+const DEFAULT_STAGE_2_PROVIDER = "gemini";
+
 export default function NewJob() {
   const navigate = useNavigate();
   const [step, setStep]       = useState(0);
@@ -100,6 +109,11 @@ export default function NewJob() {
   // to "smart_cut" -- the catalog's only fully-implemented entry at
   // ship time. The dropdown surfaces the other six as "Coming soon".
   const [transitionStyle, setTransitionStyle] = useState(DEFAULT_TRANSITION);
+
+  // Item 114: V2 Stage 2 provider selection. ("gemini" | "claude").
+  // Same V2-only semantics as transitionStyle. Defaults to "gemini"
+  // -- no behaviour change for existing users.
+  const [stage2Provider, setStage2Provider] = useState(DEFAULT_STAGE_2_PROVIDER);
 
   // First-4-MiB SHA-256 of (size_string + first_4MiB_bytes), truncated
   // to 32 hex chars — matches the Python ``gemini_cache.hash_file_prefix``
@@ -236,6 +250,11 @@ export default function NewJob() {
       // value when the user actually picked one.
       if (isV2(platform) && transitionStyle && transitionStyle !== DEFAULT_TRANSITION) {
         form.append("transition_style", transitionStyle);
+      }
+      // Item 114: V2 Stage 2 provider selection. Same pattern --
+      // backend coerces unknown -> "gemini"; only send non-default.
+      if (isV2(platform) && stage2Provider && stage2Provider !== DEFAULT_STAGE_2_PROVIDER) {
+        form.append("stage_2_provider", stage2Provider);
       }
       // Phase 14 / V2 Beta (D-13.11): optional name. Backend caps at
       // 120 chars and falls back to the filename when blank.
@@ -557,6 +576,12 @@ export default function NewJob() {
                   value={TRANSITION_CATALOG.find((t) => t.name === transitionStyle)?.label || transitionStyle}
                 />
               )}
+              {isV2(platform) && (
+                <ConfirmRow
+                  label="Editorial AI"
+                  value={STAGE_2_PROVIDER_CATALOG.find((p) => p.name === stage2Provider)?.label || stage2Provider}
+                />
+              )}
             </div>
 
             {/* Item 104: V2 bulletin transition selection. Only shown
@@ -595,6 +620,31 @@ export default function NewJob() {
                     }
                     return null;
                   })()}
+                </div>
+              </div>
+            )}
+
+            {/* Item 114: Stage 2 provider selection. Only shown for V2. */}
+            {isV2(platform) && (
+              <div className="bg-surface border border-border rounded p-3 mb-4">
+                <label htmlFor="stage-2-provider"
+                       className="text-sm font-medium text-gray-200 block mb-1.5">
+                  Editorial AI <span className="text-[11px] text-gray-500 font-normal">(which LLM picks the cuts)</span>
+                </label>
+                <select
+                  id="stage-2-provider"
+                  value={stage2Provider}
+                  onChange={(e) => setStage2Provider(e.target.value)}
+                  className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                             text-sm text-white
+                             focus:outline-none focus:border-accent2"
+                >
+                  {STAGE_2_PROVIDER_CATALOG.map((p) => (
+                    <option key={p.name} value={p.name}>{p.label}</option>
+                  ))}
+                </select>
+                <div className="text-[11px] text-gray-500 mt-1.5">
+                  {(STAGE_2_PROVIDER_CATALOG.find((p) => p.name === stage2Provider)?.description) || ""}
                 </div>
               </div>
             )}
