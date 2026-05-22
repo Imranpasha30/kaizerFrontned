@@ -55,10 +55,10 @@ const DEFAULT_TRANSITION = "smart_cut";
 // kaizer/KaizerBackend/pipeline_v2/pipeline_v2/stages/stage_2_providers.py
 // (VALID_PROVIDERS). Backend is source of truth; UI just labels.
 const STAGE_2_PROVIDER_CATALOG = [
-  { name: "gemini", label: "Gemini 2.5 Pro (default)", description: "Google's most capable model. Strong on Telugu / code-mixed transcripts. Default since V2 ship." },
-  { name: "claude", label: "Claude Sonnet 4.6",        description: "Anthropic's alt option. Deterministic (T=0). Prompt caching reduces per-job cost after first run." },
+  { name: "gemini", label: "Gemini 2.5 Pro", description: "Google's most capable model. Strong on Telugu / code-mixed transcripts. Default since V2 ship." },
+  { name: "claude", label: "Claude Sonnet 4.6 (default)",        description: "Anthropic's alt option. Deterministic (T=0). Prompt caching reduces per-job cost after first run." },
 ];
-const DEFAULT_STAGE_2_PROVIDER = "gemini";
+const DEFAULT_STAGE_2_PROVIDER = "claude";
 
 export default function NewJob() {
   const navigate = useNavigate();
