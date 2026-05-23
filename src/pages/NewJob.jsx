@@ -22,6 +22,17 @@ function isV2(platform) {
   return platform === V2_PLATFORM_KEY;
 }
 
+// V3 platform key. V3 = Deepgram + (Claude|Gemini) -> V1 render. Shares
+// the Stage 2 provider dropdown with V2 since both expose the same
+// "which LLM decides the cuts" question.
+const V3_PLATFORM_KEY = "full_video_shorts_v3";
+function isV3(platform) {
+  return platform === V3_PLATFORM_KEY;
+}
+function usesStage2Provider(platform) {
+  return isV2(platform) || isV3(platform);
+}
+
 // Step 12.5 / backlog 59: language codes the V2 wizard treats as
 // "Indian-language" for STT-provider recommendation. When the user
 // has picked one of these AND is considering Whisper-Groq, we surface
@@ -253,7 +264,12 @@ export default function NewJob() {
       }
       // Item 114: V2 Stage 2 provider selection. Same pattern --
       // backend coerces unknown -> "gemini"; only send non-default.
-      if (isV2(platform) && stage2Provider && stage2Provider !== DEFAULT_STAGE_2_PROVIDER) {
+      // Send the chosen provider explicitly for any platform that uses it.
+      // (We deliberately don't gate on != DEFAULT here so the backend
+      // never has to guess -- it gets the exact value the user saw in
+      // the dropdown. Backend create_job's form default of "gemini" is
+      // only used when no value is sent at all, i.e. legacy V1 paths.)
+      if (usesStage2Provider(platform) && stage2Provider) {
         form.append("stage_2_provider", stage2Provider);
       }
       // Phase 14 / V2 Beta (D-13.11): optional name. Backend caps at
@@ -624,8 +640,8 @@ export default function NewJob() {
               </div>
             )}
 
-            {/* Item 114: Stage 2 provider selection. Only shown for V2. */}
-            {isV2(platform) && (
+            {/* Item 114: Stage 2 provider selection. Shown for V2 and V3. */}
+            {usesStage2Provider(platform) && (
               <div className="bg-surface border border-border rounded p-3 mb-4">
                 <label htmlFor="stage-2-provider"
                        className="text-sm font-medium text-gray-200 block mb-1.5">
