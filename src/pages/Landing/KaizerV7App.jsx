@@ -226,8 +226,7 @@ function Masthead(){
           <a href="#sec-3" data-cursor="Jump">§III Compositor</a>
           <a href="#sec-4" data-cursor="Jump">§IV Figures</a>
           <a href="#sec-5" data-cursor="Jump">§V Trust</a>
-          <a href="#sec-6" data-cursor="Jump">§VI Rates</a>
-          <a href="#sec-7" data-cursor="Jump">§VII Q&amp;A</a>
+          <a href="#sec-6" data-cursor="Jump">§VI Q&amp;A</a>
         </div>
         <div className="subnav-right">
           <a href="/login" className="draw-uline" data-cursor="Enter">Sign in →</a>
@@ -322,13 +321,12 @@ function Cover(){
                 ['§III','The compositor — a demonstration'],
                 ['§IV', 'The hours, in figures'],
                 ['§V',  'On trust & access'],
-                ['§VI', 'Rates'],
-                ['§VII','Questions, answered'],
+                ['§VI', 'Questions, answered'],
               ].map((r,i)=>(
                 <div key={i} style={{display:'flex',gap:14,alignItems:'baseline',fontFamily:'Newsreader',fontSize:14,paddingBottom:8,borderBottom:'1px solid var(--rule-faint)'}}>
                   <span className="f-mono" style={{fontSize:11,letterSpacing:'.18em',color:'var(--ink-mute)',width:34}}>{r[0]}</span>
                   <span style={{flex:1,fontStyle:'italic'}}>{r[1]}</span>
-                  <span className="f-mono" style={{fontSize:10,letterSpacing:'.18em',color:'var(--ink-mute)'}}>P. {['II','III','IV','V','VII','VIII','IX'][i]}</span>
+                  <span className="f-mono" style={{fontSize:10,letterSpacing:'.18em',color:'var(--ink-mute)'}}>P. {['II','III','IV','V','VII','VIII'][i]}</span>
                 </div>
               ))}
             </div>
@@ -941,66 +939,10 @@ function SectionTrust(){
   );
 }
 
-/* ===== §VI — Rates ===== */
-function SectionRates(){
-  const tiers = [
-    { name:"FREE",   role:"For trying it on",   price:"$0",     period:"",
-      features:["5 min of source / month","Up to 10 clips / month","One connected channel","Community support"],
-      cta:"Begin", featured:false },
-    { name:"PRO",    role:"For working creators", price:"$29",  period:"/mo",
-      features:["Unlimited source video","Unlimited clips","Up to 5 connected channels","Priority rendering queue","Per-channel branding & SEO","Email support, 24h SLA"],
-      cta:"Upgrade", featured:true },
-    { name:"STUDIO", role:"For agencies & teams", price:"Custom", period:"",
-      features:["Everything in Pro","Unlimited connected channels","Dedicated GPU pipeline","Custom layouts & templates","SAML SSO + audit logs","Priority support, 4h SLA"],
-      cta:"Contact us", featured:false },
-  ];
-  return (
-    <section className="page">
-      <SectionHead id="sec-6" num="VI" ttl={<>The <em style={{fontStyle:'italic',color:'var(--accent)'}}>rate card</em></>} meta="Page VIII · Three roles · No card to start"/>
-
-      <Reveal>
-        <p className="standfirst" style={{marginBottom:36,maxWidth:880}}>
-          Three plans, drawn from the call sheet. Free is genuinely free. Pro is the working plan. Studio is for teams that ship across many brands. All include OAuth-secured channel connection and unlimited revocation.
-        </p>
-      </Reveal>
-
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:18}}>
-        {tiers.map((t,i)=>(
-          <Reveal key={t.name} delay={i*120}>
-            <div className={`tier ${t.featured?'featured':''}`}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:6}}>
-                <h3 className="f-display" style={{fontSize:38,fontWeight:500,letterSpacing:'-0.03em'}}>{t.name}</h3>
-                {t.featured && <span className="label accent">Featured</span>}
-              </div>
-              <div className="role f-display-i" style={{fontSize:16,color:'var(--ink-mute)',marginBottom:24}}>— {t.role}</div>
-              <div style={{display:'flex',alignItems:'baseline',gap:6,marginBottom:18}}>
-                <span className="price-amount">{t.price}</span>
-                {t.period && <span style={{fontSize:14,opacity:.7}}>{t.period}</span>}
-              </div>
-              <div className="rule" style={{borderColor: t.featured? 'rgba(241,233,213,.25)':'var(--rule-soft)', marginBottom:18}}></div>
-              <ul style={{listStyle:'none',display:'flex',flexDirection:'column',gap:11,marginBottom:24,flex:1}}>
-                {t.features.map((f,k)=>(
-                  <li key={k} style={{display:'flex',gap:10,fontFamily:'Newsreader',fontSize:14.5,lineHeight:1.5}}>
-                    <span style={{color:'var(--accent)',marginTop:1}}>✓</span><span>{f}</span>
-                  </li>
-                ))}
-              </ul>
-              <a href={t.cta && /talk|contact|sales/i.test(t.cta) ? "mailto:sales@kaizerx.com" : "/register"} className={`btn ${t.featured?'accent':''}`} data-cursor={t.cta} style={t.featured?{}:{}}>{t.cta} →</a>
-            </div>
-          </Reveal>
-        ))}
-      </div>
-
-      <Reveal delay={350}>
-        <p style={{marginTop:24,textAlign:'center',fontFamily:'JetBrains Mono',fontSize:10.5,letterSpacing:'.22em',textTransform:'uppercase',color:'var(--ink-mute)'}}>
-          all plans · OAuth-secured · per-channel branding · unlimited revocation · cancel any time
-        </p>
-      </Reveal>
-
-      <Orn n="VII"/>
-    </section>
-  );
-}
+/* §VI — Rates section removed 2026-05-23 (product decision: no pricing
+ * on public landing for now). The Q&A section below was renumbered from
+ * §VII to §VI to close the gap. Nav + TOC references updated below.
+ */
 
 /* ===== §VII — Q&A ===== */
 function SectionQA(){
@@ -1014,7 +956,7 @@ function SectionQA(){
   ];
   return (
     <section className="page">
-      <SectionHead id="sec-7" num="VII" ttl={<>Questions, <em style={{fontStyle:'italic',color:'var(--accent)'}}>answered</em></>} meta="Page IX–X · Q&A · 6 entries"/>
+      <SectionHead id="sec-6" num="VI" ttl={<>Questions, <em style={{fontStyle:'italic',color:'var(--accent)'}}>answered</em></>} meta="Page VII–VIII · Q&A · 6 entries"/>
 
       <Reveal>
         <p className="standfirst" style={{marginBottom:36,maxWidth:880}}>
@@ -1130,7 +1072,6 @@ export default function KaizerV7App({ isActive }){
         <SectionCompositor/>
         <SectionFigures/>
         <SectionTrust/>
-        <SectionRates/>
         <SectionQA/>
       </main>
       <Closing/>
