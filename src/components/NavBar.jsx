@@ -146,6 +146,13 @@ export default function NavBar() {
                   <SettingsIcon size={13} /> Settings & social links
                 </Link>
                 <Link
+                  to="/settings/meta"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"
+                >
+                  <SettingsIcon size={13} /> Facebook & Instagram
+                </Link>
+                <Link
                   to="/v4-defaults"
                   onClick={() => setUserMenuOpen(false)}
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-white/5 hover:text-white"

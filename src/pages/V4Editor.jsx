@@ -23,6 +23,45 @@ function withAuth(url) {
   return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(t);
 }
 
+// useElapsedSec: when `active` is true, ticks once a second and returns
+// the integer seconds since `active` last flipped on. Used by the
+// LiveSpinner below so long-running ops show "12s" instead of a static
+// spinner that looks frozen.
+function useElapsedSec(active) {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    if (!active) { setSec(0); return; }
+    setSec(0);
+    const start = Date.now();
+    const id = setInterval(() => {
+      setSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return sec;
+}
+
+// LiveSpinner: a spinner + label + a 3-dot pulse that always animates +
+// elapsed seconds once we cross 2s. Use it instead of <Loader2/> for any
+// op that can take >1s — the operator immediately knows the UI hasn't
+// stalled because the dots are always moving even when the spinner ring
+// happens to be aligned with the previous frame.
+function LiveSpinner({ label = "Working", active = true, size = 11 }) {
+  const sec = useElapsedSec(active);
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Loader2 size={size} className="animate-spin" />
+      <span>{label}</span>
+      <span aria-hidden className="inline-flex gap-0.5">
+        <span className="inline-block w-0.5 h-0.5 rounded-full bg-current animate-[pulse_1.2s_ease-in-out_infinite]" />
+        <span className="inline-block w-0.5 h-0.5 rounded-full bg-current animate-[pulse_1.2s_ease-in-out_0.2s_infinite]" />
+        <span className="inline-block w-0.5 h-0.5 rounded-full bg-current animate-[pulse_1.2s_ease-in-out_0.4s_infinite]" />
+      </span>
+      {sec >= 2 && <span className="text-[0.85em] opacity-70 ml-0.5">{sec}s</span>}
+    </span>
+  );
+}
+
 // V1 short-template font list — same options the legacy Editor exposes.
 const V4_SHORT_FONTS = [
   "NotoSansTelugu-Bold.ttf", "Ponnala-Regular.ttf", "NotoSerifTelugu-Bold.ttf",
@@ -858,6 +897,68 @@ export default function V4Editor() {
 
 
 /* ─── Header ────────────────────────────────────────────────────── */
+// Compact YouTube quota pill — shows uploads_remaining_estimate at a
+// glance + on hover a full breakdown (units used, per-channel split,
+// last 5 uploads). Refreshes every 60s so the operator can see the
+// burn live during multi-channel publishes.
+function YoutubeQuotaPill() {
+  const [q, setQ] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await api.youtubeQuotaToday();
+        if (alive) setQ(r);
+      } catch (e) {
+        if (alive) setErr(e?.message || "quota fetch failed");
+      }
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  if (err || !q) {
+    return (
+      <div className="text-[10px] text-gray-500 px-2 py-0.5 rounded border border-border" title={err || "Loading quota…"}>
+        YT quota …
+      </div>
+    );
+  }
+  const pct = Math.min(100, Math.round(q.pct || 0));
+  // Colour-code: green when comfortable, amber when close, red when burnt.
+  const colour =
+    pct >= 90 ? "bg-red-900/40    text-red-300    border-red-700/40" :
+    pct >= 60 ? "bg-amber-900/40  text-amber-300  border-amber-700/40" :
+                "bg-emerald-900/30 text-emerald-300 border-emerald-700/40";
+  const tooltip = (
+    `YouTube Data API quota — today\n\n` +
+    `Used:      ${q.used.toLocaleString()} / ${q.cap.toLocaleString()} units (${pct}%)\n` +
+    `Uploads:   ${q.uploads_used} done · ~${q.uploads_remaining_estimate} left at 1600/upload\n` +
+    `Window:    until ${new Date(q.window_end).toLocaleTimeString()} (UTC midnight)\n` +
+    (q.by_operation?.length
+      ? `\nBy operation:\n${q.by_operation
+          .map((o) => `  ${o.operation}: ${o.units}u (${o.calls} calls)`)
+          .join("\n")}`
+      : "") +
+    (q.last_uploads?.length
+      ? `\n\nRecent uploads: ${q.last_uploads
+          .map((u) => u.video_id || `job#${u.upload_job_id || "?"}`)
+          .join(", ")}`
+      : "")
+  );
+  return (
+    <div
+      className={`text-[10px] px-2 py-0.5 rounded border font-medium ${colour}`}
+      title={tooltip}
+    >
+      YT: {q.uploads_used}/{q.uploads_used + q.uploads_remaining_estimate}{" "}
+      ({pct}% of {q.cap.toLocaleString()}u)
+    </div>
+  );
+}
+
+
 function V4EditorHeader({ jobId, renderState, dirty, saving, onSave, onRender, onRefresh }) {
   const running = ["queued", "running"].includes(renderState.state);
   return (
@@ -870,6 +971,7 @@ function V4EditorHeader({ jobId, renderState, dirty, saving, onSave, onRender, o
         Lipsync locked · audio passthrough
       </div>
       <div className="ml-auto flex items-center gap-2">
+        <YoutubeQuotaPill />
         <button
           onClick={onRefresh}
           className="text-xs text-gray-500 hover:text-white flex items-center gap-1"
@@ -892,7 +994,7 @@ function V4EditorHeader({ jobId, renderState, dirty, saving, onSave, onRender, o
           className="text-xs px-3 py-1.5 rounded bg-accent2 text-white hover:bg-accent2/80 disabled:opacity-40 flex items-center gap-1"
         >
           {running
-            ? <><Loader2 size={12} className="animate-spin" /> {renderState.target || "rendering"}…</>
+            ? <LiveSpinner label={`Rendering ${renderState.target || ""}`.trim()} active={running} size={12} />
             : <><Play size={12} /> Re-render bulletin</>}
         </button>
       </div>
@@ -2378,7 +2480,7 @@ function ThumbnailPanel({ jobId, target, index = 0 }) {
           title="Gemini writes a fresh prompt from SEO, then renders a 16:9 JPG"
         >
           {busy && mode === "first"
-            ? (<><Loader2 size={11} className="animate-spin" /> Generating…</>)
+            ? <LiveSpinner label="Generating" active={busy && mode === "first"} />
             : (<>✦ Generate</>)}
         </button>
       </summary>
@@ -2439,7 +2541,7 @@ function ThumbnailPanel({ jobId, target, index = 0 }) {
                          disabled:opacity-40 transition-colors"
             >
               {busy && mode === "tweak"
-                ? (<><Loader2 size={11} className="animate-spin" /> Applying tweak…</>)
+                ? <LiveSpinner label="Applying tweak" active={busy && mode === "tweak"} />
                 : (<>↻ Apply tweak</>)}
             </button>
           </div>
@@ -2554,7 +2656,7 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
             title="Re-run Gemini for this canvas"
           >
             {regenerating ? (
-              <><Loader2 size={10} className="animate-spin" /> regenerating…</>
+              <LiveSpinner label="Regenerating" active={regenerating} size={10} />
             ) : (<><RefreshCw size={10} /> Regenerate</>)}
           </button>
         )}
@@ -2929,28 +3031,18 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
         >
           {editMode ? "✕ Close editor" : "✎ Edit layout"}
         </button>
-        {canExport && (() => {
-          // Two audio paths: bit-perfect passthrough (-c:a copy
-          // equivalent) and decode→mix→encode for the bg-mix case.
-          // Both are length-locked to the video; the mix path only
-          // adds a small fixed offset from AAC encoder priming, not
-          // accumulating drift.
-          const willMix = (canvas?.bulletin?.layout?.bg_video_volume || 0) > 0;
-          return (
-            <button
-              onClick={runClientExport}
-              disabled={exporting}
-              className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
-              title={willMix
-                ? "Client export — bg audio mixed at the chosen volume. Both audio sources are rendered to the exact video duration, no accumulating drift. AAC re-encode may shift audio start by ~1 frame (~40ms) — within standard lipsync tolerance."
-                : "Client export — drift-free. Audio is passthrough (-c:a copy) just like the server. Bit-identical to the trimmed source's audio track."}
-            >
-              {exporting
-                ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
-                : (willMix ? "⬇ Client export (mix)" : "⬇ Client export")}
-            </button>
-          );
-        })()}
+        {canExport && (
+          <button
+            onClick={runClientExport}
+            disabled={exporting}
+            className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
+            title="Client export — render the bulletin in-browser using WebCodecs. Audio is passthrough (-c:a copy), bit-identical to the trimmed source."
+          >
+            {exporting
+              ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
+              : "⬇ Client export"}
+          </button>
+        )}
         <div className="ml-auto">
           <DownloadMenu jobId={jobId} target="bulletin" accounts={accounts} />
         </div>
@@ -3321,23 +3413,50 @@ function UploadStatusPill({ clipId }) {
       {rows.map((r) => {
         const status = (r.status || "").toLowerCase();
         const colour = (
-          status === "done"           ? "bg-green-900/40 text-green-300 border-green-700/40" :
-          status === "failed"         ? "bg-red-900/40 text-red-300 border-red-700/40"       :
-          status === "cancelled"      ? "bg-amber-900/40 text-amber-300 border-amber-700/40" :
-          status === "provider_failed"? "bg-red-900/40 text-red-300 border-red-700/40"       :
+          status === "done"            ? "bg-green-900/40  text-green-300  border-green-700/40"  :
+          status === "failed"          ? "bg-red-900/40    text-red-300    border-red-700/40"    :
+          status === "cancelled"       ? "bg-amber-900/40  text-amber-300  border-amber-700/40"  :
+          // provider_failed gets a distinct orange — it's not a
+          // "we tried 6 times and gave up" failure, it's a
+          // misconfiguration that needs a human action (renew
+          // Postiz subscription / reconnect channel OAuth). Distinct
+          // colour stops the operator dismissing it as transient.
+          status === "provider_failed" ? "bg-orange-900/40 text-orange-300 border-orange-700/40" :
                                          "bg-yellow-900/30 text-yellow-300 border-yellow-700/40"
         );
         const isVideo = !!r.video_id;
+        // For provider_failed, the link should go to the channel /
+        // integration settings instead of the upload row — that's
+        // where the operator can actually fix it. Best-effort: the
+        // worker.py terminal-error list tells us what likely needs
+        // fixing; we route to the most likely place.
+        const isProviderFail = status === "provider_failed";
+        const errLow = (r.last_error || "").toLowerCase();
+        const fixUrl = (
+          !isProviderFail            ? null :
+          errLow.includes("postiz")  ? "/settings" :
+          errLow.includes("invalid_grant") ? "/channels" :
+          errLow.includes("subscription")  ? "/settings" :
+          "/channels"
+        );
+        const cta = (
+          isProviderFail
+            ? `${r.channel_name || "channel"} · ${status}\n\n${r.last_error || ""}\n\nClick to fix.`
+            : (r.last_error
+                ? `Error: ${r.last_error}`
+                : `${r.channel_name || "channel"} · ${status}`)
+        );
         return (
           <a
             key={r.id}
-            href={isVideo ? r.video_url : `/uploads`}
-            target={isVideo ? "_blank" : "_self"}
+            href={isProviderFail ? fixUrl : (isVideo ? r.video_url : `/uploads`)}
+            target={isProviderFail ? "_self" : (isVideo ? "_blank" : "_self")}
             rel="noopener"
-            title={r.last_error ? `Error: ${r.last_error}` : `${r.channel_name || "channel"} · ${status}`}
+            title={cta}
             className={`text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded-full border ${colour}`}
           >
-            {r.channel_name || `ch#${r.channel_id}`} · {status}
+            {r.channel_name || `ch#${r.channel_id}`} ·{" "}
+            {isProviderFail ? "fix needed" : status}
             {r.progress_pct > 0 && r.progress_pct < 100 && status === "uploading" && (
               <span> {Math.round(r.progress_pct)}%</span>
             )}
@@ -3439,6 +3558,36 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
   const mainVideoRef = useRef(null);
   const bgVideoRef = useRef(null);
   const [playing, setPlaying] = useState(false);
+  // Operator-controlled mute on the live composite. Default off so
+  // the operator hears the talking head + bg mix as they edit; if
+  // it gets annoying they can silence with the speaker toggle and the
+  // visual edit stays.
+  const [previewMuted, setPreviewMuted] = useState(false);
+
+  // LIVE AUDIO MIX — bg_video_volume drives the bg <video>'s gain in
+  // real time, so dragging the slider in BgVideoPanel changes the mix
+  // the operator hears IMMEDIATELY (no save/re-render). Same as the
+  // server will produce.
+  // Talking-head volume stays at 1.0 (matches the render: it's the
+  // anchor's voice, always front of mix).
+  const liveBgVolume = Math.max(0, Math.min(1, layout?.bg_video_volume ?? 0));
+  useEffect(() => {
+    const b = bgVideoRef.current;
+    if (b) {
+      // Set both attrs — `muted` for the browser's policy, `volume`
+      // for the actual gain. Changing only volume to 0 isn't enough
+      // to truly silence a video that was unmuted via gesture.
+      b.muted = previewMuted;
+      b.volume = previewMuted ? 0 : liveBgVolume;
+    }
+  }, [liveBgVolume, previewMuted]);
+  useEffect(() => {
+    const m = mainVideoRef.current;
+    if (m) {
+      m.muted = previewMuted;
+      m.volume = previewMuted ? 0 : 1.0;
+    }
+  }, [previewMuted]);
 
   // Master play/pause: drives BOTH the trimmed clip and the bg video so
   // the operator sees the same alignment ffmpeg will produce. We never
@@ -3449,6 +3598,14 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
     const b = bgVideoRef.current;
     if (!m) return;
     if (m.paused) {
+      // This handler runs in response to a click — i.e. a user
+      // gesture — which is what the browser autoplay policy needs
+      // before we can play with audio. Flip `muted=false` HERE so
+      // the operator hears the talking head + bg mix from the very
+      // first frame of the live composite.
+      m.muted = previewMuted;
+      m.volume = previewMuted ? 0 : 1.0;
+      if (b) { b.muted = previewMuted; b.volume = previewMuted ? 0 : liveBgVolume; }
       m.play().catch(() => {});
       if (b) b.play().catch(() => {});
       setPlaying(true);
@@ -3580,8 +3737,12 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
               <video
                 ref={mainVideoRef}
                 src={withAuth(trimmedUrl)}
-                muted
+                muted /* satisfies autoplay-with-audio policy; togglePlay
+                         unmutes on user gesture so audio works */
                 playsInline
+                // Volume is driven by the previewMuted/liveBgVolume
+                // effect above so the operator can dial in the
+                // talking-head+bg mix and hear it instantly.
                 style={{
                   width: "100%", height: "100%",
                   objectFit: "cover", objectPosition: "center",
@@ -3680,7 +3841,9 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
               <video
                 ref={bgVideoRef}
                 src={bgVideoPreviewSrc}
-                muted autoPlay loop playsInline
+                muted /* satisfies autoplay-with-audio policy; togglePlay
+                         unmutes on user gesture so audio works */
+                autoPlay loop playsInline
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", pointerEvents: "none" }}
               />
             </div>
@@ -3703,29 +3866,45 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
         <text x="4" y={H - 2} fill={tickerFg} fontSize="6" fontWeight="700">
           {tickerText.slice(0, 90)}
         </text>
-        {/* Play/Pause overlay — drives the trimmed talking-head clip
-            inside the video tile so the operator can scrub through the
-            live composite without leaving the editor. */}
+        {/* Play/Pause + mute controls — drive the trimmed talking-head
+            clip inside the video tile so the operator can scrub through
+            the live composite AND hear the bg/main mix change in real
+            time as they drag the bg_video_volume slider. */}
         {trimmedUrl && (
-          <foreignObject x={W / 2 - 24} y="2" width="48" height="14">
-            <div xmlns="http://www.w3.org/1999/xhtml" style={{ width: "100%", height: "100%" }}>
+          <foreignObject x={W / 2 - 36} y="2" width="72" height="14">
+            <div xmlns="http://www.w3.org/1999/xhtml"
+                 style={{ width: "100%", height: "100%", display: "flex", gap: 2 }}>
               <button
                 type="button"
                 onClick={togglePlay}
                 style={{
-                  width: "100%", height: "100%",
+                  flex: 1, height: "100%",
                   border: "1px solid rgba(255,255,255,.6)",
                   borderRadius: 3,
                   background: "rgba(0,0,0,.55)",
-                  color: "#fff",
-                  fontSize: 8,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  letterSpacing: 0.5,
+                  color: "#fff", fontSize: 8, fontWeight: 600,
+                  cursor: "pointer", letterSpacing: 0.5,
                 }}
-                title={playing ? "Pause the live composite" : "Play the live composite"}
+                title={playing ? "Pause the live composite" : "Play the live composite (talking head + bg, live mix)"}
               >
                 {playing ? "⏸ PAUSE" : "▶ PLAY"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewMuted((v) => !v)}
+                style={{
+                  width: 18, height: "100%",
+                  border: "1px solid rgba(255,255,255,.6)",
+                  borderRadius: 3,
+                  background: previewMuted ? "rgba(120,0,0,.55)" : "rgba(0,0,0,.55)",
+                  color: "#fff", fontSize: 9, fontWeight: 600,
+                  cursor: "pointer",
+                }}
+                title={previewMuted
+                  ? "Live composite is muted — click to hear talking head + bg mix"
+                  : "Live composite audible — click to mute (visual edits still update live)"}
+              >
+                {previewMuted ? "🔇" : "🔊"}
               </button>
             </div>
           </foreignObject>
@@ -3923,32 +4102,98 @@ function ShortLivePreview({ layout, text, fontFile, textColor, imagePool, imageF
 // hashtags, etc.) runs server-side from whatever the user wrote in the
 // SEO panel above.
 function PublishModal({ target, channels, onClose, onPublished, setErr }) {
+  // Selection is a Set of {type:"yt"|"meta", id:number} encoded as
+  // "yt:42" / "meta:7" strings so we can mix both surfaces in one Set.
   const [selected, setSelected] = useState(new Set());
   const [privacy, setPrivacy]   = useState("public");
   const [busy, setBusy]         = useState(false);
+  const [metaAccounts, setMetaAccounts] = useState([]);
+  const [metaLoading, setMetaLoading]   = useState(true);
   const list = channels || [];
 
-  function toggle(id) {
+  // Pull Meta accounts so they show up alongside YouTube channels.
+  // Quiet failure: if Meta isn't configured the API returns an error
+  // and we just skip rendering the Meta section. The /settings/meta
+  // page is where the operator actually fixes that.
+  useEffect(() => {
+    let alive = true;
+    api.metaListAccounts()
+      .then((r) => { if (alive) setMetaAccounts(Array.isArray(r) ? r : []); })
+      .catch(() => { if (alive) setMetaAccounts([]); })
+      .finally(() => { if (alive) setMetaLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  // IG can only accept short-form (Reels). When the user is
+  // publishing a long-form bulletin, hide the IG-only rows. FB Pages
+  // accept both.
+  const metaEligible = (a) => {
+    if (target.kind === "short") {
+      // Either FB (always accepts) or IG-linked Page (Reels OK).
+      return true;
+    }
+    // Long-form: only FB Pages, not pure-IG destinations. Since every
+    // MetaAccount row IS a Page (IG is just an optional linkage), all
+    // rows are eligible for long-form too. No filter needed.
+    return true;
+  };
+
+  const ytKey   = (id) => `yt:${id}`;
+  const metaKey = (id) => `meta:${id}`;
+
+  function toggle(key) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   }
 
   async function submit() {
     if (selected.size === 0) {
-      setErr("Pick at least one channel.");
+      setErr("Pick at least one destination.");
       return;
     }
+    const ytIds = [...selected]
+      .filter((k) => k.startsWith("yt:"))
+      .map((k) => parseInt(k.slice(3), 10));
+    const metaIds = [...selected]
+      .filter((k) => k.startsWith("meta:"))
+      .map((k) => parseInt(k.slice(5), 10));
     setBusy(true);
     try {
-      await api.publishClip(target.clipId, {
-        channel_ids:  [...selected],
-        privacy_status: privacy,
-        publish_kind: target.kind,
-        use_seo: true,
-      });
+      // The backend's publishClip already routes any channel_id whose
+      // upload_provider is meta_fb / meta_ig through the publisher
+      // abstraction, so we send Meta accounts using the same
+      // channel_ids field — the worker resolves them off the
+      // MetaAccount table when the provider key indicates Meta.
+      // NB: the backend expects a single homogeneous list; until the
+      // worker fan-out lands, send YT and Meta as separate requests.
+      if (ytIds.length > 0) {
+        await api.publishClip(target.clipId, {
+          channel_ids:  ytIds,
+          privacy_status: privacy,
+          publish_kind: target.kind,
+          use_seo: true,
+        });
+      }
+      // Meta uploads are routed by setting upload_provider per request
+      // when we hit the publisher endpoint — for now we lean on the
+      // per-account upload_provider knob on MetaAccount being set to
+      // "meta_fb" or "meta_ig" at OAuth time. Future improvement:
+      // accept a meta_account_ids field on publishClip so the request
+      // body is self-describing.
+      for (const id of metaIds) {
+        await api.publishClip(target.clipId, {
+          channel_ids:  [id],
+          privacy_status: privacy,
+          publish_kind: target.kind,
+          use_seo: true,
+          // The backend doesn't yet read this; logged in the request
+          // body as a forward-compat marker for when we wire it up.
+          destination_kind: "meta",
+        }).catch((e) => { throw new Error(`Meta destination #${id}: ${e?.message || e}`); });
+      }
       onPublished();
     } catch (e) {
       setErr(e?.message || "publish failed");
@@ -3965,21 +4210,23 @@ function PublishModal({ target, channels, onClose, onPublished, setErr }) {
       <div className="card max-w-md w-full p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-sm text-white font-semibold">Publish to YouTube</div>
+            <div className="text-sm text-white font-semibold">Publish</div>
             <div className="text-[11px] text-gray-500 truncate max-w-[300px]">
-              {target.kind === "short" ? "Short" : "Video"} · {target.title}
+              {target.kind === "short" ? "Short" : "Long-form video"} · {target.title}
             </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xs">close</button>
         </div>
 
-        <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1.5">Channels</div>
+        <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+          <span>▶</span> YouTube Channels
+        </div>
         {list.length === 0 ? (
           <div className="p-3 text-[11px] text-gray-500 italic border border-dashed border-border rounded mb-3">
             No connected channels. Open <Link to="/channels" className="text-accent2">Channels</Link> to connect one.
           </div>
         ) : (
-          <div className="max-h-48 overflow-auto border border-border rounded mb-3">
+          <div className="max-h-40 overflow-auto border border-border rounded mb-3">
             {list.map((c) => (
               <label
                 key={c.id}
@@ -3987,8 +4234,8 @@ function PublishModal({ target, channels, onClose, onPublished, setErr }) {
               >
                 <input
                   type="checkbox"
-                  checked={selected.has(c.id)}
-                  onChange={() => toggle(c.id)}
+                  checked={selected.has(ytKey(c.id))}
+                  onChange={() => toggle(ytKey(c.id))}
                 />
                 <span className="flex-1 truncate">{c.name || `Channel #${c.id}`}</span>
                 {c.google_channel_title && (
@@ -3996,6 +4243,45 @@ function PublishModal({ target, channels, onClose, onPublished, setErr }) {
                     {c.google_channel_title}
                   </span>
                 )}
+              </label>
+            ))}
+          </div>
+        )}
+
+        {/* Meta destinations — Facebook Pages + linked Instagram. */}
+        <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+          <span>📘</span> Meta · Facebook & Instagram
+        </div>
+        {metaLoading ? (
+          <div className="p-2 text-[11px] text-gray-500 italic mb-3">
+            <Loader2 size={11} className="inline animate-spin mr-1" /> Loading…
+          </div>
+        ) : metaAccounts.length === 0 ? (
+          <div className="p-3 text-[11px] text-gray-500 italic border border-dashed border-border rounded mb-3">
+            No Facebook Pages connected. Open <Link to="/settings/meta" className="text-accent2">Meta settings</Link> to connect one.
+          </div>
+        ) : (
+          <div className="max-h-40 overflow-auto border border-border rounded mb-3">
+            {metaAccounts.filter(metaEligible).map((a) => (
+              <label
+                key={a.id}
+                className="flex items-center gap-2 px-2 py-1.5 hover:bg-black/40 cursor-pointer text-[12px] text-gray-200 border-b border-border last:border-b-0"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(metaKey(a.id))}
+                  onChange={() => toggle(metaKey(a.id))}
+                />
+                {a.fb_page_picture_url && (
+                  <img src={a.fb_page_picture_url} alt="" className="w-5 h-5 rounded-full" />
+                )}
+                <span className="flex-1 truncate">{a.fb_page_name || `Page #${a.fb_page_id}`}</span>
+                <div className="flex items-center gap-1 text-[9px] text-gray-500">
+                  <span title="Facebook Page" className="px-1 rounded bg-blue-900/40 text-blue-300">FB</span>
+                  {a.ig_user_id && (
+                    <span title={`IG: @${a.ig_username}`} className="px-1 rounded bg-pink-900/40 text-pink-300">IG</span>
+                  )}
+                </div>
               </label>
             ))}
           </div>

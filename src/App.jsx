@@ -18,6 +18,7 @@ import ExpressMode  from "./pages/ExpressMode";
 import LiveStudio   from "./pages/LiveStudio";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
+import MetaSettings from "./pages/MetaSettings";
 import Billing  from "./pages/Billing";
 import LiveDirector from "./pages/LiveDirector";
 import ProgramMonitor from "./pages/ProgramMonitor";
@@ -115,6 +116,7 @@ export default function App() {
           <Route path="/live-studio"                   element={<ProtectedRoute><LiveStudio /></ProtectedRoute>} />
           <Route path="/assets"                        element={<ProtectedRoute><Assets /></ProtectedRoute>} />
           <Route path="/settings"                      element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/settings/meta"                 element={<ProtectedRoute><MetaSettings /></ProtectedRoute>} />
           <Route path="/jobs/:jobId"                   element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/edit"              element={<ProtectedRoute><Editor /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/edit/:clipId"      element={<ProtectedRoute><Editor /></ProtectedRoute>} />

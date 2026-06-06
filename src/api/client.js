@@ -445,6 +445,13 @@ export const api = {
     return res.json();
   },
   v4DeleteUserAsset:   (assetId)      => req("DELETE", `/assets/${assetId}`),
+  // ── Meta (Facebook + Instagram) OAuth + publishing ─────────────
+  metaConfig:          ()             => req("GET", `/meta/oauth/config`),
+  metaStartOAuth:      ()             => req("GET", `/meta/oauth/start`),
+  metaListAccounts:    ()             => req("GET", `/meta/accounts`),
+  metaDisconnect:      (id)           => req("DELETE", `/meta/accounts/${id}`),
+  // ── YouTube quota dashboard ────────────────────────────────────
+  youtubeQuotaToday:   ()             => req("GET", `/youtube/quota/today`),
   v4RegenSeo:          (jobId, body)  => req("POST", `/v4/jobs/${jobId}/seo/regenerate`, body),
   v4GenThumbnail:      (jobId, body)  => req("POST", `/v4/jobs/${jobId}/thumbnail/generate`, body),
   seoGenerate:         (clipId, body) => req("POST", `/clips/${clipId}/seo/generate`, body),
