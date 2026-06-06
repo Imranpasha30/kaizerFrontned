@@ -6,6 +6,11 @@ import {
   ChevronDown, ChevronRight,
 } from "lucide-react";
 import { api, getToken } from "../api/client";
+import {
+  exportBulletinClient,
+  isClientExportSupported,
+  downloadBlob,
+} from "../lib/clientExporter";
 
 // Browser <img> tags cannot attach Authorization: Bearer headers — so the
 // pool-serving route accepts the JWT via ?token= query too. This helper
@@ -2836,6 +2841,69 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
   // they'll see on render. Edits don't touch the rendered file until
   // they hit Re-render — this is purely the editing surface.
   const [editMode, setEditMode] = useState(false);
+  const mainPlayerRef = useRef(null);
+  // Client-side export state. Spike scope: video-only (bg + lower-third),
+  // fixed 5s, just to prove the WebCodecs + mp4-muxer path. Per-story
+  // composite + audio mix come in follow-up sessions.
+  const [exporting, setExporting] = useState(false);
+  const [exportPct, setExportPct] = useState(0);
+  const [exportErr, setExportErr] = useState("");
+  const canExport = isClientExportSupported();
+  const runClientExport = async () => {
+    setExportErr("");
+    setExporting(true);
+    setExportPct(0);
+    try {
+      const bulletin = canvas?.bulletin;
+      if (!bulletin) throw new Error("No bulletin canvas loaded");
+      const layout = bulletin.layout;
+      const bgRef = layout?.bg_video_path || "";
+
+      // Resolve the bg URL — mirrors the editor's preview logic. For
+      // `asset:N` we'd need to hit the user-assets API, but most users
+      // pick a sample so we cover that first; assets are a follow-up.
+      let bgUrl = "";
+      if (bgRef.startsWith("sample:")) {
+        const name = bgRef.slice("sample:".length);
+        bgUrl = withAuth(`/api/v4/bg-samples/${encodeURIComponent(name)}`);
+      }
+
+      // Helper passed to the exporter so it can fetch pool images by
+      // filename without knowing about jobs or auth.
+      const resolvePoolUrl = (filename) =>
+        withAuth(`/api/v4/jobs/${jobId}/pool/${encodeURIComponent(filename)}`);
+
+      const blob = await exportBulletinClient({
+        canvasState: bulletin,
+        trimmedUrl: withAuth(trimmedUrl),
+        bgUrl,
+        bgVolume: layout?.bg_video_volume || 0,
+        resolvePoolUrl,
+        fps: 30,
+        videoBitrate: 6_000_000,
+        onProgress: ({ pct, phase }) => {
+          setExportPct(pct);
+          // eslint-disable-next-line no-console
+          if (phase) console.debug("[export]", phase, pct);
+        },
+      });
+      downloadBlob(blob, `bulletin_client_${jobId}_${Date.now()}.mp4`);
+    } catch (e) {
+      setExportErr(e?.message || "client export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+  // When the edit overlay opens, pause the underlying rendered-bulletin
+  // player so its audio doesn't keep playing behind the silent live
+  // composite (the overlay's trimmed clip is muted by default). Leaving
+  // it paused on close is intentional — operator usually wants to scrub
+  // intentionally, not auto-resume mid-edit.
+  useEffect(() => {
+    if (editMode && mainPlayerRef.current) {
+      try { mainPlayerRef.current.pause(); } catch {}
+    }
+  }, [editMode]);
   if (!url) {
     return (
       <div className="h-64 flex items-center justify-center text-gray-500 text-xs italic">
@@ -2861,6 +2929,18 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
         >
           {editMode ? "✕ Close editor" : "✎ Edit layout"}
         </button>
+        {canExport && (
+          <button
+            onClick={runClientExport}
+            disabled={exporting}
+            className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
+            title="Phase C spike — render a 5s mp4 entirely in the browser (bg + lower-third only). No server load."
+          >
+            {exporting
+              ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
+              : "⬇ Client export"}
+          </button>
+        )}
         <div className="ml-auto">
           <DownloadMenu jobId={jobId} target="bulletin" accounts={accounts} />
         </div>
@@ -2869,11 +2949,17 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
         )}
       </div>
       {bulletinClipId && <UploadStatusPill clipId={bulletinClipId} />}
+      {exportErr && (
+        <div className="text-[11px] text-red-300 bg-red-500/10 border border-red-500/30 rounded px-2 py-1 flex items-center gap-1.5">
+          <AlertCircle size={11} /> Client export: {exportErr}
+        </div>
+      )}
       {/* Video player + overlay live preview. The overlay is the same
           SVG mock that used to sit below — it just lives on top now so
           one surface is editor + result. Toggle controls visibility. */}
       <div className="relative w-full">
         <video
+          ref={mainPlayerRef}
           key={url}
           src={url}
           controls
@@ -2891,6 +2977,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
               headline={canvas?.bulletin?.seo?.title || canvas?.bulletin?.stories?.[0]?.title_native}
               layout={canvas?.bulletin?.layout}
               onLayoutChange={onLayoutChange}
+              trimmedUrl={trimmedUrl}
             />
           </div>
         )}
@@ -3257,7 +3344,7 @@ function UploadStatusPill({ clipId }) {
 // left video tile + right sidebar tile (white-bordered, ~50px top
 // margin), full-width red lower-third with kicker chip + headline,
 // yellow ticker scrolling along the bottom.
-function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING", layout, onLayoutChange, activeImage, onPanActiveImage }) {
+function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING", layout, onLayoutChange, activeImage, onPanActiveImage, trimmedUrl = "" }) {
   const [frameMode, setFrameMode] = useState(false);   // ON = drag inside picture rect pans the image; OFF = drag moves the rect (existing behaviour).
   const [copied, setCopied] = useState("");            // "ok" | "err" | "" — transient feedback on the Copy/Paste preset buttons.
   // Resolve canvas.layout.bg_video_path → playable URL for the preview
@@ -3336,6 +3423,31 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
   //               origin: {x,y}, start: {x,y,w,h} }
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null);
+  // Refs for the compositing player — main = trimmed talking head,
+  // bgVideoRef from earlier (declared in renderTile scope is wrong;
+  // declare them up here so play / pause controls can reach them).
+  const mainVideoRef = useRef(null);
+  const bgVideoRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+
+  // Master play/pause: drives BOTH the trimmed clip and the bg video so
+  // the operator sees the same alignment ffmpeg will produce. We never
+  // try to seek the bg (it loops independently); we just gate its
+  // visibility/playback to match.
+  const togglePlay = () => {
+    const m = mainVideoRef.current;
+    const b = bgVideoRef.current;
+    if (!m) return;
+    if (m.paused) {
+      m.play().catch(() => {});
+      if (b) b.play().catch(() => {});
+      setPlaying(true);
+    } else {
+      m.pause();
+      if (b) b.pause();
+      setPlaying(false);
+    }
+  };
 
   function svgPoint(evt) {
     const svg = svgRef.current;
@@ -3442,6 +3554,32 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
               />
             </div>
           </foreignObject>
+        ) : target === "video" && trimmedUrl ? (
+          // Live talking-head: play the actual trimmed clip inside the
+          // video tile so the user sees WHERE the anchor will land plus
+          // WHAT they'll see, without waiting for a server re-render.
+          // Cover-cropped to match the backend composer's geometry.
+          <foreignObject
+            x={rect.x + 1} y={rect.y + 1} width={rect.w - 2} height={rect.h - 2}
+            style={{ pointerEvents: "none" }}
+          >
+            <div
+              xmlns="http://www.w3.org/1999/xhtml"
+              style={{ width: "100%", height: "100%", overflow: "hidden", background: "#000", pointerEvents: "none" }}
+            >
+              <video
+                ref={mainVideoRef}
+                src={withAuth(trimmedUrl)}
+                muted
+                playsInline
+                style={{
+                  width: "100%", height: "100%",
+                  objectFit: "cover", objectPosition: "center",
+                  display: "block", pointerEvents: "none", userSelect: "none",
+                }}
+              />
+            </div>
+          </foreignObject>
         ) : (
           <>
             <rect x={rect.x + 1} y={rect.y + 1} width={rect.w - 2} height={rect.h - 2} fill="#222" />
@@ -3530,6 +3668,7 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
           <foreignObject x="0" y="0" width={W} height={H} style={{ pointerEvents: "none" }}>
             <div xmlns="http://www.w3.org/1999/xhtml" style={{ width: "100%", height: "100%", overflow: "hidden", background: "#000" }}>
               <video
+                ref={bgVideoRef}
                 src={bgVideoPreviewSrc}
                 muted autoPlay loop playsInline
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", pointerEvents: "none" }}
@@ -3554,6 +3693,33 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
         <text x="4" y={H - 2} fill={tickerFg} fontSize="6" fontWeight="700">
           {tickerText.slice(0, 90)}
         </text>
+        {/* Play/Pause overlay — drives the trimmed talking-head clip
+            inside the video tile so the operator can scrub through the
+            live composite without leaving the editor. */}
+        {trimmedUrl && (
+          <foreignObject x={W / 2 - 24} y="2" width="48" height="14">
+            <div xmlns="http://www.w3.org/1999/xhtml" style={{ width: "100%", height: "100%" }}>
+              <button
+                type="button"
+                onClick={togglePlay}
+                style={{
+                  width: "100%", height: "100%",
+                  border: "1px solid rgba(255,255,255,.6)",
+                  borderRadius: 3,
+                  background: "rgba(0,0,0,.55)",
+                  color: "#fff",
+                  fontSize: 8,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  letterSpacing: 0.5,
+                }}
+                title={playing ? "Pause the live composite" : "Play the live composite"}
+              >
+                {playing ? "⏸ PAUSE" : "▶ PLAY"}
+              </button>
+            </div>
+          </foreignObject>
+        )}
       </svg>
       {onLayoutChange && (
         <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
