@@ -2930,8 +2930,11 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
           {editMode ? "✕ Close editor" : "✎ Edit layout"}
         </button>
         {canExport && (() => {
-          // Drift-free passthrough vs lossy mix — surfaced in the
-          // tooltip so the operator knows what they're shipping.
+          // Two audio paths: bit-perfect passthrough (-c:a copy
+          // equivalent) and decode→mix→encode for the bg-mix case.
+          // Both are length-locked to the video; the mix path only
+          // adds a small fixed offset from AAC encoder priming, not
+          // accumulating drift.
           const willMix = (canvas?.bulletin?.layout?.bg_video_volume || 0) > 0;
           return (
             <button
@@ -2939,8 +2942,8 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
               disabled={exporting}
               className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
               title={willMix
-                ? "Client export — bg audio mix enabled. Audio is decoded + re-encoded, may introduce slight lipsync drift (V2/V3-style). Set bg_video_volume to 0 for drift-free export."
-                : "Client export — drift-free. Audio is passthrough (-c:a copy) just like the server. Visually equivalent to the server render; downloads without server load."}
+                ? "Client export — bg audio mixed at the chosen volume. Both audio sources are rendered to the exact video duration, no accumulating drift. AAC re-encode may shift audio start by ~1 frame (~40ms) — within standard lipsync tolerance."
+                : "Client export — drift-free. Audio is passthrough (-c:a copy) just like the server. Bit-identical to the trimmed source's audio track."}
             >
               {exporting
                 ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
