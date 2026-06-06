@@ -8,6 +8,23 @@
 // "visually equivalent" output that the operator can download without
 // queueing a server render.
 //
+// LIPSYNC CONTRACT (matches the server)
+// ─────────────────────────────────────
+// The server's V4 pipeline is "lipsync locked" because the audio is
+// `-c:a copy`'d byte-for-byte through every ffmpeg pass — same bytes,
+// same PTS, end to end. V2/V3 used to re-encode audio at each stage
+// and that introduced cumulative drift; V4's fix was passthrough.
+//
+// This client exporter applies the SAME fix. By default the trimmed
+// talking-head's AAC chunks are lifted straight out of mp4box (see
+// `passthroughAacChunks` in ./audioBridge.js) and fed to mp4-muxer
+// verbatim with their original timestamps — no AudioDecoder, no
+// AudioEncoder. Zero drift possible.
+//
+// The decode→mix→encode path (`encodeAudioStream`) is ONLY used when
+// the operator explicitly sets bg_video_volume > 0. That path has the
+// same drift risk V2/V3 had; the operator picked it deliberately.
+//
 // Architecture overview
 // ─────────────────────
 // One async pull loop, driven by `decodeVideoFrames` from
@@ -24,9 +41,14 @@
 //      VideoEncoder.
 //
 // Audio runs in parallel as a separate AsyncIterable from
-// ./audioBridge.js. We pump its EncodedAudioChunks into the muxer as
-// they arrive. Both pipelines feed mp4-muxer's video/audio inputs
-// concurrently; the muxer takes care of A/V interleaving.
+// ./audioBridge.js. In passthrough mode (the default) the iterable is
+// `passthroughAacChunks` — pure byte-copy of the source's AAC frames
+// with original timestamps preserved. In mix mode it's
+// `encodeAudioStream` — full decode → OfflineAudioContext mix →
+// AudioEncoder re-encode. We pump whichever's EncodedAudioChunks into
+// the muxer as they arrive. Both pipelines feed mp4-muxer's
+// video/audio inputs concurrently; the muxer takes care of A/V
+// interleaving.
 //
 // What this matches in the server
 // ───────────────────────────────
@@ -54,6 +76,7 @@ import {
   encodeAudioStream,
   probeAudioMetadata,
   isAudioEncodingSupported,
+  passthroughAacChunks,
 } from "./audioBridge";
 
 // ─── Feature detection ───────────────────────────────────────────────
@@ -422,29 +445,71 @@ export async function exportBulletinClient({
     fastStart: "in-memory",
   });
 
-  // Re-build muxer with audio once we know the audio metadata. Easier
-  // than threading audio config through later — we just probe first.
+  // Probe audio + decide which pipeline to use.
+  //
+  // ── DRIFT-FREE PASSTHROUGH IS THE DEFAULT ──
+  //
+  // The server's V4 contract is "lipsync locked" because audio is
+  // -c:a copy'd byte-for-byte through every ffmpeg pass. We replicate
+  // that exact model on the client: when the operator hasn't asked
+  // for a bg-audio mix (bg_video_volume == 0, the default), we lift
+  // AAC samples straight out of the trimmed mp4 and feed them to
+  // mp4-muxer verbatim with their original timestamps. No
+  // AudioDecoder, no AudioEncoder, no resampling — zero drift
+  // possible.
+  //
+  // Only when the operator explicitly set bg_video_volume > 0 do we
+  // fall through to the decode→mix→encode path (encodeAudioStream).
+  // That path has the same drift risk V2/V3 had; the UI warns the
+  // operator about it.
   let audioMeta = null;
   let muxerWithAudio = muxer;
+  let audioMode = "none"; // "none" | "passthrough" | "mix"
   try {
     audioMeta = await probeAudioMetadata(trimmedUrl);
   } catch {
     audioMeta = null;
   }
-  const audioOk =
-    audioMeta &&
+  const wantMix = bgVolume > 0 && bgUrl;
+  const audioAvailable = !!audioMeta && typeof EncodedAudioChunk !== "undefined";
+  const mixSupported =
+    audioAvailable &&
     typeof AudioEncoder !== "undefined" &&
     (await isAudioEncodingSupported());
-  if (audioOk) {
-    // Rebuild the muxer with an audio config now that we know it.
+  if (audioAvailable) {
+    if (wantMix && mixSupported) {
+      audioMode = "mix";
+    } else if (wantMix && !mixSupported) {
+      // Operator asked for mix but the browser can't AAC-encode —
+      // silently fall back to passthrough so we still ship sound.
+      // eslint-disable-next-line no-console
+      console.warn("[clientExporter] mix requested but AudioEncoder unsupported; falling back to passthrough (no bg mix)");
+      audioMode = "passthrough";
+    } else {
+      audioMode = "passthrough";
+    }
+  }
+
+  if (audioMode !== "none") {
+    // Rebuild the muxer with an audio config matching the SOURCE's
+    // native rate/channels for passthrough (so the AAC chunks we paste
+    // through align with the muxer's declared track config), or the
+    // mixed rate (48k stereo) for mix mode.
+    const muxAudio = audioMode === "passthrough"
+      ? {
+          codec: "aac",
+          sampleRate: audioMeta.sample_rate || 48000,
+          numberOfChannels: audioMeta.num_channels || 2,
+        }
+      : {
+          codec: "aac",
+          sampleRate: 48000,
+          numberOfChannels: Math.min(2, audioMeta.num_channels || 2),
+        };
     muxerWithAudio = new Muxer({
       target: new ArrayBufferTarget(),
       video: { codec: "avc", width, height, frameRate: fps },
-      audio: {
-        codec: "aac",
-        sampleRate: 48000,
-        numberOfChannels: Math.min(2, audioMeta.num_channels || 2),
-      },
+      audio: muxAudio,
       fastStart: "in-memory",
     });
   }
@@ -463,31 +528,43 @@ export async function exportBulletinClient({
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext("2d", { alpha: false });
 
-  // ── 4. Concurrent audio encode (drains while video composites) ──
-  let audioDone = false;
+  // ── 4. Concurrent audio (drains while video composites) ────────
+  // In passthrough mode we lift AAC chunks straight from mp4box and
+  // push them into the muxer with their original timestamps. The
+  // resulting mp4 is bit-identical to the trimmed source's audio
+  // track — zero drift, just like the server's -c:a copy.
+  // In mix mode we run the full decode→mix→encode pipeline (the
+  // operator opted into a bg-audio mix; some drift is unavoidable).
   let audioErr = null;
-  const audioPromise = audioOk
-    ? (async () => {
-        try {
-          for await (const { chunk, meta } of encodeAudioStream({
-            talkingHeadUrl: trimmedUrl,
-            bgUrl: bgVideoEl && bgVolume > 0 ? bgBlobUrl : undefined,
-            bgVolume: bgVolume,
-            durationSec: outputDuration,
-            sampleRate: 48000,
-            channels: Math.min(2, audioMeta.num_channels || 2),
-            signal,
-          })) {
-            if (signal?.aborted) return;
-            muxerWithAudio.addAudioChunk(chunk, meta);
-          }
-        } catch (e) {
-          audioErr = e;
-        } finally {
-          audioDone = true;
+  const audioPromise = (async () => {
+    if (audioMode === "none") return;
+    try {
+      if (audioMode === "passthrough") {
+        for await (const { chunk, meta } of passthroughAacChunks(
+          trimmedUrl,
+          { signal }
+        )) {
+          if (signal?.aborted) return;
+          muxerWithAudio.addAudioChunk(chunk, meta);
         }
-      })()
-    : Promise.resolve();
+      } else if (audioMode === "mix") {
+        for await (const { chunk, meta } of encodeAudioStream({
+          talkingHeadUrl: trimmedUrl,
+          bgUrl: bgVideoEl && bgVolume > 0 ? bgBlobUrl : undefined,
+          bgVolume: bgVolume,
+          durationSec: outputDuration,
+          sampleRate: 48000,
+          channels: Math.min(2, audioMeta.num_channels || 2),
+          signal,
+        })) {
+          if (signal?.aborted) return;
+          muxerWithAudio.addAudioChunk(chunk, meta);
+        }
+      }
+    } catch (e) {
+      audioErr = e;
+    }
+  })();
 
   // ── 5. Pull loop: trimmed frame → composite → encode ───────────
   // Pre-compute cumulative offsets so we can map a trimmed timestamp

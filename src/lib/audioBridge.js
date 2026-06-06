@@ -188,6 +188,145 @@ function extractAacDescription(trakBox) {
 }
 
 // ---------------------------------------------------------------------------
+// AAC PASSTHROUGH — drift-free, no decode, no encode.
+// ---------------------------------------------------------------------------
+//
+// The server's V4 contract is "lipsync locked" precisely because the
+// audio is `-c:a copy`'d through every ffmpeg pass — same bytes, same
+// PTS, end to end. Any decode → re-encode round-trip introduces small
+// timing/sample-count differences that desync from the video timeline
+// (the V2/V3 drift bug). The fix on the client is the same fix as on
+// the server: skip decode + encode for the talking-head audio, lift
+// AAC samples straight out of mp4box and hand them to mp4-muxer
+// verbatim. Each EncodedAudioChunk carries its original timestamp from
+// the source mp4, so the output mp4's audio track is a bit-identical
+// copy of the trimmed source's audio track.
+//
+// Use this whenever the operator has NOT asked for a bg-audio mix
+// (bg_video_volume = 0, which is the default). When they HAVE asked
+// for a mix the encode round-trip is unavoidable; see
+// `encodeAudioStream` for that path (and warn the operator at the UI
+// that drift is possible).
+
+/**
+ * Stream the raw AAC frames from `url`'s audio track as
+ * EncodedAudioChunks with their original timestamps. No decoder, no
+ * encoder, no resampling — the output muxer writes them as-is.
+ *
+ * The first yielded value carries `meta.decoderConfig` so the muxer
+ * can advertise the same AAC config the source carries. Every
+ * subsequent yield reuses that same meta (mp4-muxer accepts it on
+ * every chunk; only the first one is load-bearing).
+ *
+ * @param {string} url - mp4 url, same-origin
+ * @param {Object} [opts]
+ * @param {AbortSignal} [opts.signal]
+ * @returns {AsyncGenerator<{chunk: EncodedAudioChunk, meta: any}>}
+ *
+ * Throws if the source has no audio track or no esds box.
+ */
+export async function* passthroughAacChunks(url, opts = {}) {
+  const { signal } = opts;
+  if (typeof EncodedAudioChunk === "undefined") {
+    throw new Error("EncodedAudioChunk not available in this browser");
+  }
+  const buf = await fetchMp4(url, signal);
+  if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+  const { file, info } = await parseWithMp4Box(buf);
+  const at = info.audioTracks?.[0];
+  if (!at) throw new Error("mp4 has no audio track");
+  const trakBox = file.getTrackById(at.id);
+  if (!trakBox) throw new Error(`could not resolve audio trakBox for track ${at.id}`);
+
+  // Pull AudioSpecificConfig once — every chunk carries this same
+  // meta so mp4-muxer can serialize a matching esds box on the output.
+  const description = extractAacDescription(trakBox);
+  const meta = {
+    decoderConfig: {
+      codec: at.codec, // "mp4a.40.2" for AAC-LC, etc.
+      sampleRate: at.audio?.sample_rate ?? 48000,
+      numberOfChannels: at.audio?.channel_count ?? 2,
+      description,
+    },
+  };
+
+  // Queue + signaling pattern (mirrors decodeVideoFrames). mp4box
+  // dispatches samples in batches via onSamples; we push them into a
+  // buffer the generator drains.
+  /** @type {{chunk: EncodedAudioChunk, meta: any}[]} */
+  const queue = [];
+  let demuxDone = false;
+  let wake = null;
+  const signal_resolve = () => { if (wake) { wake(); wake = null; } };
+  let samplesYielded = 0;
+  let aborted = false;
+
+  file.onSamples = (id, _user, samples) => {
+    if (aborted) return;
+    if (id !== at.id) return;
+    for (const s of samples) {
+      // mp4box gives us a Uint8Array view in the sample's `data`.
+      // EncodedAudioChunk copies it on construction so re-using
+      // mp4box's buffer (which it'll free below) is safe.
+      const tsUs = (s.cts * 1_000_000) / s.timescale;
+      const durUs = (s.duration * 1_000_000) / s.timescale;
+      const chunk = new EncodedAudioChunk({
+        // AAC frames are independently decodable — every frame is a
+        // keyframe. mp4-muxer accepts "key" universally.
+        type: "key",
+        timestamp: tsUs,
+        duration: durUs,
+        data: s.data,
+      });
+      queue.push({ chunk, meta });
+    }
+    // Release demuxer memory for samples we've already consumed.
+    const last = samples[samples.length - 1];
+    if (last) file.releaseUsedSamples(at.id, last.number + 1);
+    signal_resolve();
+  };
+
+  const cleanup = () => {
+    aborted = true;
+    demuxDone = true;
+    try { file.stop(); } catch { /* best-effort */ }
+    queue.length = 0;
+    signal_resolve();
+  };
+  signal?.addEventListener("abort", cleanup);
+
+  // 50 samples per callback keeps the queue movement amortised.
+  file.setExtractionOptions(at.id, null, { nbSamples: 50 });
+  file.start();
+  // Trigger sample dispatch from the buffer we already appended.
+  file.flush();
+
+  try {
+    while (true) {
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+      if (queue.length) {
+        const item = queue.shift();
+        samplesYielded++;
+        yield item;
+        // mp4box gives us samples until nb_samples is reached for the
+        // track. Once we've yielded that many, we're done.
+        if (samplesYielded >= (at.nb_samples || Infinity)) {
+          break;
+        }
+        continue;
+      }
+      if (demuxDone) break;
+      if (samplesYielded >= (at.nb_samples || 0) && at.nb_samples > 0) break;
+      // Wait for the next batch of samples (or abort).
+      await new Promise((r) => { wake = r; });
+    }
+  } finally {
+    cleanup();
+    signal?.removeEventListener?.("abort", cleanup);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Demux + decode: turn an mp4 audio track into a single AudioBuffer
 // ---------------------------------------------------------------------------
 

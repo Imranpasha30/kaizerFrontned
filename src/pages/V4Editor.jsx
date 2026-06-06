@@ -2929,18 +2929,25 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
         >
           {editMode ? "✕ Close editor" : "✎ Edit layout"}
         </button>
-        {canExport && (
-          <button
-            onClick={runClientExport}
-            disabled={exporting}
-            className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
-            title="Phase C spike — render a 5s mp4 entirely in the browser (bg + lower-third only). No server load."
-          >
-            {exporting
-              ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
-              : "⬇ Client export"}
-          </button>
-        )}
+        {canExport && (() => {
+          // Drift-free passthrough vs lossy mix — surfaced in the
+          // tooltip so the operator knows what they're shipping.
+          const willMix = (canvas?.bulletin?.layout?.bg_video_volume || 0) > 0;
+          return (
+            <button
+              onClick={runClientExport}
+              disabled={exporting}
+              className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
+              title={willMix
+                ? "Client export — bg audio mix enabled. Audio is decoded + re-encoded, may introduce slight lipsync drift (V2/V3-style). Set bg_video_volume to 0 for drift-free export."
+                : "Client export — drift-free. Audio is passthrough (-c:a copy) just like the server. Visually equivalent to the server render; downloads without server load."}
+            >
+              {exporting
+                ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
+                : (willMix ? "⬇ Client export (mix)" : "⬇ Client export")}
+            </button>
+          );
+        })()}
         <div className="ml-auto">
           <DownloadMenu jobId={jobId} target="bulletin" accounts={accounts} />
         </div>
