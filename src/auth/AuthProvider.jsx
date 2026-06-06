@@ -34,8 +34,15 @@ export default function AuthProvider({ children }) {
       // as "anonymous" so the UI still prompts login.
       if (u && u.email !== "legacy@kaizer.local") setUser(u);
       else setUser(null);
-    } catch {
-      clearToken();
+    } catch (e) {
+      // DO NOT clearToken() here — that was the bug that logged people
+      // out on every backend blip. Real 401s come through the
+      // onUnauthorized event listener below, which is the only place
+      // we should be invalidating a session. A transient failure here
+      // (backend restart, 5xx, dropped connection) just means we
+      // couldn't refresh the user object — keep the token; the next
+      // request will recover when the backend is reachable.
+      console.warn("auth hydrate transient failure:", e?.message);
       setUser(null);
     } finally {
       setLoading(false);

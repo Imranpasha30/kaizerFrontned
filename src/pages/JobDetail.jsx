@@ -18,6 +18,8 @@ const PLATFORM_LABEL = {
   youtube_full:           "YouTube Full",
   youtube_full_plus_shorts: "Full Video + Shorts",
   full_video_shorts_v2:   "Full Video + Shorts (V2 Beta)",
+  full_video_shorts_v3:   "Full Video + Shorts (V3)",
+  full_video_shorts_v4:   "Full Video + Shorts (V4)",
 };
 
 // V2 per-step progress label map (Step 11.5, D-11.9). Slugs are
@@ -208,9 +210,18 @@ export default function JobDetail() {
 
         {isDone && (
           <div className="flex gap-2 self-start flex-shrink-0">
-            <Link to={`/jobs/${jobId}/edit`} className="btn btn-secondary flex items-center gap-1.5 text-sm">
-              <Edit2 size={14} /> Editor
-            </Link>
+            {job.platform === "full_video_shorts_v4" ? (
+              // V4 jobs have their own canvas-based editor — different
+              // schema, different mutation model (canvas.json source of
+              // truth). Route there instead of the legacy clip editor.
+              <Link to={`/jobs/${jobId}/v4-edit`} className="btn btn-secondary flex items-center gap-1.5 text-sm">
+                <Edit2 size={14} /> Canvas Editor
+              </Link>
+            ) : (
+              <Link to={`/jobs/${jobId}/edit`} className="btn btn-secondary flex items-center gap-1.5 text-sm">
+                <Edit2 size={14} /> Editor
+              </Link>
+            )}
             <button
               onClick={doExport}
               disabled={exporting}
@@ -385,8 +396,11 @@ export default function JobDetail() {
       )}
 
       {/* Pipeline finished but nothing landed in the DB — usually an import
-          error.  Show a one-click recovery path instead of a dead screen. */}
-      {(isDone || isFailed) && job.clips?.length === 0 && (
+          error.  Show a one-click recovery path instead of a dead screen.
+          NOT shown for V4: V4 has no Clip rows by design (canvas.json IS
+          the artifact). Showing "no clips imported" would be misleading
+          and the Reimport button is a no-op on V4 jobs. */}
+      {(isDone || isFailed) && job.clips?.length === 0 && job.platform !== "full_video_shorts_v4" && (
         <div className="card p-4 mb-6 border-yellow-900 bg-yellow-950/30">
           <div className="flex items-start gap-3">
             <AlertCircle size={18} className="text-yellow-400 mt-0.5 flex-shrink-0" />

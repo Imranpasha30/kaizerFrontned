@@ -107,10 +107,15 @@ export default function Settings() {
       ) : (
         <>
           <div className="bg-surface border border-border rounded p-4 space-y-3">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-gray-200">Social Links</h2>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-sm font-semibold text-gray-200">Default Social Links</h2>
               <span className="text-xs text-gray-500">{filledCount} filled</span>
             </div>
+            <p className="text-[11px] text-gray-500 leading-snug mb-2">
+              Used as a <span className="text-accent2">template</span> when you create a new YouTube channel —
+              the values copy across automatically. Each channel can override its own socials in
+              Channels → <span className="text-accent2">✦ Brand</span> so different audiences get the right handles.
+            </p>
             {SOCIALS.map(({ key, label, icon: Icon, placeholder, color }) => (
               <div key={key} className="grid grid-cols-[110px_1fr] sm:grid-cols-[150px_1fr] gap-2 items-center">
                 <label className="flex items-center gap-1.5 text-xs text-gray-300">

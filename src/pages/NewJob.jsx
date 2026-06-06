@@ -1,7 +1,17 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Upload, ChevronRight, ChevronLeft, Loader2, Film, Languages, Image as ImageIcon, Star, Mic } from "lucide-react";
-import { api } from "../api/client";
+import { api, getToken } from "../api/client";
+
+// Stamps ?token=<jwt> onto backend URLs so plain <video src=...> /
+// <img src=...> tags can authenticate. Browser tags can't attach
+// Authorization: Bearer, so the bg-sample route falls back to query.
+function withAuth(url) {
+  if (!url) return url;
+  const t = getToken();
+  if (!t) return url;
+  return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(t);
+}
 
 const STEPS         = ["Upload Video", "Choose Platform", "Choose Frame",   "Choose Language", "Confirm"];
 const STEPS_LONGFORM = ["Upload Video", "Choose Platform", "Long-form mode", "Choose Language", "Confirm"];
@@ -18,6 +28,81 @@ function isLongForm(platform) {
 // PLATFORMS["full_video_shorts_v2"] on the backend) so a typo here
 // would surface immediately in the "wrong step count" UI bug.
 const V2_PLATFORM_KEY = "full_video_shorts_v2";
+
+
+// ─── Frame-layout SVG mock for the wizard's Step 2 ──────────────────
+// Small visual preview of each short template so the user can see
+// the layout before picking, rather than guessing from a one-line
+// description. Mirrors the live-preview SVG used in V4Editor's short
+// inspector. Pure presentation — no state.
+function FrameLayoutMock({ layoutKey }) {
+  const W = 140, H = 248;     // ~9:16 mini canvas
+  const fontFamily = "system-ui, sans-serif";
+
+  if (layoutKey === "follow_bar") {
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-[9/16] rounded bg-black border border-gray-200">
+        <rect x="0" y="0" width={W} height={H} fill="#1a0a2e" />
+        <text x={W / 2} y="28" fill="#ffff00" fontSize="11" fontWeight="800" textAnchor="middle" fontFamily={fontFamily}>HEADLINE</text>
+        <text x={W / 2} y="42" fill="#ffff00" fontSize="9" fontWeight="800" textAnchor="middle" fontFamily={fontFamily}>(top text)</text>
+        <rect x="6" y="60" width={W - 12} height={W - 12} fill="#222" stroke="#444" />
+        <text x={W / 2} y={60 + (W - 12) / 2 + 3} fill="rgba(255,255,255,.35)" fontSize="9" textAnchor="middle" fontFamily={fontFamily}>video (1:1)</text>
+        <rect x="0" y={H - 38} width={W} height="38" fill="#0d0518" />
+        <text x={W / 2} y={H - 22} fill="#fff" fontSize="7" fontWeight="800" textAnchor="middle" fontFamily={fontFamily}>FOLLOW KAIZER NEWS</text>
+        <circle cx={W / 2 - 16} cy={H - 10} r="4" fill="#fff" />
+        <circle cx={W / 2}      cy={H - 10} r="4" fill="#fff" />
+        <circle cx={W / 2 + 16} cy={H - 10} r="4" fill="#fff" />
+      </svg>
+    );
+  }
+
+  if (layoutKey === "split_frame") {
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-[9/16] rounded bg-black border border-gray-200">
+        <rect x="0" y="0" width={W} height={H} fill="#1a0a2e" />
+        <rect x="8" y="8" width={W - 16} height="74" fill="#333" stroke="#555" />
+        <text x={W / 2} y="48" fill="rgba(255,255,255,.45)" fontSize="9" textAnchor="middle" fontFamily={fontFamily}>thumbnail</text>
+        <rect x="8" y="88" width={W - 16} height={H - 96} fill="#222" stroke="#444" />
+        <text x={W / 2} y={H / 2 + 30} fill="rgba(255,255,255,.35)" fontSize="9" textAnchor="middle" fontFamily={fontFamily}>video</text>
+      </svg>
+    );
+  }
+
+  if (layoutKey === "clean_card") {
+    const half = H / 2;
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-[9/16] rounded bg-black border border-gray-200">
+        <rect x="0" y="0" width={W} height={H} fill="#000" />
+        <rect x="0" y="0" width={W} height={half} fill="#222" />
+        <text x={W / 2} y={half / 2} fill="rgba(255,255,255,.3)" fontSize="10" textAnchor="middle" fontFamily={fontFamily}>video</text>
+        <rect x="0" y={half} width={W} height={H - half} fill="#C10000" />
+        <text x={W / 2} y={half + 18} fill="#fff" fontSize="9" fontWeight="800" textAnchor="middle" fontFamily={fontFamily}>HEADLINE</text>
+        <rect x="14" y={half + 30} width={W - 28} height={H - half - 44} fill="#fff" />
+        <rect x="17" y={half + 33} width={W - 34} height={H - half - 50} fill="#333" />
+      </svg>
+    );
+  }
+
+  // Default: torn_card
+  const vH = Math.round(H * 0.4619);
+  const iH = Math.round(H * 0.3690);
+  const tH = H - vH - iH;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-[9/16] rounded bg-black border border-gray-200">
+      <rect x="0" y="0" width={W} height={H} fill="#000" />
+      <rect x="0" y="0" width={W} height={vH} fill="#222" />
+      <text x={W / 2} y={vH / 2} fill="rgba(255,255,255,.3)" fontSize="9" textAnchor="middle" fontFamily={fontFamily}>video</text>
+      <rect x="0" y={vH + tH} width={W} height={iH} fill="#333" />
+      <text x={W / 2} y={vH + tH + iH / 2} fill="rgba(255,255,255,.3)" fontSize="9" textAnchor="middle" fontFamily={fontFamily}>image</text>
+      <rect x="0" y={vH - 4} width={W} height={tH + 8} fill="#C10000" />
+      <polygon
+        points={`0,${vH - 4} ${W * 0.15},${vH - 9} ${W * 0.32},${vH - 3} ${W * 0.5},${vH - 8} ${W * 0.7},${vH - 3} ${W * 0.85},${vH - 9} ${W},${vH - 4}`}
+        fill="#C10000"
+      />
+      <text x={W / 2} y={vH + tH / 2 + 2} fill="#fff" fontSize="10" fontWeight="800" textAnchor="middle" fontFamily={fontFamily}>HEADLINE</text>
+    </svg>
+  );
+}
 function isV2(platform) {
   return platform === V2_PLATFORM_KEY;
 }
@@ -31,6 +116,16 @@ function isV3(platform) {
 }
 function usesStage2Provider(platform) {
   return isV2(platform) || isV3(platform);
+}
+
+// V4 platform key. V4 = Deepgram + Claude KEEP/CUT + atomic ffmpeg
+// trim+concat (Step 1) + canvas composite with audio passthrough
+// (Step 2). Eliminates the lipsync drift class of bugs entirely. The
+// canvas JSON is the source of truth for layout + timing; the editor
+// reads/writes it. No Stage 2 provider — V4 always uses Claude.
+const V4_PLATFORM_KEY = "full_video_shorts_v4";
+function isV4(platform) {
+  return platform === V4_PLATFORM_KEY;
 }
 
 // Step 12.5 / backlog 59: language codes the V2 wizard treats as
@@ -78,6 +173,37 @@ export default function NewJob() {
   const [platform, setPlatform]   = useState("");
   const [frame, setFrame]     = useState("");
   const [language, setLanguage] = useState("te");
+  // V4-only: which looping background video the operator wants the
+  // bulletin to render onto. "" or null = flat color (current default).
+  // "sample:NAME.mp4" picks a bundled demo; "asset:N" picks one of the
+  // user's previously-uploaded videos. The bg_video_volume slider
+  // mirrors the editor's; defaults to muted so the studio-feel doesn't
+  // step on the anchor audio.
+  const [v4BgRef, setV4BgRef] = useState("");
+  const [v4BgVolume, setV4BgVolume] = useState(0.0);
+  // Intro reel — bg plays full-screen with audio for N seconds before
+  // the bulletin layout fades in. 0 = no intro. Gives the channel-leader
+  // / cold-open feel the operator asked for.
+  const [v4BgIntroSec, setV4BgIntroSec] = useState(0);
+  // Three-way mode selector the operator picks first. Drives which
+  // sections of the bg step are shown + what gets submitted:
+  //   "none"     → no bg video at all (flat colour background)
+  //   "bg"       → bg looped behind the bulletin from t=0 (no intro)
+  //   "intro_bg" → bg plays full-screen with audio first, then drops to
+  //                background once the bulletin starts
+  const [v4BgMode, setV4BgMode] = useState("none");
+  const [v4BgSamples, setV4BgSamples] = useState([]);
+  const [v4UserBgs, setV4UserBgs]     = useState([]);
+  const [v4BgUploading, setV4BgUploading] = useState(false);
+  const v4BgFileRef = useRef(null);
+  // Sub-state for V4's Step 2 — flips from "frame" (show template grid)
+  // to "bg" (show bg-video picker) after the operator picks a template.
+  // Lets us add the new "studio background" choice without renumbering
+  // every other step downstream (V1 = 5 steps, V2 = 6, V4 stays at 5
+  // visually).
+  const [v4StepPhase, setV4StepPhase] = useState("frame");
+  const [v4Defaults, setV4Defaults] = useState(null);
+  const [hasV4Defaults, setHasV4Defaults] = useState(false);
   const [platforms, setPlatforms] = useState({});
   const [frames, setFrames]   = useState({});
   const [languages, setLanguages] = useState([]);
@@ -149,6 +275,9 @@ export default function NewJob() {
     api.frameLayouts().then(setFrames);
     api.listLanguages().then((list) => setLanguages(list || []));
     api.getDefaultAsset().then(setDefaultAsset).catch(() => setDefaultAsset(null));
+    // V4 auto-pipeline defaults — drive the one-click quick-start path.
+    api.v4HasDefaults().then((r) => setHasV4Defaults(!!r?.has)).catch(() => {});
+    api.v4GetDefaults().then(setV4Defaults).catch(() => {});
     // V2 STT providers (Step 11.3). The endpoint is harmless to call
     // for users who never pick V2 -- just a tiny GET. Default the
     // selection to the first ``configured`` provider so V2 users
@@ -278,6 +407,21 @@ export default function NewJob() {
       if (trimmedName) {
         form.append("name", trimmedName);
       }
+      // V4 background video — stamped onto the freshly-created canvas
+      // so the very first render already uses the user-chosen studio
+      // backdrop. Empty / null means flat colour (legacy behaviour).
+      // Bg fields only travel when the operator actually picked one of
+      // the two bg modes — "none" submits no bg, so the orchestrator
+      // falls back to the flat-colour default. Intro seconds only count
+      // for the "intro_bg" mode so picking "bg" alone gives a pure
+      // looped background from t=0 even if the operator had previously
+      // dialled a non-zero intro.
+      if (isV4(platform) && v4BgMode !== "none" && v4BgRef) {
+        form.append("v4_bg_video_path", v4BgRef);
+        form.append("v4_bg_video_volume", String(v4BgVolume || 0));
+        form.append("v4_bg_intro_seconds",
+          String(v4BgMode === "intro_bg" ? (v4BgIntroSec || 0) : 0));
+      }
       const { id } = await api.createJob(form, pct => setUploadPct(pct));
       navigate(`/jobs/${id}`);
     } catch (e) {
@@ -327,6 +471,45 @@ export default function NewJob() {
         {/* Step 0: Upload */}
         {step === 0 && (
           <div>
+            {/* V4 auto-pipeline shortcut: when the user has saved
+                defaults, surface a one-click path that skips Step 2,
+                3 (and 4 for V2 STT) entirely. The pipeline applies the
+                user's frame_layout / language / channels automatically
+                and the consent banner in V4Editor handles the publish
+                gate. */}
+            {hasV4Defaults && v4Defaults && (
+              <div className="mb-4 p-3 rounded-lg border border-accent2/40 bg-accent2/5 flex items-center gap-3">
+                <div className="text-accent2 text-lg flex-shrink-0">⚡</div>
+                <div className="flex-1 text-xs text-gray-300">
+                  <div className="font-semibold text-white">Quick-start with your defaults</div>
+                  <div className="text-gray-500">
+                    Platform: <span className="text-accent2">{v4Defaults.platform || "full_video_shorts_v4"}</span>
+                    {" · "}Frame: <span className="text-accent2">{v4Defaults.frame_layout}</span>
+                    {" · "}Language: <span className="text-accent2">{v4Defaults.language}</span>
+                    {v4Defaults.auto_publish && (
+                      <> {" · "}<span className="text-amber-300">Auto-publish on{v4Defaults.require_consent ? " (with consent)" : ""}</span></>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Pre-fill every step and jump straight to confirm.
+                    setPlatform(v4Defaults.platform || "full_video_shorts_v4");
+                    setFrame(v4Defaults.frame_layout || "torn_card");
+                    setLanguage(v4Defaults.language || "te");
+                  }}
+                  className="text-xs px-3 py-1.5 bg-accent2/20 text-accent2 rounded hover:bg-accent2/30"
+                >
+                  Apply defaults
+                </button>
+                <Link
+                  to="/v4-defaults"
+                  className="text-xs text-gray-500 hover:text-white"
+                  title="Edit your defaults"
+                >Edit</Link>
+              </div>
+            )}
             <h2 className="font-semibold text-white mb-4">Upload Video</h2>
             <label
               ref={dropRef}
@@ -397,8 +580,23 @@ export default function NewJob() {
                       Beta
                     </span>
                   )}
+                  {isV4(key) && (
+                    <span
+                      className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full
+                                 text-[9px] font-bold tracking-widest uppercase
+                                 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      title="V4 — trim + canvas architecture. Zero lipsync drift, editable canvas timeline."
+                    >
+                      New
+                    </span>
+                  )}
                   <div className="font-medium">{info.label}</div>
                   <div className="text-xs text-gray-500 mt-0.5">{info.width} x {info.height}</div>
+                  {isV4(key) && (
+                    <div className="text-[10px] text-emerald-400/80 mt-1">
+                      Lipsync locked · editable canvas
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
@@ -406,27 +604,312 @@ export default function NewJob() {
         )}
 
         {/* Step 2: Frame \u2014 Shorts only. Long-form (16:9) uses the bulletin
-            compositor and bypasses this step entirely. */}
-        {step === 2 && !isLongForm(platform) && (
+            compositor and bypasses this step entirely.
+            V4 also inserts a "background video" sub-step here: after the
+            user picks a shorts template, we swap this whole section to
+            the bg picker so the operator can choose a studio backdrop
+            before kicking off the pipeline. v4StepPhase tracks which
+            sub-view is showing; non-V4 platforms ignore it. */}
+        {step === 2 && !isLongForm(platform) && (!isV4(platform) || v4StepPhase === "frame") && (
           <div>
-            <h2 className="font-semibold text-white mb-4">Choose Frame Layout</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {Object.entries(frames).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => { setFrame(key); setStep(3); }}
-                  className={`p-4 rounded-lg border text-left transition-all
-                    ${frame === key
-                      ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
-                      : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
-                >
-                  <div className="font-medium capitalize">{key.replace("_", " ")}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{label.split("\u2014")[1]?.trim()}</div>
-                </button>
-              ))}
+            <div className="mb-5">
+              <h2 className="font-semibold text-white text-lg">Choose a Shorts Template</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Every template renders one 9:16 video per story. Same trim, same audio \u2014 different on-screen look.
+                Pick one for now; you can swap any short to a different template later in the editor.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {Object.entries(frames).map(([key, label]) => {
+                const description = label.split("\u2014")[1]?.trim() || "";
+                const isSelected = frame === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setFrame(key);
+                      // V4 inserts a "background video" sub-step between
+                      // template selection and language. V1/V2 jump
+                      // straight to step 3.
+                      if (isV4(platform)) {
+                        setV4StepPhase("bg");
+                        // Load sample + user-saved bg videos lazily on
+                        // entering the sub-step.
+                        api.v4ListBgSamples().then((s) => setV4BgSamples(s || [])).catch(() => {});
+                        api.v4ListUserBgVideos().then((u) => setV4UserBgs(u || [])).catch(() => {});
+                      } else {
+                        setStep(3);
+                      }
+                    }}
+                    className={`group relative rounded-xl overflow-hidden border-2 transition-all text-left
+                      ${isSelected
+                        ? "border-accent ring-2 ring-accent/40 shadow-lg shadow-accent/20"
+                        : "border-border hover:border-accent/60 hover:shadow-md hover:-translate-y-0.5"}`}
+                  >
+                    {/* Big preview thumbnail \u2014 fills the top of the card,
+                        same SVG mock the editor uses for the live preview */}
+                    <div className="bg-black p-3 pb-2">
+                      <FrameLayoutMock layoutKey={key} />
+                    </div>
+                    {/* Card meta */}
+                    <div className="bg-panel px-3 py-2.5 border-t border-border">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-white text-sm capitalize truncate">
+                          {key.replace("_", " ")}
+                        </div>
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full
+                                         bg-accent2/15 text-accent2 border border-accent2/40 flex-shrink-0">
+                          Shorts
+                        </span>
+                      </div>
+                      {description && (
+                        <div className="text-[11px] text-gray-500 mt-1 line-clamp-2 leading-tight">
+                          {description}
+                        </div>
+                      )}
+                    </div>
+                    {/* Selected checkmark badge */}
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-accent text-white
+                                      flex items-center justify-center text-xs font-bold shadow-md">
+                        \u2713
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
+        {/* V4 sub-step 2b: Background video. Comes between template
+            selection and language. Skippable — proceeding without
+            picking anything keeps the legacy flat-color background. */}
+        {step === 2 && !isLongForm(platform) && isV4(platform) && v4StepPhase === "bg" && (
+          <div>
+            <div className="mb-5">
+              <h2 className="font-semibold text-white text-lg">Studio background</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Choose how the background of your bulletin behaves. You can change all of this later in the editor
+                before re-rendering — nothing here is permanent.
+              </p>
+            </div>
+
+            {/* Three-way mode selector — drives the rest of this step. */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+              {[
+                {
+                  key: "none",
+                  title: "No background video",
+                  desc: "Plain colour fill behind the anchor — fastest render, smallest file.",
+                },
+                {
+                  key: "bg",
+                  title: "Background from the start",
+                  desc: "A looping studio video plays behind the bulletin from the very first frame.",
+                },
+                {
+                  key: "intro_bg",
+                  title: "Intro reel, then background",
+                  desc: "Bg plays full-screen with audio first (5–15s), then drops behind the bulletin (muted).",
+                },
+              ].map((m) => {
+                const sel = v4BgMode === m.key;
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => {
+                      setV4BgMode(m.key);
+                      if (m.key === "none") { setV4BgRef(""); setV4BgIntroSec(0); }
+                      // Default 8s intro the first time the user picks intro mode.
+                      if (m.key === "intro_bg" && !v4BgIntroSec) setV4BgIntroSec(8);
+                      if (m.key === "bg") setV4BgIntroSec(0);
+                    }}
+                    className={`text-left p-3 rounded-lg border-2 transition-all
+                      ${sel
+                        ? "border-accent ring-2 ring-accent/40 bg-accent/5"
+                        : "border-border hover:border-accent/60"}`}
+                  >
+                    <div className={`font-semibold text-sm mb-1 ${sel ? "text-white" : "text-gray-200"}`}>{m.title}</div>
+                    <div className="text-[11px] text-gray-500 leading-tight">{m.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* When mode = "none", the rest of the step is just a continue button. */}
+            {v4BgMode === "none" && (
+              <div className="text-[11px] text-gray-500 italic p-3 border border-dashed border-border rounded mb-5">
+                No background video will be used. The canvas will render with a flat colour fill (the layout's bg colour).
+              </div>
+            )}
+
+            {/* Bundled demo backgrounds — only when bg or intro_bg picked */}
+            {(v4BgMode === "bg" || v4BgMode === "intro_bg") && v4BgSamples.length > 0 && (
+              <div className="mb-4">
+                <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-2">
+                  Demo backgrounds ({v4BgSamples.length})
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {v4BgSamples.map((s) => {
+                    const sel = v4BgRef === s.ref;
+                    return (
+                      <button
+                        key={s.filename}
+                        type="button"
+                        onClick={() => setV4BgRef(s.ref)}
+                        className={`relative text-left border-2 rounded-lg overflow-hidden transition-all
+                          ${sel ? "border-accent ring-2 ring-accent/40" : "border-border hover:border-accent/60"}`}
+                        title={s.filename}
+                      >
+                        <video
+                          src={withAuth(s.url)}
+                          muted autoPlay loop playsInline preload="metadata"
+                          className="w-full aspect-video object-cover bg-black"
+                        />
+                        <div className="px-2 py-1.5 text-[11px] text-gray-300 truncate bg-panel">{s.filename}</div>
+                        {sel && (
+                          <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-accent text-white text-[10px] font-bold flex items-center justify-center">✓</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* User's previously-uploaded bg videos — "previously used" */}
+            {(v4BgMode === "bg" || v4BgMode === "intro_bg") && (
+            <div className="mb-4">
+              <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span>Your uploads ({v4UserBgs.length})</span>
+                <button
+                  type="button"
+                  onClick={() => v4BgFileRef.current?.click()}
+                  disabled={v4BgUploading}
+                  className="text-accent2 hover:text-white text-[11px] flex items-center gap-1 disabled:opacity-40"
+                >
+                  {v4BgUploading ? (<><Loader2 size={11} className="animate-spin" /> uploading…</>) : (<><Upload size={11} /> Upload from computer</>)}
+                </button>
+                <input
+                  ref={v4BgFileRef}
+                  type="file" accept="video/*" className="hidden"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f) return;
+                    setV4BgUploading(true);
+                    try {
+                      const r = await api.v4UploadBgVideo(f);
+                      setV4BgRef(`asset:${r.id}`);
+                      const u = await api.v4ListUserBgVideos().catch(() => []);
+                      setV4UserBgs(u || []);
+                    } catch (err) {
+                      setError(err?.message || "bg upload failed");
+                    } finally { setV4BgUploading(false); }
+                  }}
+                />
+              </div>
+              {v4UserBgs.length === 0 ? (
+                <div className="text-[11px] text-gray-500 italic p-3 border border-dashed border-border rounded">
+                  No saved bg videos yet. Upload one to use it now and on every future bulletin.
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {v4UserBgs.map((a) => {
+                    const ref = `asset:${a.id}`;
+                    const sel = v4BgRef === ref;
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => setV4BgRef(ref)}
+                        className={`relative text-left border-2 rounded-lg overflow-hidden transition-all
+                          ${sel ? "border-accent ring-2 ring-accent/40" : "border-border hover:border-accent/60"}`}
+                        title={a.filename}
+                      >
+                        <video
+                          src={withAuth(a.url)}
+                          muted autoPlay loop playsInline preload="metadata"
+                          className="w-full aspect-video object-cover bg-black"
+                        />
+                        <div className="px-2 py-1.5 text-[11px] text-gray-300 truncate bg-panel">{a.filename}</div>
+                        {sel && (
+                          <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-accent text-white text-[10px] font-bold flex items-center justify-center">✓</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            )}
+
+            {/* Background-audio volume — only when a bg is picked AND not mode=none. */}
+            {(v4BgMode === "bg" || v4BgMode === "intro_bg") && v4BgRef && (
+              <div className="mb-4 p-3 rounded-lg border border-border bg-panel">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] text-gray-300 font-medium">Background audio volume</span>
+                  <span className="text-[11px] text-gray-400">{Math.round(v4BgVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={v4BgVolume}
+                  onChange={(e) => setV4BgVolume(parseFloat(e.target.value))}
+                  className="w-full"
+                />
+                <div className="text-[10px] text-gray-500 mt-1">
+                  0% = muted (recommended — keeps the anchor audio clean). Higher mixes the bg track under the talking-head while the bulletin plays.
+                </div>
+              </div>
+            )}
+
+            {/* Intro duration — only when mode = intro_bg */}
+            {v4BgMode === "intro_bg" && v4BgRef && (
+              <div className="mb-4 p-3 rounded-lg border border-amber-300/40 bg-amber-300/5">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] text-amber-200 font-medium">Intro reel duration</span>
+                  <span className="text-[11px] text-amber-200">{v4BgIntroSec.toFixed(1)}s</span>
+                </div>
+                <input
+                  type="range" min="2" max="20" step="0.5"
+                  value={v4BgIntroSec}
+                  onChange={(e) => setV4BgIntroSec(parseFloat(e.target.value) || 0)}
+                  className="w-full"
+                />
+                <div className="text-[10px] text-gray-400 mt-1">
+                  How long the bg plays full-screen at full audio BEFORE the bulletin starts. 5–10s gives a TV-channel cold-open feel.
+                </div>
+              </div>
+            )}
+
+            {/* Validation hint — modes that need a video but don't have one yet. */}
+            {(v4BgMode === "bg" || v4BgMode === "intro_bg") && !v4BgRef && (
+              <div className="mb-4 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-[12px]">
+                Pick a demo background or upload your own to continue.
+              </div>
+            )}
+
+            {/* Continue + Back actions */}
+            <div className="flex items-center gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => setV4StepPhase("frame")}
+                className="text-[12px] text-gray-400 hover:text-white"
+              >← Back to template</button>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStep(3)}
+                  disabled={(v4BgMode === "bg" || v4BgMode === "intro_bg") && !v4BgRef}
+                  className="px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={(v4BgMode === "bg" || v4BgMode === "intro_bg") && !v4BgRef ? "Pick a background video first" : ""}
+                >Continue</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {step === 2 && isLongForm(platform) && (
           <div>
             <h2 className="font-semibold text-white mb-4">Long-form bulletin</h2>

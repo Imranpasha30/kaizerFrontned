@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Radio, Upload, Plus, Trash2, X, Loader2, AlertCircle,
-  CheckCircle2, Sparkles, Clock, Tv, RefreshCw,
+  CheckCircle2, Sparkles, Clock, Tv, RefreshCw, Image as ImageIcon,
+  Play, ExternalLink, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { api } from "../api/client";
 
@@ -25,7 +26,20 @@ import { api } from "../api/client";
  * stream at a time. Across videos in the batch, sequential.
  */
 
-const CHUNK_SIZE = 5 * 1024 * 1024;   // 5 MB — matches backend threshold
+// 16 MB chunks — big enough to amortize HTTP/auth/round-trip overhead
+// on each request without losing fine-grained retry semantics. The
+// per-stream write lock on the server serialises writes within ONE
+// stream, so parallel chunks for the SAME stream would not speed it
+// up; the win comes from parallel uploads ACROSS streams (see
+// MAX_PARALLEL_STREAMS below).
+const CHUNK_SIZE = 16 * 1024 * 1024;
+
+// Maximum (video × channel) uploads in flight at once. The browser's
+// HTTP/2 connection budget per origin is ~100 — we cap conservatively
+// because each in-flight upload also burns memory holding its current
+// chunk slice. 4 is the sweet spot for typical residential uplinks;
+// bump to 6-8 on dedicated office lines.
+const MAX_PARALLEL_STREAMS = 4;
 
 // Per-channel concurrent broadcasts already kicked off; backend caps
 // total at KAIZER_LIVE_STUDIO_CONCURRENCY (default 8) — anything past
@@ -72,6 +86,23 @@ export default function LiveStudio() {
     }
   }
 
+  // Auto-refresh history every 4s as long as ANY history row has a
+  // non-terminal stream — the operator needs live progress (and the
+  // Stop button) without having to manually refresh. We DON'T poll
+  // while there's an active batch board open, because that has its
+  // own dedicated 4s poller for the in-flight batch.
+  useEffect(() => {
+    if (batch) return;          // active board does its own polling
+    const hasInFlight = history.some((b) =>
+      (b.streams || []).some((s) =>
+        !["done", "failed", "canceled"].includes(s.status)
+      )
+    );
+    if (!hasInFlight) return;
+    const tid = setInterval(refreshHistory, 4000);
+    return () => clearInterval(tid);
+  }, [batch, history]);
+
   // ── Drop handler — multi-file accepted ─────────────────────
   function onFilesPicked(fileList) {
     const next = [];
@@ -80,6 +111,9 @@ export default function LiveStudio() {
       next.push({
         tmpId:       Math.random().toString(36).slice(2),
         file:        f,
+        sourceUrl:   "",            // empty = uploaded file source
+        thumbFile:   null,          // optional File — uploaded after batch creation
+        thumbPreview: "",           // object-URL for the picker preview
         channelIds:  new Set(),
         hours:       1,
         seoSource:   "user",
@@ -93,6 +127,47 @@ export default function LiveStudio() {
       });
     }
     setVideos((prev) => [...prev, ...next]);
+  }
+
+  // ── URL handler — yt-dlp ingestion (no chunk upload needed) ──
+  // The server fetches the video; we still create a per-video card
+  // so the operator picks channels + SEO + thumbnail like any other.
+  function onUrlAdded(rawUrl) {
+    const url = (rawUrl || "").trim();
+    if (!url) return;
+    // Match the same set the backend validates against — better to
+    // catch the typo here than after a batch-creation 400.
+    if (!/^https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/)[\w\-]{6,}/i.test(url)) {
+      alert("That doesn't look like a YouTube watch URL.\nExpected forms: https://www.youtube.com/watch?v=… or https://youtu.be/…");
+      return;
+    }
+    // Deduplicate — same URL already queued?
+    if (videos.some((v) => v.sourceUrl === url)) {
+      alert("That URL is already in the batch.");
+      return;
+    }
+    // Pull a sensible default title from the URL (the video id) and
+    // let the user replace it with a proper headline or click
+    // "Generate with AI".
+    const idMatch = url.match(/[?&]v=([\w\-]+)/) || url.match(/youtu\.be\/([\w\-]+)/) || url.match(/shorts\/([\w\-]+)/);
+    const ytId = idMatch ? idMatch[1] : "youtube";
+    setVideos((prev) => [...prev, {
+      tmpId:       Math.random().toString(36).slice(2),
+      file:        null,               // no local file — server downloads
+      sourceUrl:   url,
+      thumbFile:   null,
+      thumbPreview: "",
+      channelIds:  new Set(),
+      hours:       1,
+      seoSource:   "user",
+      seo: {
+        title:         `YouTube live · ${ytId}`.slice(0, 100),
+        description:   `Source: ${url}`,
+        tags:          "",
+        privacy:       "unlisted",
+        made_for_kids: false,
+      },
+    }]);
   }
 
   function removeVideo(tmpId) {
@@ -144,11 +219,12 @@ export default function LiveStudio() {
       // 1) Create the batch — backend allocates stream rows.
       const payload = {
         videos: videos.map((v) => ({
-          filename:       v.file.name,
-          size_bytes:     v.file.size,
+          filename:       v.file ? v.file.name : (v.sourceUrl || "youtube_url.mp4"),
+          size_bytes:     v.file ? v.file.size : 0,
           duration_hours: Number(v.hours) || 1,
           channel_ids:    [...v.channelIds],
           seo_source:     v.seoSource,
+          source_url:     v.sourceUrl || null,
           seo: {
             title:         v.seo.title.trim(),
             description:   v.seo.description || "",
@@ -169,28 +245,73 @@ export default function LiveStudio() {
       }
       setStreamsByVideo(byVideo);
 
-      // 2) For each video, upload it ONCE to the FIRST stream that
-      //    uses it, then call /start on every stream sharing that
-      //    video. (Backend only stores one copy per video_slot — but
-      //    since each stream has its own row + upload_path, we need
-      //    to upload N times if a video targets N channels. To keep
-      //    bandwidth low we ONLY upload to the first stream of each
-      //    video and reuse its file path by hard-linking after.)
-      //    For v1 simplicity: upload to ALL streams. Phase 5.5 will
-      //    add the de-dup hardlink optimisation.
+      // 1.5) Upload thumbnails (if any) BEFORE starting broadcasts —
+      // the orchestrator reads thumbnail_path right after minting the
+      // YT broadcast, so it must be on the row before /start fires.
+      // Soft-fails: a busted thumbnail doesn't block the broadcast,
+      // we just log + carry on (YouTube will auto-pick a frame).
+      for (let vi = 0; vi < videos.length; vi++) {
+        const v = videos[vi];
+        if (!v.thumbFile) continue;
+        try {
+          await api.liveUploadThumbnail(created.id, vi, v.thumbFile);
+        } catch (e) {
+          console.warn(`thumbnail upload for video ${vi} failed:`, e.message);
+        }
+      }
+
+      // 2) Upload + start every (video × channel) stream IN PARALLEL,
+      //    capped at MAX_PARALLEL_STREAMS in-flight. Each pair runs
+      //    its own chunk loop, then fires /start the moment its own
+      //    upload finishes — no global barrier waits for the slowest
+      //    stream before any broadcast kicks off.
+      //
+      //    The backend serialises chunk writes per-stream_id, so two
+      //    chunks for the SAME stream wouldn't go faster in parallel.
+      //    The win is ACROSS streams — N independent stream_ids =
+      //    N independent locks = real concurrency.
+      //
+      //    Note: each LiveStream still has its own upload_path, so a
+      //    video targeting N channels uploads N copies. The hardlink
+      //    de-dup optimisation is a follow-up; for now parallelism
+      //    is the practical gain that makes large batches usable.
+      const pairs = [];
       for (let vi = 0; vi < videos.length; vi++) {
         const v = videos[vi];
         const streams = byVideo[vi] || [];
         for (const s of streams) {
-          await uploadFileToStream(v.file, s.id);
-          // Start broadcast for this stream immediately.
-          try {
-            await api.liveStartStream(s.id);
-          } catch (e) {
-            console.warn(`stream ${s.id} start failed:`, e.message);
-          }
+          pairs.push({
+            file:       v.file,
+            sourceUrl:  v.sourceUrl || null,
+            streamId:   s.id,
+          });
         }
       }
+
+      const inFlight = new Set();
+      for (const p of pairs) {
+        const task = (async () => {
+          try {
+            if (p.sourceUrl) {
+              // Server is fetching this one via yt-dlp — poll the
+              // stream until upload_done flips true (or it fails),
+              // then /start.
+              await waitForUrlIngest(p.streamId);
+            } else {
+              await uploadFileToStream(p.file, p.streamId);
+            }
+            await api.liveStartStream(p.streamId);
+          } catch (e) {
+            console.warn(`stream ${p.streamId} failed:`, e.message);
+          }
+        })();
+        inFlight.add(task);
+        task.finally(() => inFlight.delete(task));
+        if (inFlight.size >= MAX_PARALLEL_STREAMS) {
+          await Promise.race(inFlight);
+        }
+      }
+      await Promise.all(inFlight);
 
       setSubmitting(false);
       // Clear the builder so the user sees the batch board only.
@@ -199,6 +320,37 @@ export default function LiveStudio() {
       setSubmitErr(e.message || "submit failed");
       setSubmitting(false);
     }
+  }
+
+  // ── Wait for the server-side yt-dlp ingest to finish ───────
+  // The backend spawns one yt-dlp download per video_slot when
+  // a batch is created with `source_url`. We poll the per-stream
+  // status endpoint until `upload_done` flips true (success), or
+  // the row goes to `failed`. Polls every 2s with a 30-min ceiling
+  // — enough headroom for slow networks / 4K downloads.
+  async function waitForUrlIngest(streamId) {
+    const startedAt = Date.now();
+    const HARD_CEIL_MS = 30 * 60 * 1000;
+    while (Date.now() - startedAt < HARD_CEIL_MS) {
+      let s;
+      try {
+        s = await api.liveStream(streamId);
+      } catch (e) {
+        // Transient — try again.
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      // Surface byte progress in the same UI map the file path uses.
+      if (s.upload_bytes) {
+        setUploadProgress((m) => ({ ...m, [streamId]: s.upload_bytes }));
+      }
+      if (s.upload_done) return;
+      if (s.status === "failed" || s.status === "canceled") {
+        throw new Error(`URL ingest ${s.status}: ${s.error || "(no detail)"}`);
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    throw new Error("URL ingest exceeded 30-minute ceiling — aborted");
   }
 
   // ── Chunked uploader for one stream ────────────────────────
@@ -315,41 +467,137 @@ export default function LiveStudio() {
               const ch = channels.find((c) => c.id === s.channel_id);
               const isActive = !["done", "failed", "canceled"].includes(s.status);
               const upBytes  = uploadProgress[s.id] || 0;
+              const isStreaming = s.status === "streaming" && !!s.yt_video_id;
               return (
-                <div key={s.id} className={`p-2 rounded border text-xs flex items-center gap-3 ${
+                <div key={s.id} className={`rounded border text-xs ${
                   s.status === "done"     ? "border-emerald-500/30 bg-emerald-500/5" :
                   s.status === "failed"   ? "border-red-500/30 bg-red-500/5" :
                   s.status === "canceled" ? "border-gray-500/30 bg-gray-500/5" :
                                             "border-accent2/30 bg-accent2/5"
                 }`}>
-                  {isActive
-                    ? <Loader2 size={14} className="animate-spin text-accent2" />
-                    : s.status === "done"
-                      ? <CheckCircle2 size={14} className="text-emerald-400" />
-                      : <AlertCircle size={14} className="text-red-400" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-white truncate">
-                      <Tv size={11} className="inline mr-1 text-gray-400" />
-                      {ch?.name || `Channel #${s.channel_id}`}
-                      <span className="ml-2 text-gray-500">· {s.title}</span>
-                    </div>
-                    <div className="text-[10px] text-gray-500 mt-0.5">
-                      {s.status}{s.progress_pct > 0 ? ` · ${s.progress_pct}%` : ""}
-                      {" · "}{s.duration_hours}h
-                      {upBytes > 0 && s.status === "uploading" && (
-                        <span className="ml-2 text-accent2">
-                          upload {(upBytes / 1024 / 1024).toFixed(1)}MB
-                        </span>
+                  <div className="p-2 flex items-center gap-3">
+                    {isActive
+                      ? <Loader2 size={14} className="animate-spin text-accent2" />
+                      : s.status === "done"
+                        ? <CheckCircle2 size={14} className="text-emerald-400" />
+                        : <AlertCircle size={14} className="text-red-400" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white truncate">
+                        <Tv size={11} className="inline mr-1 text-gray-400" />
+                        {ch?.name || `Channel #${s.channel_id}`}
+                        <span className="ml-2 text-gray-500">· {s.title}</span>
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">
+                        {s.status}{s.progress_pct > 0 ? ` · ${s.progress_pct}%` : ""}
+                        {" · "}{s.duration_hours}h
+                        {upBytes > 0 && s.status === "uploading" && (
+                          <span className="ml-2 text-accent2">
+                            upload {(upBytes / 1024 / 1024).toFixed(1)}MB
+                          </span>
+                        )}
+                        {upBytes > 0 && s.status === "downloading" && (
+                          <span className="ml-2 text-accent2">
+                            server fetching · {(upBytes / 1024 / 1024).toFixed(1)}MB
+                          </span>
+                        )}
+                      </div>
+                      {/* Surface the per-row message when it's not the
+                          default "queued"/null state — operator wants
+                          to know "is the server downloading?" without
+                          having to expand a history row. */}
+                      {s.message && !["streaming","done"].includes(s.status) && (
+                        <div className="text-[10px] text-gray-400 mt-0.5 truncate italic">
+                          {s.message}
+                        </div>
                       )}
                     </div>
+                    {s.yt_watch_url && (
+                      <a
+                        href={s.yt_watch_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-accent2 hover:text-white flex items-center gap-0.5"
+                        title="Open on YouTube"
+                      >
+                        <ExternalLink size={10} /> YT
+                      </a>
+                    )}
+                    {isActive && (
+                      <button
+                        onClick={() => cancelStream(s.id)}
+                        className="text-[10px] text-gray-500 hover:text-red-400"
+                      >
+                        Stop
+                      </button>
+                    )}
                   </div>
-                  {isActive && (
-                    <button
-                      onClick={() => cancelStream(s.id)}
-                      className="text-[10px] text-gray-500 hover:text-red-400"
-                    >
-                      Stop
-                    </button>
+                  {/* Live link banner — shown the moment the YT
+                      broadcast is minted (i.e. the row has a
+                      yt_video_id). Always-visible, copy-friendly,
+                      regardless of whether the source was an upload
+                      or a URL. */}
+                  {s.yt_video_id && (
+                    <div className="px-2 pb-1.5">
+                      <div className="rounded border border-emerald-500/30 bg-emerald-500/5 px-2 py-1.5 text-[11px] flex items-center gap-2 flex-wrap">
+                        <span className="text-emerald-300 font-medium whitespace-nowrap">Live on YouTube →</span>
+                        <a
+                          href={s.yt_watch_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-emerald-200 hover:text-white underline break-all flex-1 min-w-0"
+                        >
+                          {s.yt_watch_url}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(s.yt_watch_url || "");
+                          }}
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                          title="Copy link"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Source URL strip — only on URL-ingested rows so the
+                      operator can see "what's being broadcast" alongside
+                      the live link. */}
+                  {s.source_url && (
+                    <div className="px-2 pb-1.5">
+                      <div className="text-[10px] text-gray-500 flex items-center gap-1.5 flex-wrap">
+                        <span className="text-gray-600">source:</span>
+                        <a
+                          href={s.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent2 hover:text-white underline break-all"
+                        >
+                          {s.source_url}
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Live preview — only embed while actively streaming
+                      (so we don't keep a 0-fps iframe alive for hours
+                      after the broadcast ends). YouTube serves the
+                      "broadcast ended" state automatically when the
+                      stream stops. */}
+                  {isStreaming && (
+                    <div className="px-2 pb-2">
+                      <div className="aspect-video w-full max-w-md mx-auto rounded border border-border bg-black overflow-hidden">
+                        <iframe
+                          title={`live preview ${s.id}`}
+                          src={`https://www.youtube.com/embed/${s.yt_video_id}?autoplay=1&mute=1`}
+                          className="w-full h-full"
+                          allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
               );
@@ -378,6 +626,11 @@ export default function LiveStudio() {
               Each video can target multiple channels. Short videos loop to fill your "live hours" setting.
             </div>
           </label>
+
+          {/* OR — YouTube URL ingest. Server fetches with yt-dlp,
+              then the same broadcast pipeline runs. Only use this
+              with content you have rights to rebroadcast. */}
+          <UrlAdder onAdd={onUrlAdded} />
 
           {videos.length > 0 && (
             <div className="mt-4 space-y-3">
@@ -425,20 +678,12 @@ export default function LiveStudio() {
           ? <div className="text-[11px] text-gray-500 italic">No batches yet.</div>
           : <ul className="space-y-1.5">
               {history.map((b) => (
-                <li key={b.id} className="p-2 rounded border border-border bg-black/30 text-xs flex items-center gap-2">
-                  <span className="font-mono text-gray-500">{b.public_id}</span>
-                  <span className={
-                    b.status === "done"     ? "text-emerald-300" :
-                    b.status === "failed"   ? "text-red-300" :
-                    b.status === "queued"   ? "text-gray-400" : "text-accent2"
-                  }>{b.status}</span>
-                  <span className="text-gray-500">{b.total} stream{b.total === 1 ? "" : "s"}</span>
-                  {b.done > 0  && <span className="text-emerald-400">{b.done} done</span>}
-                  {b.failed > 0 && <span className="text-red-400">{b.failed} failed</span>}
-                  <span className="ml-auto text-[10px] text-gray-600">
-                    {b.created_at ? new Date(b.created_at).toLocaleString() : ""}
-                  </span>
-                </li>
+                <HistoryRow
+                  key={b.id}
+                  batch={b}
+                  channels={channels}
+                  onCancelStream={cancelStream}
+                />
               ))}
             </ul>}
         <p className="text-[10px] text-gray-600 mt-2">
@@ -453,7 +698,9 @@ export default function LiveStudio() {
 // ─── Per-video card ─────────────────────────────────────────
 
 function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSeo, onRemove }) {
-  const sizeMB = (video.file.size / 1024 / 1024).toFixed(1);
+  // URL-sourced entries have no local File — show the URL instead of a size.
+  const isUrlSource = !video.file && !!video.sourceUrl;
+  const sizeMB = video.file ? (video.file.size / 1024 / 1024).toFixed(1) : null;
   const [genBusy, setGenBusy] = useState(false);
   const [genErr,  setGenErr]  = useState("");
   const [briefDraft, setBriefDraft] = useState("");
@@ -500,11 +747,74 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
     <div className="rounded border border-border bg-black/30 p-3">
       <div className="flex items-center gap-2 mb-2">
         <div className="text-[10px] text-gray-500 uppercase tracking-wider">#{index + 1}</div>
-        <div className="text-sm text-white truncate flex-1">{video.file.name}</div>
-        <div className="text-[10px] text-gray-500 whitespace-nowrap">{sizeMB} MB</div>
+        <div className="text-sm text-white truncate flex-1">
+          {isUrlSource
+            ? <span title={video.sourceUrl}>{video.sourceUrl}</span>
+            : video.file.name}
+        </div>
+        {isUrlSource
+          ? <span className="text-[10px] px-1.5 py-0.5 rounded border border-accent2/40 bg-accent2/10 text-accent2 whitespace-nowrap flex items-center gap-1">
+              <Play size={9} /> YouTube URL
+            </span>
+          : <div className="text-[10px] text-gray-500 whitespace-nowrap">{sizeMB} MB</div>}
         <button onClick={onRemove} className="text-gray-500 hover:text-red-400 ml-1">
           <Trash2 size={12} />
         </button>
+      </div>
+
+      {/* Thumbnail picker — optional, one per video. Replicated by the
+          backend across all channel destinations for this video_slot. */}
+      <div className="mb-2">
+        <div className="text-[10px] text-gray-400 mb-1 flex items-center gap-1">
+          <ImageIcon size={10} /> Custom thumbnail (optional)
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex-1 cursor-pointer text-[11px] px-2 py-1.5 rounded border border-border bg-black/40 text-gray-400 hover:text-white hover:border-gray-500 flex items-center gap-1.5">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (f.size > 4 * 1024 * 1024) {
+                  alert(`Thumbnail is ${(f.size/1024/1024).toFixed(1)} MB — limit is 4 MB.`);
+                  return;
+                }
+                // Revoke the prior preview URL before replacing.
+                if (video.thumbPreview) URL.revokeObjectURL(video.thumbPreview);
+                onPatch({ thumbFile: f, thumbPreview: URL.createObjectURL(f) });
+              }}
+            />
+            <Upload size={11} />
+            {video.thumbFile
+              ? <span className="truncate">{video.thumbFile.name}</span>
+              : <span>Choose thumbnail (JPG/PNG/WebP, ≤4 MB)</span>}
+          </label>
+          {video.thumbPreview && (
+            <>
+              <img
+                src={video.thumbPreview}
+                alt="thumbnail preview"
+                className="w-12 h-7 object-cover rounded border border-border"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  URL.revokeObjectURL(video.thumbPreview);
+                  onPatch({ thumbFile: null, thumbPreview: "" });
+                }}
+                className="text-gray-500 hover:text-red-400"
+                title="Remove thumbnail"
+              >
+                <X size={12} />
+              </button>
+            </>
+          )}
+        </div>
+        <div className="text-[9px] text-gray-600 mt-0.5">
+          YouTube recommends 1280×720 JPEG. Larger images get auto-resized server-side.
+        </div>
       </div>
 
       {/* Channels */}
@@ -542,13 +852,24 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
       {/* Hours + SEO source + privacy */}
       <div className="grid grid-cols-3 gap-2 mb-2 text-[11px]">
         <label>
-          <span className="text-gray-400 flex items-center gap-1"><Clock size={10} /> Hours live</span>
-          <input
-            type="number" min="0.5" max="24" step="0.5"
-            value={video.hours}
-            onChange={(e) => onPatch({ hours: parseFloat(e.target.value) || 1 })}
-            className="w-full mt-0.5 bg-black border border-border rounded px-2 py-1 text-white"
-          />
+          <span className="text-gray-400 flex items-center gap-1">
+            <Clock size={10} /> {isUrlSource ? "Duration" : "Hours live"}
+          </span>
+          {isUrlSource ? (
+            <div
+              className="w-full mt-0.5 bg-black/40 border border-border rounded px-2 py-1 text-[10px] text-gray-500 italic"
+              title="URL passthrough mode — broadcast ends when the source video ends; no loop"
+            >
+              Live until source ends · no loop
+            </div>
+          ) : (
+            <input
+              type="number" min="0.5" max="24" step="0.5"
+              value={video.hours}
+              onChange={(e) => onPatch({ hours: parseFloat(e.target.value) || 1 })}
+              className="w-full mt-0.5 bg-black border border-border rounded px-2 py-1 text-white"
+            />
+          )}
         </label>
         <label>
           <span className="text-gray-400">SEO source</span>
@@ -680,4 +1001,244 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
       </div>
     </div>
   );
+}
+
+
+// ─── YouTube URL adder ──────────────────────────────────────
+//
+// One-shot input that pipes a YouTube URL through the same Live
+// Studio pipeline as an uploaded file. The server downloads via
+// yt-dlp; the resulting VideoCard behaves identically except the
+// "source" badge marks it as URL-ingested.
+
+function UrlAdder({ onAdd }) {
+  const [val, setVal] = useState("");
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-black/20 p-3">
+      <div className="text-[11px] text-gray-400 mb-1.5 flex items-center gap-1.5">
+        <Play size={11} className="text-accent2" />
+        <span className="font-medium">Or paste a YouTube URL</span>
+        <span className="text-gray-600">— server fetches via yt-dlp, then broadcasts. Use only with content you have rights to.</span>
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="url"
+          placeholder="https://youtu.be/… or https://www.youtube.com/watch?v=…"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (val.trim()) { onAdd(val.trim()); setVal(""); }
+            }
+          }}
+          className="flex-1 bg-black border border-border rounded px-2 py-1.5 text-white text-[12px]"
+        />
+        <button
+          type="button"
+          onClick={() => { if (val.trim()) { onAdd(val.trim()); setVal(""); } }}
+          disabled={!val.trim()}
+          className="text-[11px] px-3 py-1.5 rounded bg-accent2 text-white hover:bg-accent2/80 disabled:opacity-40 flex items-center gap-1"
+        >
+          <Plus size={11} /> Add URL
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Per-history-row (expandable) ───────────────────────────
+//
+// The /api/live-studio/batches list returns streams pre-hydrated, so
+// expansion is a pure UI toggle — no extra round-trip. Each stream
+// row inside the expansion exposes its YouTube watch link, status,
+// finished_at, and the thumbnail that was applied.
+
+function HistoryRow({ batch, channels, onCancelStream }) {
+  // Auto-expand any batch that still has in-flight streams so the
+  // operator immediately sees the preview / Stop button without
+  // having to click. Collapsed once everything is terminal.
+  const streams = batch.streams || [];
+  const hasInFlight = streams.some((s) => !["done", "failed", "canceled"].includes(s.status));
+  const [open, setOpen] = useState(hasInFlight);
+  const hasStreams = streams.length > 0;
+
+  return (
+    <li className="rounded border border-border bg-black/30 text-xs">
+      <button
+        type="button"
+        onClick={() => hasStreams && setOpen(!open)}
+        className="w-full p-2 flex items-center gap-2 text-left hover:bg-white/[0.02]"
+      >
+        {hasStreams
+          ? (open ? <ChevronDown size={12} className="text-gray-500" /> : <ChevronRight size={12} className="text-gray-500" />)
+          : <span className="w-3" />}
+        <span className="font-mono text-gray-500">{batch.public_id}</span>
+        <span className={
+          batch.status === "done"     ? "text-emerald-300" :
+          batch.status === "failed"   ? "text-red-300" :
+          batch.status === "queued"   ? "text-gray-400" : "text-accent2"
+        }>{batch.status}</span>
+        <span className="text-gray-500">{batch.total} stream{batch.total === 1 ? "" : "s"}</span>
+        {batch.done > 0   && <span className="text-emerald-400">{batch.done} done</span>}
+        {batch.failed > 0 && <span className="text-red-400">{batch.failed} failed</span>}
+        <span className="ml-auto text-[10px] text-gray-600">
+          {batch.created_at ? new Date(batch.created_at).toLocaleString() : ""}
+        </span>
+      </button>
+
+      {open && hasStreams && (
+        <div className="border-t border-border/60 px-2 py-2 space-y-2">
+          {streams.map((s) => {
+            const ch = channels.find((c) => c.id === s.channel_id);
+            const started = s.started_at ? new Date(s.started_at).toLocaleString() : null;
+            const finished = s.finished_at ? new Date(s.finished_at).toLocaleString() : null;
+            const upMB = ((s.upload_bytes || 0) / 1024 / 1024).toFixed(1);
+            const totalMB = ((s.upload_total || 0) / 1024 / 1024).toFixed(1);
+            const friendly = friendlyError(s.error || "");
+            return (
+              <div key={s.id} className="rounded border border-border/60 bg-black/20 p-2 space-y-1">
+                <div className="flex items-center gap-2 text-[11px]">
+                  {s.thumbnail_url
+                    ? <img src={s.thumbnail_url} alt="" className="w-10 h-6 object-cover rounded border border-border flex-shrink-0" />
+                    : <div className="w-10 h-6 rounded border border-border bg-black/50 flex-shrink-0" />}
+                  <Tv size={10} className="text-gray-500 flex-shrink-0" />
+                  <span className="truncate text-gray-300 flex-1">
+                    {ch?.name || `Channel #${s.channel_id}`}
+                    <span className="text-gray-600"> · {s.title}</span>
+                  </span>
+                  <span className={`text-[10px] font-medium ${
+                    s.status === "done"     ? "text-emerald-400" :
+                    s.status === "failed"   ? "text-red-400" :
+                    s.status === "canceled" ? "text-gray-500" : "text-accent2"
+                  }`}>{s.status}</span>
+                  {s.yt_watch_url && (
+                    <a
+                      href={s.yt_watch_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accent2 hover:text-white flex items-center gap-0.5 text-[10px]"
+                      title={`youtu.be/${s.yt_video_id}`}
+                    >
+                      <Play size={9} /> Watch
+                    </a>
+                  )}
+                  {/* Stop button — only on non-terminal streams.
+                      Wired to the same /streams/{id}/cancel endpoint
+                      the active batch board uses. */}
+                  {!["done","failed","canceled"].includes(s.status) && onCancelStream && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onCancelStream(s.id); }}
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                      title="Stop this broadcast"
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+
+                {/* Inline live preview — embed the YT player while
+                    the broadcast is actively streaming. Once it goes
+                    terminal the iframe is removed (YT auto-shows
+                    "broadcast ended" but there's no point keeping a
+                    zero-fps frame alive after that). */}
+                {s.status === "streaming" && s.yt_video_id && (
+                  <div className="pl-12 pt-1">
+                    <div className="aspect-video w-full max-w-md rounded border border-border bg-black overflow-hidden">
+                      <iframe
+                        title={`history preview ${s.id}`}
+                        src={`https://www.youtube.com/embed/${s.yt_video_id}?autoplay=1&mute=1`}
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Meta strip */}
+                <div className="text-[10px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5 pl-12">
+                  {started  && <span>started: {started}</span>}
+                  {finished && <span>finished: {finished}</span>}
+                  <span>upload: {upMB}/{totalMB} MB{s.upload_done ? " (complete)" : ""}</span>
+                  {s.yt_video_id && <span className="font-mono">vid: {s.yt_video_id}</span>}
+                </div>
+
+                {/* Last status message (queued / waiting / minting etc.) */}
+                {s.message && s.status !== "done" && (
+                  <div className="text-[10px] text-gray-400 pl-12 italic">{s.message}</div>
+                )}
+
+                {/* Failure detail — explicit, with friendly-text fix-it
+                    hint and a collapsed view of the raw traceback. */}
+                {s.status === "failed" && (s.error || s.message) && (
+                  <div className="ml-12 mt-1 rounded border border-red-500/40 bg-red-500/5 p-2 text-[11px] text-red-200 space-y-1">
+                    <div className="flex items-start gap-1">
+                      <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">{friendly.headline}</div>
+                        {friendly.fix && (
+                          <div className="text-red-200/80 mt-0.5">→ {friendly.fix}</div>
+                        )}
+                      </div>
+                    </div>
+                    {s.error && (
+                      <details className="text-[10px] text-red-300/70">
+                        <summary className="cursor-pointer hover:text-red-200">Raw error</summary>
+                        <pre className="whitespace-pre-wrap break-words mt-1 font-mono text-[10px]">{s.error}</pre>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </li>
+  );
+}
+
+
+// Map raw orchestrator/YT errors to short human headlines + the
+// concrete fix. Keeps the "why did this fail" answer in the same
+// row instead of forcing the operator to read a 400-char traceback.
+function friendlyError(raw) {
+  const e = (raw || "").toLowerCase();
+  if (e.includes("livestreamingnotenabled")) {
+    return {
+      headline: "YouTube live streaming is not enabled on this channel.",
+      fix: "Sign in to that channel at youtube.com/livestreaming and click \"Get Started\". YouTube requires phone verification + a 24h wait after first enabling before broadcasts go live.",
+    };
+  }
+  if (e.includes("invalid_grant")) {
+    return {
+      headline: "OAuth token expired or revoked.",
+      fix: "Reconnect this channel from Channels → My accounts → Reconnect.",
+    };
+  }
+  if (e.includes("ffmpeg")) {
+    return {
+      headline: "Encoder (ffmpeg) crashed during the broadcast.",
+      fix: "Usually means the input video is malformed or RTMP ingest dropped. Try re-encoding the source (H.264 + AAC, MP4 container) and retry.",
+    };
+  }
+  if (e.includes("timed out waiting for a broadcast slot")) {
+    return {
+      headline: "Waited too long in the broadcast queue.",
+      fix: "Cap is 10 concurrent broadcasts. Reduce the batch size or wait for active broadcasts to finish.",
+    };
+  }
+  if (e.includes("quota") || e.includes("403")) {
+    return {
+      headline: "YouTube API quota or permission rejected the broadcast mint.",
+      fix: "Either the daily quota is exhausted (wait for midnight PT reset) or the OAuth scope is missing youtube.force-ssl. Reconnect the channel if scopes are wrong.",
+    };
+  }
+  return {
+    headline: "Stream failed.",
+    fix: "See raw error below for details.",
+  };
 }

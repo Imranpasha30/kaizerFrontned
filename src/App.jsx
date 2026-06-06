@@ -6,6 +6,8 @@ import NewJob   from "./pages/NewJob";
 import JobDetail from "./pages/JobDetail";
 import JobsStats from "./pages/JobsStats";
 import Editor   from "./pages/Editor";
+import V4Editor from "./pages/V4Editor";
+import V4Defaults from "./pages/V4Defaults";
 import Channels from "./pages/Channels";
 import Uploads  from "./pages/Uploads";
 import Campaigns from "./pages/Campaigns";
@@ -116,6 +118,8 @@ export default function App() {
           <Route path="/jobs/:jobId"                   element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/edit"              element={<ProtectedRoute><Editor /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/edit/:clipId"      element={<ProtectedRoute><Editor /></ProtectedRoute>} />
+          <Route path="/jobs/:jobId/v4-edit"            element={<ProtectedRoute><V4Editor /></ProtectedRoute>} />
+          <Route path="/v4-defaults"                    element={<ProtectedRoute><V4Defaults /></ProtectedRoute>} />
           <Route path="/channels"                      element={<ProtectedRoute><Channels /></ProtectedRoute>} />
           <Route path="/uploads"                       element={<ProtectedRoute><Uploads /></ProtectedRoute>} />
           <Route path="/campaigns"                     element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />

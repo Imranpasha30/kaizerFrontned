@@ -33,6 +33,41 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
   const [logoAcc, setLogoAcc]     = useState(null);        // the acc object or null
   const [logoValue, setLogoValue] = useState(null);        // pending asset id (or null)
   const [logoSaving, setLogoSaving] = useState(false);
+
+  // Brand / watermark / socials modal state.
+  const [brandAcc, setBrandAcc]   = useState(null);
+  const [wmText, setWmText]       = useState("");
+  const [wmOp, setWmOp]           = useState(0.35);
+  const [wmPos, setWmPos]         = useState("top-right");
+  const [socials, setSocials]     = useState({});
+  const [brandSaving, setBrandSaving] = useState(false);
+
+  function openBrandEditor(acc) {
+    setBrandAcc(acc);
+    setWmText(acc.watermark_text || "");
+    setWmOp(acc.watermark_opacity ?? 0.35);
+    setWmPos(acc.watermark_position || "top-right");
+    setSocials(acc.socials || {});
+  }
+  function closeBrandEditor() { setBrandAcc(null); }
+  async function saveBrand() {
+    if (!brandAcc?.primary_profile_id) { closeBrandEditor(); return; }
+    setBrandSaving(true);
+    try {
+      await api.updateChannel(brandAcc.primary_profile_id, {
+        watermark_text: wmText,
+        watermark_opacity: wmOp,
+        watermark_position: wmPos,
+        socials,
+      });
+      closeBrandEditor();
+      await load();
+    } catch (e) {
+      setError(e.message || "Failed to save brand settings");
+    } finally {
+      setBrandSaving(false);
+    }
+  }
   const popupRef = useRef(null);
 
   function openLogoEditor(acc) {
@@ -510,6 +545,21 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                       </span>
                     )}
                   </div>
+                  {/* Brand stamp + socials — per-account watermark text
+                      and social-link footer applied at upload time. */}
+                  <button
+                    type="button"
+                    onClick={() => openBrandEditor(acc)}
+                    disabled={!acc.primary_profile_id}
+                    title="Per-channel watermark + social links injected at publish time"
+                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-accent2 hover:text-white hover:bg-accent2/10 border border-accent2/40 hover:border-accent2/70 rounded-md py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ✦ Brand &amp; socials
+                    {(acc.watermark_text || Object.values(acc.socials || {}).some(Boolean)) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Configured" />
+                    )}
+                  </button>
+
                   {/* Disconnect — required by Google's policy that users
                       can withdraw OAuth access in-app. Calls
                       DELETE /api/youtube/oauth/{channel_id} which clears
@@ -521,7 +571,7 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                     onClick={() => handleDisconnect(acc)}
                     disabled={!!disconnectingIds[acc.primary_profile_id] || !acc.primary_profile_id}
                     title="Revoke Kaizer's access to this YouTube account"
-                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-500/5 border border-red-900/40 hover:border-red-800/60 rounded-md py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-red-400 hover:text-red-300 hover:bg-red-500/5 border border-red-900/40 hover:border-red-800/60 rounded-md py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {disconnectingIds[acc.primary_profile_id]
                       ? <><Loader2 size={11} className="animate-spin" /> Disconnecting…</>
@@ -531,6 +581,187 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Brand stamp + per-account socials modal */}
+      {brandAcc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 overflow-y-auto py-6"
+          onClick={closeBrandEditor}
+        >
+          <div
+            className="bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-100">
+                Brand &amp; socials — <span className="text-green-300">{brandAcc.youtube_channel_title || brandAcc.name}</span>
+              </h3>
+              <button onClick={closeBrandEditor} className="text-gray-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-4 leading-snug">
+              Watermark is stamped on the video at upload time (using this account's logo + the
+              text below). Socials get appended to the YouTube description footer — each account
+              gets its own @handles so the reach goes to the right audience.
+            </p>
+
+            {/* Live watermark preview */}
+            <div className="mb-4">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Live preview</div>
+              {(() => {
+                // Logo: fixed top-right at full opacity (it's the channel
+                // bug, separate from the text watermark). The watermark
+                // text floats in one of four mid bands: upper-center,
+                // lower-center, center-left, center-right. Corners stay
+                // reserved for the logo so the two never collide.
+                const W = 320, H = 180;
+                const logoUrl = brandAcc.logo?.url || null;
+                const bugSize = 28;
+                const bugM = 6;
+                const textW = Math.max(40, Math.min(180, (wmText || "  ").length * 7 + 18));
+                const textH = 22;
+                let tx, ty;
+                if (wmPos === "upper-center")      { tx = (W - textW) / 2; ty = H / 4 - textH / 2; }
+                else if (wmPos === "lower-center") { tx = (W - textW) / 2; ty = H * 3 / 4 - textH / 2; }
+                else if (wmPos === "center-left")  { tx = bugM + 6;          ty = (H - textH) / 2; }
+                else if (wmPos === "center-right") { tx = W - textW - bugM - 6; ty = (H - textH) / 2; }
+                else                                { tx = (W - textW) / 2; ty = H * 3 / 4 - textH / 2; }
+                const op = Math.max(0.05, Math.min(1, wmOp || 0.35));
+                return (
+                  <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-video rounded border border-border bg-black">
+                    <defs>
+                      <linearGradient id="ytapvid" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stopColor="#1a1a1a" />
+                        <stop offset="100%" stopColor="#2a2a2a" />
+                      </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width={W} height={H} fill="url(#ytapvid)" />
+                    <text x={W / 2} y={H / 2 + 4} fill="rgba(255,255,255,.15)" fontSize="12" textAnchor="middle">video frame</text>
+
+                    {/* Channel logo bug — always top-right, full opacity */}
+                    {logoUrl ? (
+                      <image
+                        href={logoUrl}
+                        x={W - bugSize - bugM} y={bugM}
+                        width={bugSize} height={bugSize}
+                        preserveAspectRatio="xMidYMid meet"
+                      />
+                    ) : (
+                      <rect
+                        x={W - bugSize - bugM} y={bugM}
+                        width={bugSize} height={bugSize}
+                        fill="rgba(255,255,255,.04)" stroke="rgba(255,255,255,.15)" strokeDasharray="2 2"
+                      />
+                    )}
+
+                    {/* Text watermark — mid-band placement, alpha = opacity slider */}
+                    {wmText && (
+                      <g opacity={op}>
+                        <rect x={tx} y={ty} width={textW} height={textH} fill="rgba(0,0,0,0.45)" rx="2" />
+                        <text x={tx + textW / 2} y={ty + textH / 2 + 4} fill="#fff" fontSize="10" fontWeight="700" textAnchor="middle">
+                          {wmText.slice(0, 22)}
+                        </text>
+                      </g>
+                    )}
+                  </svg>
+                );
+              })()}
+              <div className="text-[10px] text-gray-600 mt-1 space-y-0.5">
+                <div>Logo: <span className="text-gray-400">top-right · always full opacity</span></div>
+                <div>Watermark text: <span className="text-gray-400">{wmPos} · {Math.round(wmOp * 100)}% opacity</span></div>
+                {!brandAcc.logo?.url && (
+                  <div className="text-amber-500/70">No logo set yet — use the "change" link on the card to add one.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Watermark fields */}
+            <div className="mb-4 p-3 rounded border border-border bg-black/30 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Watermark</div>
+              <label className="block">
+                <div className="text-[10px] text-gray-500 mb-1">Text (leave blank for logo-only)</div>
+                <input
+                  type="text"
+                  value={wmText}
+                  maxLength={30}
+                  onChange={(e) => setWmText(e.target.value)}
+                  placeholder="e.g. Cyber Sphere"
+                  className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">Opacity ({Math.round(wmOp * 100)}%)</div>
+                  <input type="range" min={0.05} max={1} step={0.05}
+                    value={wmOp}
+                    onChange={(e) => setWmOp(parseFloat(e.target.value))}
+                    className="w-full" />
+                </label>
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">Position</div>
+                  <select
+                    value={wmPos}
+                    onChange={(e) => setWmPos(e.target.value)}
+                    className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200"
+                  >
+                    <option value="upper-center">Upper center</option>
+                    <option value="lower-center">Lower center</option>
+                    <option value="center-left">Center left</option>
+                    <option value="center-right">Center right</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {/* Per-account socials */}
+            <div className="p-3 rounded border border-border bg-black/30">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Social links (injected into description)</div>
+              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                {[
+                  ["youtube",   "YouTube",     "@yourchannel"],
+                  ["instagram", "Instagram",   "@handle"],
+                  ["twitter",   "X / Twitter", "@handle"],
+                  ["facebook",  "Facebook",    "facebook.com/page"],
+                  ["tiktok",    "TikTok",      "@handle"],
+                  ["threads",   "Threads",     "@handle"],
+                  ["whatsapp",  "WhatsApp",    "whatsapp.com/channel/…"],
+                  ["telegram",  "Telegram",    "t.me/yourchannel"],
+                  ["linkedin",  "LinkedIn",    "linkedin.com/in/…"],
+                  ["website",   "Website",     "https://example.com"],
+                  ["email",     "Email",       "you@example.com"],
+                ].map(([key, label, ph]) => (
+                  <label key={key} className="grid grid-cols-[110px,1fr] items-center gap-2">
+                    <span className="text-[11px] text-gray-400">{label}</span>
+                    <input
+                      type="text"
+                      value={socials[key] || ""}
+                      onChange={(e) => setSocials((s) => ({ ...s, [key]: e.target.value }))}
+                      placeholder={ph}
+                      className="w-full bg-black/60 border border-border rounded px-2 py-1 text-xs text-gray-200"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={closeBrandEditor}
+                className="btn btn-secondary text-xs py-1 px-3"
+                disabled={brandSaving}
+              >Cancel</button>
+              <button
+                onClick={saveBrand}
+                disabled={brandSaving}
+                className="btn btn-primary text-xs py-1 px-3 flex items-center gap-1 disabled:opacity-50"
+              >
+                {brandSaving ? (<><Loader2 size={11} className="animate-spin" /> saving…</>) : "Save"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

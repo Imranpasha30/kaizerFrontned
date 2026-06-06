@@ -30,6 +30,26 @@ const LANG_LABEL = {
   ml: "മലയാളം", bn: "বাংলা", mr: "मराठी", gu: "ગુજરાતી", en: "EN",
 };
 
+// "8m23s" / "1h05m" — compact runtime formatter for the list row.
+function fmtDuration(secs) {
+  if (secs == null || secs < 0) return "";
+  const s = Math.floor(secs);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+// "14:32" — local-time HH:MM, used for start/end timestamps.
+function fmtTime(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch { return ""; }
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [jobs, setJobs]     = useState([]);
@@ -147,6 +167,30 @@ export default function Home() {
                   <span>{job.clip_count} clip{job.clip_count !== 1 ? "s" : ""}</span>
                   <span className="hidden sm:inline text-gray-700">|</span>
                   <span className="hidden sm:inline">{new Date(job.created_at).toLocaleDateString()}</span>
+                  {/* Timing: live elapsed for running, start-end + total for done.
+                      Re-renders every 3s via the parent polling loop, so the
+                      live counter ticks for the user without extra timers. */}
+                  {job.started_at && (
+                    <>
+                      <span className="hidden sm:inline text-gray-700">|</span>
+                      <span className="hidden sm:inline">
+                        {job.status === "running" ? (
+                          <span className="text-yellow-400">
+                            {fmtTime(job.started_at)} - live {fmtDuration(job.elapsed_seconds)}
+                          </span>
+                        ) : job.finished_at ? (
+                          <span className="text-gray-400">
+                            {fmtTime(job.started_at)} - {fmtTime(job.finished_at)}
+                            {job.elapsed_seconds != null && (
+                              <span className="text-gray-600"> ({fmtDuration(job.elapsed_seconds)})</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span>started {fmtTime(job.started_at)}</span>
+                        )}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 

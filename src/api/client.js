@@ -17,6 +17,16 @@ export function onUnauthorized(cb) {
   return () => window.removeEventListener(UNAUTHORIZED_EVENT, handler);
 }
 
+// A 401 from an `/auth/...` endpoint truly means our session is invalid
+// (bad/expired JWT). A 401 from any *other* endpoint is almost always an
+// upstream-provider auth failure (Postiz/HeyGen/etc.) — those should NOT
+// log the user out. Returning 502 from the backend is the correct fix
+// there, but we also gate the frontend logout dispatch defensively so a
+// stray 401 from some other future endpoint can't kick the user out.
+function _isSessionAuthPath(path) {
+  return typeof path === "string" && path.startsWith("/auth/");
+}
+
 async function req(method, path, body, isForm = false) {
   const opts = { method, headers: {} };
   const tok = getToken();
@@ -31,8 +41,8 @@ async function req(method, path, body, isForm = false) {
   }
   const res = await fetch(`${BASE}${path}`, opts);
   if (!res.ok) {
-    if (res.status === 401) {
-      // Token invalid/expired — bubble up so AuthProvider can log out
+    if (res.status === 401 && _isSessionAuthPath(path)) {
+      // Real session failure — bubble up so AuthProvider can log out
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     }
     const err = await res.json().catch(() => ({}));
@@ -87,7 +97,9 @@ export const api = {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText));
       } else {
-        if (xhr.status === 401) window.dispatchEvent(new CustomEvent("kaizer:unauthorized"));
+        // Intentionally NOT dispatching the unauthorized event on 401:
+        // this is an upload endpoint, not an auth one. AuthProvider's
+        // /auth/me probe handles real session expiry on next nav.
         try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
         catch { reject(new Error(xhr.statusText || "Upload failed")); }
       }
@@ -132,7 +144,9 @@ export const api = {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText));
       } else {
-        if (xhr.status === 401) window.dispatchEvent(new CustomEvent("kaizer:unauthorized"));
+        // Intentionally NOT dispatching the unauthorized event on 401:
+        // this is an upload endpoint, not an auth one. AuthProvider's
+        // /auth/me probe handles real session expiry on next nav.
         try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
         catch { reject(new Error(xhr.statusText || "Upload failed")); }
       }
@@ -397,6 +411,122 @@ export const api = {
   liveCancelStream:    (id)           => req("POST", `/live-studio/streams/${id}/cancel`),
   liveHealth:          ()             => req("GET",  "/live-studio/health"),
   liveValidateSeo:     (body)         => req("POST", "/live-studio/seo/validate", body),
+
+  // ── V4 pipeline editor ─────────────────────────────────────────
+  // Reads/writes the canvas.json source of truth for V4 jobs.
+  v4GetCanvas:         (jobId)        => req("GET",  `/v4/jobs/${jobId}/canvas`),
+  v4PutCanvas:         (jobId, canvas)=> req("PUT",  `/v4/jobs/${jobId}/canvas`, { canvas }),
+  v4DeletePoolImage:   (jobId, fn)    => req("DELETE", `/v4/jobs/${jobId}/pool/${encodeURIComponent(fn)}`),
+  v4TriggerRender:     (jobId, body)  => req("POST", `/v4/jobs/${jobId}/render`, body),
+  v4RenderState:       (jobId)        => req("GET",  `/v4/jobs/${jobId}/render/state`),
+  v4FetchPoolImage:    (jobId, body)  => req("POST", `/v4/jobs/${jobId}/pool/fetch`, body),
+  v4AiGenImage:        (jobId, body)  => req("POST", `/v4/jobs/${jobId}/pool/ai-generate`, body),
+  v4AutoDistribute:    (jobId, body)  => req("POST", `/v4/jobs/${jobId}/bulletin/auto-distribute`, body),
+  v4ListBgSamples:     ()             => req("GET",  `/v4/bg-samples`),
+  // List user-uploaded bg videos (reuses the global assets system; we
+  // just filter by folder_path so only v4 bg uploads come back).
+  v4ListUserBgVideos:  ()             => req("GET",  `/assets/?folder_path=v4_bg_videos`),
+  // Upload a bg video to the user-assets pool. Uses the global assets
+  // upload route — folder_path tag keeps it discoverable from the V4
+  // editor's bg picker on later visits.
+  v4UploadBgVideo: async (file) => {
+    const tok = getToken();
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("kind", "video");
+    fd.append("folder_path", "v4_bg_videos");
+    const headers = {};
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(`${BASE}/assets/upload`, { method: "POST", headers, body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `bg video upload ${res.status}`);
+    }
+    return res.json();
+  },
+  v4DeleteUserAsset:   (assetId)      => req("DELETE", `/assets/${assetId}`),
+  v4RegenSeo:          (jobId, body)  => req("POST", `/v4/jobs/${jobId}/seo/regenerate`, body),
+  v4GenThumbnail:      (jobId, body)  => req("POST", `/v4/jobs/${jobId}/thumbnail/generate`, body),
+  seoGenerate:         (clipId, body) => req("POST", `/clips/${clipId}/seo/generate`, body),
+  seoStatus:           (clipId)       => req("GET",  `/clips/${clipId}/seo/status`),
+  listClipUploads:     (clipId)       => req("GET",  `/uploads?clip_id=${clipId}`),
+  v4GetDefaults:       ()             => req("GET",  "/v4/defaults"),
+  v4PutDefaults:       (body)         => req("PUT",  "/v4/defaults", body),
+  v4HasDefaults:       ()             => req("GET",  "/v4/defaults/has"),
+  // Build the download URL — kept for cases where the browser already
+  // has auth (same-origin cookie auth). With Bearer auth we must use
+  // v4DownloadBlob below so the token gets sent.
+  v4DownloadUrl:       (jobId, target, index = 0, channelId = null) => {
+    const params = new URLSearchParams({ target, index: String(index) });
+    if (channelId) params.set("channel_id", String(channelId));
+    return `/api/v4/jobs/${jobId}/download?${params.toString()}`;
+  },
+  // Fetch the watermarked MP4 with the JWT in the Authorization header
+  // and trigger a save-as via a temporary <a> on a blob URL. This is
+  // the path the V4Editor's Download buttons use — plain <a href> on
+  // an authenticated endpoint would fail with 401.
+  v4DownloadBlob: async (jobId, target, index = 0, channelId = null, defaultFilename) => {
+    const url = api.v4DownloadUrl(jobId, target, index, channelId);
+    const tok = getToken();
+    const res = await fetch(url, {
+      method: "GET",
+      headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json())?.detail || detail; } catch {}
+      throw new Error(detail || `Download failed (HTTP ${res.status})`);
+    }
+    // Prefer the filename from Content-Disposition; fall back to caller hint.
+    const cd = res.headers.get("content-disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/i);
+    const filename = (m && m[1]) || defaultFilename || `${target}_${index + 1}.mp4`;
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(blobUrl); a.remove(); }, 1500);
+  },
+  /** Upload a new pool image. ``file`` is a raw File/Blob. */
+  v4UploadPoolImage: async (jobId, file, label) => {
+    const tok = getToken();
+    const fd = new FormData();
+    fd.append("image", file);
+    if (label) fd.append("label", label);
+    const headers = {};
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(`${BASE}/v4/jobs/${jobId}/pool/upload`, {
+      method: "POST", headers, body: fd,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (res.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      throw new Error(err.detail || err.error || `v4 image upload ${res.status}`);
+    }
+    return res.json();
+  },
+  /** Upload a thumbnail for one video in a batch. Applies to every
+   * stream sharing the (batch, video_slot). Must be called before
+   * /start so the orchestrator can push it to YouTube alongside the
+   * minted broadcast. ``file`` is a raw File / Blob (JPEG/PNG/WebP). */
+  liveUploadThumbnail: async (batchId, videoSlot, file) => {
+    const tok = getToken();
+    const headers = { "Content-Type": file.type || "image/jpeg" };
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(
+      `${BASE}/live-studio/batches/${batchId}/videos/${videoSlot}/thumbnail`,
+      { method: "POST", headers, body: file },
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (res.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      throw new Error(err.detail || err.error || `thumbnail upload ${res.status}`);
+    }
+    return res.json();
+  },
   /** Upload a single byte range to one stream. Returns
    * {bytes_written, total, is_complete, status}. ``onProgress`` is
    * called with the response's bytes_written each successful chunk. */
@@ -464,7 +594,9 @@ export const api = {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText));
       } else {
-        if (xhr.status === 401) window.dispatchEvent(new CustomEvent("kaizer:unauthorized"));
+        // Intentionally NOT dispatching the unauthorized event on 401:
+        // this is an upload endpoint, not an auth one. AuthProvider's
+        // /auth/me probe handles real session expiry on next nav.
         try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
         catch { reject(new Error(xhr.statusText || "Upload failed")); }
       }

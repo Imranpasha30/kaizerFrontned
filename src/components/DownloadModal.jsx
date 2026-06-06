@@ -193,7 +193,16 @@ export default function DownloadModal({ open, onClose, clip }) {
             {channels.map((c) => {
               const isSelected = selectedIds.has(c.id);
               const status = perCh[c.id];
-              const hasLogo = !!(c.logo_asset_id || c.logo_url);
+              // Same fallback the backend resolver uses: OAuthToken logo
+              // first, then Channel logo. `effective_logo_asset_id`
+              // mirrors that so the label reflects what would actually
+              // be applied on download.
+              const hasLogo = !!(
+                c.effective_logo_asset_id ||
+                c.logo_asset_id ||
+                c.logo?.url ||
+                c.logo_url
+              );
               return (
                 <label
                   key={c.id}

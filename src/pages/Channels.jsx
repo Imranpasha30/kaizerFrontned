@@ -670,6 +670,132 @@ function ChannelCard({
         </div>
       )}
 
+      {/* Brand stamp + per-channel socials modal — UI moved into
+          YouTubeAccountsPanel (the "My accounts" tab) since style
+          profiles are voice-only templates, not real publish targets. */}
+      {false && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 overflow-y-auto py-6"
+          onClick={() => setBrandOpen(false)}
+        >
+          <div
+            className="bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-100">
+                Brand stamp & socials — <span className="text-accent2">{channel.name}</span>
+              </h3>
+              <button onClick={() => setBrandOpen(false)} className="text-gray-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-4 leading-snug">
+              Watermark is stamped on the video at upload time (using this channel's logo + the
+              text below). Socials get appended to the YouTube description footer — each channel
+              gets its own @handles so the reach goes to the right audience.
+            </p>
+
+            {/* Watermark live preview */}
+            <WatermarkPreview
+              text={wmText}
+              opacity={wmOp}
+              position={wmPos}
+              logoUrl={channel.logo?.url || null}
+            />
+
+            {/* Watermark fields */}
+            <div className="mb-4 p-3 rounded border border-border bg-black/30 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Watermark</div>
+              <label className="block">
+                <div className="text-[10px] text-gray-500 mb-1">Text (leave blank for logo-only)</div>
+                <input
+                  type="text"
+                  value={wmText}
+                  maxLength={30}
+                  onChange={(e) => setWmText(e.target.value)}
+                  placeholder="e.g. Cyber Sphere"
+                  className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">Opacity ({Math.round(wmOp * 100)}%)</div>
+                  <input
+                    type="range" min={0.05} max={1} step={0.05}
+                    value={wmOp}
+                    onChange={(e) => setWmOp(parseFloat(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">Position</div>
+                  <select
+                    value={wmPos}
+                    onChange={(e) => setWmPos(e.target.value)}
+                    className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200"
+                  >
+                    <option value="top-left">Top-left</option>
+                    <option value="top-right">Top-right</option>
+                    <option value="bottom-left">Bottom-left</option>
+                    <option value="bottom-right">Bottom-right</option>
+                  </select>
+                </label>
+              </div>
+              <p className="text-[10px] text-gray-600">
+                Logo comes from this channel's overlay-logo upload (top of card).
+              </p>
+            </div>
+
+            {/* Per-channel social links */}
+            <div className="p-3 rounded border border-border bg-black/30">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Social links (injected into description)</div>
+              <div className="space-y-1.5">
+                {[
+                  ["youtube",   "YouTube",     "@yourchannel"],
+                  ["instagram", "Instagram",   "@handle"],
+                  ["twitter",   "X / Twitter", "@handle"],
+                  ["facebook",  "Facebook",    "facebook.com/page"],
+                  ["tiktok",    "TikTok",      "@handle"],
+                  ["threads",   "Threads",     "@handle"],
+                  ["whatsapp",  "WhatsApp",    "whatsapp.com/channel/…"],
+                  ["telegram",  "Telegram",    "t.me/yourchannel"],
+                  ["linkedin",  "LinkedIn",    "linkedin.com/in/…"],
+                  ["website",   "Website",     "https://example.com"],
+                  ["email",     "Email",       "you@example.com"],
+                ].map(([key, label, ph]) => (
+                  <label key={key} className="grid grid-cols-[110px,1fr] items-center gap-2">
+                    <span className="text-[11px] text-gray-400">{label}</span>
+                    <input
+                      type="text"
+                      value={socials[key] || ""}
+                      onChange={(e) => setSocials((s) => ({ ...s, [key]: e.target.value }))}
+                      placeholder={ph}
+                      className="w-full bg-black/60 border border-border rounded px-2 py-1 text-xs text-gray-200"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setBrandOpen(false)}
+                className="btn btn-secondary text-xs py-1 px-3"
+                disabled={brandSaving}
+              >Cancel</button>
+              <button
+                onClick={saveBrand}
+                disabled={brandSaving}
+                className="btn btn-primary text-xs py-1 px-3 flex items-center gap-1 disabled:opacity-50"
+              >
+                {brandSaving ? (<><Loader2 size={11} className="animate-spin" /> saving…</>) : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Quick logo-edit modal — only the LogoPicker, no full channel form. */}
       {logoOpen && (
         <div
@@ -744,4 +870,79 @@ function timeAgo(iso) {
     if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
     return `${Math.round(diff / 86400)}d ago`;
   } catch { return ""; }
+}
+
+
+// Live watermark preview — mock 16:9 frame with the translucent plate
+// in the chosen corner. Updates as the user types text / drags opacity
+// / switches position. Matches the backend's _render_plate_png sizing
+// (~18% of width, 6% of height) so what the user sees here is what
+// lands on the uploaded MP4.
+function WatermarkPreview({ text, opacity, position, logoUrl }) {
+  const W = 320, H = 180;
+  const plateW = Math.max(64, Math.round(W * 0.18));
+  const plateH = Math.max(20, Math.round(H * 0.10));
+  const MARGIN = 8;
+  let px = W - plateW - MARGIN, py = MARGIN;
+  if (position === "top-left")     { px = MARGIN;            py = MARGIN; }
+  if (position === "bottom-left")  { px = MARGIN;            py = H - plateH - MARGIN; }
+  if (position === "bottom-right") { px = W - plateW - MARGIN; py = H - plateH - MARGIN; }
+  const plateOpacity = Math.max(0.05, Math.min(1, opacity || 0.35));
+  const logoSlot = Math.round(plateH - 6);
+  const textStart = logoUrl ? (logoSlot + 8) : 6;
+  return (
+    <div className="mb-4">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Live preview</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-video rounded border border-border bg-black">
+        {/* Mock 16:9 frame — gradient to suggest video content */}
+        <defs>
+          <linearGradient id="vidbg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%"   stopColor="#1a1a1a" />
+            <stop offset="100%" stopColor="#2a2a2a" />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width={W} height={H} fill="url(#vidbg)" />
+        <text x={W / 2} y={H / 2 + 4} fill="rgba(255,255,255,.15)" fontSize="12" textAnchor="middle">
+          video frame
+        </text>
+        {/* Translucent plate */}
+        <g opacity={plateOpacity}>
+          <rect
+            x={px} y={py} width={plateW} height={plateH}
+            fill="rgba(0,0,0,0.75)" rx="3"
+          />
+          {logoUrl && (
+            <image
+              href={logoUrl}
+              x={px + 3} y={py + 3}
+              width={logoSlot} height={logoSlot}
+              preserveAspectRatio="xMidYMid meet"
+            />
+          )}
+          {text && (
+            <text
+              x={px + textStart} y={py + plateH / 2 + 3}
+              fill="#fff" fontSize="9" fontWeight="700"
+              dominantBaseline="middle"
+            >
+              {text.slice(0, 14)}
+            </text>
+          )}
+          {!text && !logoUrl && (
+            <text
+              x={px + plateW / 2} y={py + plateH / 2 + 3}
+              fill="rgba(255,255,255,0.4)" fontSize="8" textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              (empty)
+            </text>
+          )}
+        </g>
+      </svg>
+      <div className="text-[10px] text-gray-600 mt-1">
+        {position} · {Math.round(plateOpacity * 100)}% opacity
+        {!logoUrl && <span className="text-amber-500/70"> · no logo set (set one above the card to add it here)</span>}
+      </div>
+    </div>
+  );
 }
