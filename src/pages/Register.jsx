@@ -171,7 +171,7 @@ export default function Register() {
           </ul>
 
           <div className="mt-auto pt-10 text-[10px] tracking-[0.28em] uppercase font-bold text-gray-600">
-            &mdash; Kaizer News
+            &mdash; Kaizer X
           </div>
         </div>
       </aside>

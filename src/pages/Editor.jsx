@@ -130,7 +130,7 @@ export default function Editor() {
   const [overlap, setOverlap] = useState(20);
 
   // Follow bar
-  const [fbText, setFbText]   = useState("FOLLOW KAIZER NEWS TELUGU");
+  const [fbText, setFbText]   = useState("FOLLOW KAIZER X TELUGU");
   const [fbTextColor, setFbTextColor] = useState("#ffffff");
   const [fbBg, setFbBg]       = useState("#1a0a2e");
   const [fbTc, setFbTc]       = useState("#ffff00");
@@ -168,7 +168,7 @@ export default function Editor() {
     setOverlap(cs.overlap ?? 20);
 
     const fp = c.follow_params || {};
-    setFbText(fp.follow_text || "FOLLOW KAIZER NEWS TELUGU");
+    setFbText(fp.follow_text || "FOLLOW KAIZER X TELUGU");
     setFbTextColor(fp.follow_text_color || "#ffffff");
     setFbBg(fp.bg_color || "#1a0a2e");
     setFbTc(fp.text_color || "#ffff00");
@@ -1108,9 +1108,11 @@ export default function Editor() {
         onClose={() => setPublishOpen(false)}
         clip={clip}
         jobId={jobId}
-        onPublished={() => {
+        onPublished={(res) => {
           setPublishOpen(false);
-          navigate("/uploads");
+          // Deep-link to the job-wise publish audit page when the backend
+          // returned a publish_task_id; otherwise fall back to the list.
+          navigate(res?.publish_task_id ? `/uploads/${res.publish_task_id}` : "/uploads");
         }}
       />
       <DownloadModal

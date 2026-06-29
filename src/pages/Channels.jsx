@@ -9,6 +9,7 @@ import { api } from "../api/client";
 import Modal from "../components/Modal";
 import ChannelForm from "../components/ChannelForm";
 import YouTubeAccountsPanel from "../components/YouTubeAccountsPanel";
+import PostizDeliveryPanel from "../components/PostizDeliveryPanel";
 import ChannelGroupsManager from "../components/ChannelGroupsManager";
 
 export default function Channels() {
@@ -22,7 +23,8 @@ export default function Channels() {
     if (typeof window !== "undefined" && window.location.hash === "#styles") return "styles";
     return "accounts";
   });
-  const [channels, setChannels]   = useState([]);
+  const [channels, setChannels]   = useState([]);   // SEO style references (connected:false)
+  const [accountsChannels, setAccountsChannels] = useState([]); // connected accounts (for tab count)
   const [loading,  setLoading]    = useState(true);
   const [error,    setError]      = useState("");
   const [notice,   setNotice]     = useState("");
@@ -75,11 +77,17 @@ export default function Channels() {
     setLoading(true);
     setError("");
     try {
-      const [data, accts] = await Promise.all([
-        api.listChannels(),
+      // Two kind-scoped fetches so connected accounts can NEVER leak into
+      // the SEO Settings (style references) tab. `styles` feeds the
+      // ChannelForm + style-reference grid; `accounts` is only used for
+      // the YouTube Accounts tab count (the panel itself owns its data).
+      const [styleList, acctList, accts] = await Promise.all([
+        api.listChannels({ kind: "styles" }),
+        api.listChannels({ kind: "accounts" }),
         api.listYtAccounts().catch(() => []),
       ]);
-      setChannels(data || []);
+      setChannels(styleList || []);
+      setAccountsChannels(acctList || []);
       setYtAccounts(accts || []);
     } catch (e) {
       setError(e.message || "Failed to load channels");
@@ -228,13 +236,13 @@ export default function Channels() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-100 flex items-center gap-2">
             {activeTab === "accounts"
-              ? <><Youtube className="text-red-500" size={24} /> My YouTube Accounts</>
-              : <><Palette className="text-accent2" size={24} /> Style References</>}
+              ? <><Youtube className="text-red-500" size={24} /> YouTube Accounts</>
+              : <><Palette className="text-accent2" size={24} /> SEO Settings</>}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             {activeTab === "accounts"
-              ? <>Real YouTube channels Kaizer can publish to. Connect via Google OAuth — pick your <strong className="text-gray-300">parent Gmail</strong> in the picker to grab every Brand Account in one click.</>
-              : <>Each profile is a <strong className="text-gray-300">writing style template</strong> that teaches Gemini how to generate SEO (titles, hashtags, descriptions) in that channel's voice. References do <strong>not</strong> upload anywhere — they style the SEO only.</>}
+              ? <>The channels you publish to. Each carries its own logo, watermark and social links.</>
+              : <>Competitor channels we study to write your titles &amp; descriptions in their style — never published to.</>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -251,7 +259,7 @@ export default function Channels() {
               onClick={() => setModal({ mode: "create" })}
               className="bg-accent hover:bg-accent2 text-white text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
             >
-              <Plus size={14} /> New Style Reference
+              <Plus size={14} /> Add Competitor
             </button>
           )}
         </div>
@@ -274,7 +282,7 @@ export default function Channels() {
           }`}
         >
           <Youtube size={14} />
-          My accounts
+          YouTube Accounts
           <span className="ml-1 text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-gray-400">
             {ytAccounts?.length || 0}
           </span>
@@ -288,7 +296,7 @@ export default function Channels() {
           }`}
         >
           <Palette size={14} />
-          Style references
+          SEO Settings
           <span className="ml-1 text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-gray-400">
             {channels?.length || 0}
           </span>
@@ -302,6 +310,9 @@ export default function Channels() {
 
           {/* Channel groups — user-defined presets for publish fan-out */}
           <ChannelGroupsManager ytAccounts={ytAccounts} />
+
+          {/* Postiz 3rd-party delivery (admin) — paste key + bind channels */}
+          <PostizDeliveryPanel />
         </>
       )}
 
@@ -310,12 +321,12 @@ export default function Channels() {
           <div className="flex items-start gap-2">
             <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
             <div>
-              <strong className="text-blue-300">How style references work:</strong>{" "}
-              Style profiles ("TV9 Telugu", "RTV", etc.) are{" "}
-              <strong className="text-gray-100">writing-style templates</strong>, not channels you publish to. They tell
-              Gemini "write SEO like this channel does." A clip rendered with TV9 Telugu's style ends up on{" "}
-              <strong className="text-gray-100">your own channel</strong> — picked in the publish modal — with TV9-style
-              titles, descriptions, and hashtags. You can never upload to a YouTube channel you don't own.
+              <strong className="text-blue-300">How SEO Settings work:</strong>{" "}
+              Add a <strong className="text-gray-100">competitor channel</strong> ("TV9 Telugu", "RTV", etc.), set its
+              title formula &amp; description style, then click <strong className="text-gray-100">Learn</strong> to mine
+              its style. We use it to write your titles, descriptions, and hashtags in that channel's voice — the video
+              still uploads to <strong className="text-gray-100">your own YouTube Account</strong>, picked in the publish
+              modal. Competitor channels are never published to.
             </div>
           </div>
         </div>
@@ -378,17 +389,17 @@ export default function Channels() {
       {activeTab === "styles" && (
         loading && channels.length === 0 ? (
           <div className="flex items-center justify-center py-16 text-gray-500">
-            <Loader2 size={20} className="animate-spin mr-2" /> Loading style references…
+            <Loader2 size={20} className="animate-spin mr-2" /> Loading SEO settings…
           </div>
         ) : channels.length === 0 ? (
           <div className="bg-surface border border-border rounded-lg p-12 text-center">
             <Palette size={40} className="mx-auto text-gray-600 mb-3" />
-            <p className="text-gray-400 mb-4">No style references yet. Create one to define a SEO writing voice (e.g. "TV9 Telugu", "RTV").</p>
+            <p className="text-gray-400 mb-4">No competitors yet. Add one to write your SEO in its style (e.g. "TV9 Telugu", "RTV").</p>
             <button
               onClick={() => setModal({ mode: "create" })}
               className="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded inline-flex items-center gap-1.5"
             >
-              <Plus size={14} /> New Style Reference
+              <Plus size={14} /> Add Competitor
             </button>
           </div>
         ) : (
@@ -419,7 +430,7 @@ export default function Channels() {
       <Modal
         open={modal?.mode === "create"}
         onClose={() => setModal(null)}
-        title="New Style Profile"
+        title="Add Competitor (SEO Settings)"
         size="lg"
       >
         <ChannelForm onSubmit={handleCreate} onCancel={() => setModal(null)} />

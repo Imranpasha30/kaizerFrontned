@@ -4,6 +4,7 @@ import {
   Zap, Crown, Rocket, Info,
 } from "lucide-react";
 import { api } from "../api/client";
+import ComplianceNote, { NoteLink } from "../components/ComplianceNote";
 
 const TIER_ICON = {
   free:    Sparkles,
@@ -130,7 +131,7 @@ export default function Billing() {
           <CreditCard size={18} className="text-accent2" /> Billing & Plans
         </h1>
         <p className="text-sm text-gray-400 mt-1">
-          Pick a plan that matches how many clips you publish a month.  Every tier includes the full Content+Brand Overlay SEO engine — higher tiers unlock more quota and advanced features.
+          Pick a plan that matches how many clips you edit a month.  Every tier includes Kaizer's full intelligent editing + AI SEO engine — higher tiers unlock more editing capacity and advanced features.
         </p>
       </header>
 
@@ -198,7 +199,7 @@ export default function Billing() {
                 <div className="grid sm:grid-cols-2 gap-4 mt-4">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-                      Clips this month
+                      Clips edited this month
                     </div>
                     <UsageBar
                       used={mine.usage.clips_used}
@@ -213,12 +214,12 @@ export default function Billing() {
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-                      Connected YouTube accounts
+                      Connected integrations
                     </div>
                     <UsageBar
                       used={mine.usage.yt_accounts_used}
                       limit={mine.usage.yt_accounts_limit}
-                      unit="accounts"
+                      unit="integrations"
                     />
                   </div>
                 </div>
@@ -316,50 +317,19 @@ export default function Billing() {
             })}
           </div>
 
-          {/* Feature comparison */}
-          <section className="mb-10">
-            <h2 className="text-sm font-semibold text-gray-200 mb-3">Feature comparison</h2>
-            <div className="overflow-x-auto bg-[#0c0c0c] border border-border rounded">
-              <table className="w-full text-xs">
-                <thead className="bg-black/50 text-[10px] uppercase tracking-wider text-gray-500">
-                  <tr>
-                    <th className="text-left px-3 py-2">Feature</th>
-                    {tierList.map((p) => (
-                      <th key={p.key} className={`px-3 py-2 text-center ${p.key === currentKey ? "text-accent2" : "text-gray-400"}`}>
-                        {p.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {[
-                    ["Clips / month",        "clips_per_month",     (v) => fmtLimit(v)],
-                    ["YouTube accounts",     "yt_accounts",          (v) => fmtLimit(v)],
-                    ["Languages supported",  "languages",           (v) => String(v)],
-                    ["Brand kits",           "brand_kits",          (v) => fmtLimit(v)],
-                    ["Veo 3 video gen / mo", "veo_videos_monthly",  (v) => fmtLimit(v)],
-                    ["Advanced AI SEO",      "advanced_seo",        (v) => v ? "✓" : "—"],
-                    ["Publishing Plans",     "campaigns_enabled",   (v) => v ? "✓" : "—"],
-                    ["Channel groups",       "channel_groups",      (v) => v ? "✓" : "—"],
-                    ["Thumbnail A/B",        "thumb_ab",            (v) => v ? "✓" : "—"],
-                    ["Analytics history",    "analytics_days",      (v) => v === -1 ? "Unlimited" : `${v} days`],
-                    ["Team seats",           "team_seats",          (v) => String(v)],
-                    ["Priority support",     "priority_support",    (v) => v ? "✓" : "—"],
-                    ["BYOK (own YT quota)",  "byok",                (v) => v ? "✓" : "—"],
-                  ].map(([label, key, fmt]) => (
-                    <tr key={key} className="text-gray-300">
-                      <td className="px-3 py-1.5 text-gray-400">{label}</td>
-                      {tierList.map((p) => (
-                        <td key={p.key} className="px-3 py-1.5 text-center tabular-nums">
-                          {fmt(p[key])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          {/* Pricing compliance disclaimer (YouTube API Services ToS) */}
+          <ComplianceNote className="mb-10">
+            <p>
+              Your subscription pays for Kaizer's own editing and AI features, <strong className="text-gray-400">not</strong> for
+              access to YouTube or YouTube API Services. Publishing to your connected channels is available on
+              every plan including the free plan, and is never charged separately. You can always upload free
+              through <NoteLink href="https://studio.youtube.com">YouTube Studio</NoteLink>.
+            </p>
+            <p>
+              Plan limits refer to clips you generate and edit per month. Kaizer X is not affiliated with or
+              endorsed by YouTube or Google.
+            </p>
+          </ComplianceNote>
 
           {/* Business model explainer — deliberately plain-English so power
               users understand why the pricing is structured this way. */}
@@ -379,17 +349,17 @@ function BusinessModelExplainer() {
       </h2>
       <div className="space-y-3">
         <p>
-          <strong className="text-gray-100">Kaizer is the full news-video pipeline</strong> — import raw footage, auto-generate branded clips in 9 languages, write ≥95/100 SEO with Google-grounded research, and fan out to every YouTube channel you own with one click.  Your subscription pays for the product + compute + shared YouTube upload quota managed by us.
+          <strong className="text-gray-100">Kaizer is an intelligent editing + AI SEO studio</strong> — import raw footage, auto-edit branded clips in 9 languages, and write ≥95/100 SEO with AI-grounded research.  Your subscription pays for Kaizer's own editing software, AI, and compute — it is the editing and SEO service you're paying for.
         </p>
 
         <div className="grid sm:grid-cols-2 gap-3 mt-2">
           <div className="bg-black/30 border border-border rounded p-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-accent2 mb-1">What we pay for</div>
+            <div className="text-[10px] uppercase tracking-wider text-accent2 mb-1">What you're paying for</div>
             <ul className="space-y-0.5 text-[11px] text-gray-400">
-              <li>• Gemini API (SEO + video analysis + Veo 3)</li>
-              <li>• YouTube Data API quota (shared pool, managed)</li>
-              <li>• Hosting (Railway: backend, Postgres, storage, bandwidth)</li>
-              <li>• Google News / Trends / Autocomplete (free but rate-limited)</li>
+              <li>• Intelligent video editing engine (cuts, layout, branding)</li>
+              <li>• AI SEO generation (Gemini / Claude + grounded research)</li>
+              <li>• Veo 3 AI video generation</li>
+              <li>• Hosting, storage, bandwidth + rendering compute</li>
               <li>• Payment processing (Stripe 2.9% + 30¢)</li>
               <li>• Email + monitoring + support ops</li>
             </ul>
@@ -397,19 +367,19 @@ function BusinessModelExplainer() {
           <div className="bg-black/30 border border-border rounded p-2.5">
             <div className="text-[10px] uppercase tracking-wider text-accent2 mb-1">Why the tiers look like this</div>
             <ul className="space-y-0.5 text-[11px] text-gray-400">
-              <li>• <strong>Starter free</strong> — lets you test before paying.</li>
-              <li>• <strong>Creator $19</strong> — solo channel, 1-2 daily uploads.</li>
-              <li>• <strong>Pro $49</strong> — multi-channel operator, 5-7 daily.</li>
-              <li>• <strong>Agency $199</strong> — teams + unlimited + own YT quota (BYOK) for bulk.</li>
+              <li>• <strong>Starter free</strong> — try the editor before paying.</li>
+              <li>• <strong>Creator $19</strong> — solo creator, a few clips a day.</li>
+              <li>• <strong>Pro $49</strong> — multi-channel operator, higher volume.</li>
+              <li>• <strong>Agency $199</strong> — teams + unlimited editing for bulk.</li>
               <li>• <strong>Yearly discount</strong> funds infra reservations + gives you 2 months free.</li>
             </ul>
           </div>
         </div>
 
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-accent2 mb-1">A note on YouTube's upload quota</div>
+          <div className="text-[10px] uppercase tracking-wider text-accent2 mb-1">Publishing is always free</div>
           <p className="text-[11px] text-gray-400">
-            Every YouTube upload costs 1,600 units out of a daily 10,000-unit pool that YouTube assigns to <em>us</em> as the app owner.  At Starter you share that pool with every other free user; at Pro we prioritize you in a larger extended-quota pool we applied for; at Agency you can also switch on BYOK (Bring Your Own Key) to use your own Google Cloud project's quota for unlimited scale.  This is why heavy uploaders need higher tiers even though the code is the same.
+            Connecting an account and publishing your finished clips to your own connected channels is available on every plan — including the free plan — and is never charged separately.  Plan limits only cap how many clips you <em>generate and edit</em> per month.  You can always upload your exported clips yourself, for free, through each platform's own tools.
           </p>
         </div>
 

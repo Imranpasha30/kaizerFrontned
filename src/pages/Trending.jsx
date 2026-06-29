@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import ComplianceNote, { NoteLink } from "../components/ComplianceNote";
 
 const URGENCY_COLORS = {
   hot:    "bg-red-500/20 text-red-300 border-red-500/30",
@@ -152,7 +153,7 @@ export default function Trending() {
         if (s.state === "done" && s.job_id && s.clip_id) {
           clearInterval(heygenPollersRef.current[topic.id]);
           delete heygenPollersRef.current[topic.id];
-          nav(`/jobs/${s.job_id}/edit/${s.clip_id}`);
+          nav(`/jobs/${s.job_id}/v4-edit`);
         } else if (s.state === "error") {
           clearInterval(heygenPollersRef.current[topic.id]);
           delete heygenPollersRef.current[topic.id];
@@ -269,7 +270,7 @@ export default function Trending() {
       <header className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Radar className="text-accent2" size={22} />
-          <h1 className="text-xl font-semibold text-white">Topic Radar</h1>
+          <h1 className="text-xl font-semibold text-white">Trend Finder</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -288,6 +289,18 @@ export default function Trending() {
           </button>
         </div>
       </header>
+
+      <ComplianceNote className="mb-4">
+        <p>
+          Trend Finder uses only public data from YouTube API Services, such as public video and channel stats
+          and search results. It does not access private analytics and cannot see channels you have not
+          connected. Figures are estimates and may differ from YouTube Studio.
+        </p>
+        <p>
+          Kaizer X is not affiliated with or endorsed by YouTube or Google. Subject to the{" "}
+          <NoteLink href="https://www.youtube.com/t/terms">YouTube Terms of Service</NoteLink>.
+        </p>
+      </ComplianceNote>
 
       {error && (
         <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded flex items-center gap-2">

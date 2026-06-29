@@ -282,7 +282,7 @@ function Cover(){
           <span>·</span>
           <span className="label live"><span className="dot"></span>Filed live</span>
           <span>·</span>
-          <span>By <strong>Kaizer News</strong></span>
+          <span>By <strong>Kaizer X</strong></span>
         </div>
       </Reveal>
 
@@ -348,7 +348,7 @@ function SectionOne(){
       <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:64,alignItems:'start'}}>
         <Reveal>
           <p className="body-text dropcap">
-            <strong>Kaizer News</strong> is an AI video automation platform. It accepts long-form recordings — interviews, podcasts, lectures, raw camera dumps — and produces multiple <em>vertical shorts</em> from them. Once produced, those shorts are published to creators' YouTube channels on their behalf, using the <strong>YouTube Data API v3</strong><FN n="2">YouTube Data API v3 is the official, supported interface for programmatic uploads and metadata edits. Kaizer uses it under standard Google OAuth 2.0 consent flow.</FN>, with the creator's explicit consent. The creator remains in full control: they connect once, choose what ships, and may revoke access at any moment.
+            <strong>Kaizer X</strong> is an AI video automation platform. It accepts long-form recordings — interviews, podcasts, lectures, raw camera dumps — and produces multiple <em>vertical shorts</em> from them. Once produced, those shorts are published to creators' YouTube channels on their behalf, using the <strong>YouTube Data API v3</strong><FN n="2">YouTube Data API v3 is the official, supported interface for programmatic uploads and metadata edits. Kaizer uses it under standard Google OAuth 2.0 consent flow.</FN>, with the creator's explicit consent. The creator remains in full control: they connect once, choose what ships, and may revoke access at any moment.
           </p>
 
           <div style={{height:32}}></div>
@@ -377,7 +377,7 @@ function SectionOne(){
         <Reveal delay={150}>
           <aside style={{display:'flex',flexDirection:'column',gap:28,position:'sticky',top:30}}>
             <div className="marginalia">
-              The unit of work in Kaizer News is not the video. It is the <em>moment</em> — the line worth sharing. The pipeline's job is to find those moments and ship them, eight times a day, while you sleep.
+              The unit of work in Kaizer X is not the video. It is the <em>moment</em> — the line worth sharing. The pipeline's job is to find those moments and ship them, eight times a day, while you sleep.
             </div>
 
             <div className="inset">
@@ -882,7 +882,7 @@ function SectionTrust(){
 
       <Reveal>
         <p className="body-text dropcap" style={{maxWidth:820,marginBottom:36}}>
-          <strong>Kaizer News'</strong> use and transfer of information received from Google APIs adheres to the{' '}
+          <strong>Kaizer X'</strong> use and transfer of information received from Google APIs adheres to the{' '}
           <a className="draw-uline" href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noreferrer" style={{color:'var(--accent)'}} data-cursor="Open">Google API Services User Data Policy</a>, including the Limited Use requirements. When you connect, Google asks the application what it wants. We ask for three things — only three — and tell you, in plain language, what each one unlocks. Authorization is held by Google, not by Kaizer; revoke it in two clicks and the connection is gone.
         </p>
       </Reveal>
@@ -947,8 +947,8 @@ function SectionTrust(){
 /* ===== §VII — Q&A ===== */
 function SectionQA(){
   const items = [
-    {q:"How does Kaizer News access my YouTube channel?", a:"Through Google's standard OAuth 2.0 consent flow. You click 'Connect YouTube' inside the app, Google shows you exactly which scopes are requested, and you approve (or deny). Kaizer never sees your password. Authorization is held by Google; you can revoke at any time from myaccount.google.com/permissions."},
-    {q:"What does Kaizer News do with my data?",         a:"It is used strictly to provide the service: read your channel name to label the connection, render your source video into clips, and upload those clips with the metadata you have approved. Nothing is sold or shared with third parties, and nothing is used to train AI models. This adheres to the Google API Services User Data Policy, including the Limited Use requirements."},
+    {q:"How does Kaizer X access my YouTube channel?", a:"Through Google's standard OAuth 2.0 consent flow. You click 'Connect YouTube' inside the app, Google shows you exactly which scopes are requested, and you approve (or deny). Kaizer never sees your password. Authorization is held by Google; you can revoke at any time from myaccount.google.com/permissions."},
+    {q:"What does Kaizer X do with my data?",         a:"It is used strictly to provide the service: read your channel name to label the connection, render your source video into clips, and upload those clips with the metadata you have approved. Nothing is sold or shared with third parties, and nothing is used to train AI models. This adheres to the Google API Services User Data Policy, including the Limited Use requirements."},
     {q:"Which YouTube API scopes does the app request?", a:"Exactly three: youtube.upload (to publish), youtube.readonly (to display your channel name), and youtube (required by YouTube to attach a custom thumbnail or edit metadata — only on uploads Kaizer created)."},
     {q:"Can I review every clip before it goes live?",   a:"Yes. Every clip waits for your approval by default. You can also turn on per-channel autopilot once you trust the output for a particular brand."},
     {q:"Where is my source video stored?",               a:"On encrypted cloud storage during rendering only. Source files are deleted within 72 hours of the final clip being approved. Rendered clips persist on YouTube, under your account — never under Kaizer's."},
@@ -1041,7 +1041,7 @@ function Closing(){
 
         <div className="rule" style={{borderColor:'rgba(241,233,213,.2)',marginTop:36,marginBottom:18}}></div>
         <div className="meta" style={{display:'flex',flexWrap:'wrap',justifyContent:'space-between',gap:12,color:'rgba(241,233,213,.55)'}}>
-          <span>© {new Date().getFullYear()} Kaizer News · All rights reserved · The Daily Kaizer · Vol. I, No. 1</span>
+          <span>© {new Date().getFullYear()} Kaizer X · All rights reserved · The Daily Kaizer · Vol. I, No. 1</span>
           <span><a href="/privacy" data-cursor="Read">Privacy</a> · <a href="/terms" data-cursor="Read">Terms</a> · <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer" data-cursor="Open">YouTube terms ↗</a> · <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" data-cursor="Open">Google privacy ↗</a></span>
           <span style={{fontStyle:'italic',fontFamily:'Newsreader',color:'rgba(241,233,213,.6)'}}>— Set in Newsreader &amp; Manrope. Printed warm.</span>
         </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link as RLink } from "react-router-dom";
 import { Loader2, AlertCircle, CheckCircle2, Send, Globe } from "lucide-react";
 import { api } from "../api/client";
 
@@ -32,7 +33,20 @@ import { api } from "../api/client";
  *   onChange   : (next) => void
  *   defaultText: pre-filled caption (use SEO title/desc).
  */
-export default function PostizCrossPostSection({ value, onChange, defaultText = "" }) {
+// Match a Postiz integration to one of our Channels/style-profiles by NAME
+// (case-insensitive, trimmed). That channel is the BRAND SOURCE (logo /
+// watermark / socials) for branded Postiz delivery. Returns the channel or
+// undefined when there's no style profile for this Postiz channel.
+export function matchChannelForIntegration(integration, channels) {
+  const key = String(integration?.name || integration?.identifier || "")
+    .trim().toLowerCase();
+  if (!key) return undefined;
+  return (channels || []).find(
+    (c) => String(c?.name || "").trim().toLowerCase() === key
+  );
+}
+
+export default function PostizCrossPostSection({ value, onChange, defaultText = "", channels = [] }) {
   const [status, setStatus] = useState(null);     // {enabled, reason?, providers, integration_count}
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [integrations, setIntegrations] = useState([]);
@@ -52,6 +66,9 @@ export default function PostizCrossPostSection({ value, onChange, defaultText = 
           const list = await api.postizIntegrations();
           if (!alive) return;
           setIntegrations(list || []);
+          // Expose the full integration objects to the parent so it can
+          // resolve names → channels at submit time (for branded routing).
+          onChange({ ...value, integrations: list || [] });
         }
       } catch (e) {
         if (!alive) return;
@@ -158,6 +175,18 @@ export default function PostizCrossPostSection({ value, onChange, defaultText = 
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] text-gray-200 truncate">{i.name || i.identifier}</div>
                   <div className="text-[10px] text-gray-500 capitalize">{i.provider}</div>
+                  {(() => {
+                    const m = matchChannelForIntegration(i, channels);
+                    return m ? (
+                      <div className="text-[10px] text-emerald-400/90 truncate">
+                        ✓ branded as {m.name} (logo + watermark + SEO)
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-yellow-400/90 truncate">
+                        ⚠ no style profile — posts raw (video + SEO, no logo)
+                      </div>
+                    );
+                  })()}
                 </div>
                 {checked && <CheckCircle2 size={12} className="text-purple-400 flex-shrink-0" />}
               </label>
@@ -180,6 +209,33 @@ export default function PostizCrossPostSection({ value, onChange, defaultText = 
           />
         </div>
       )}
+
+      {(() => {
+        // Selected integrations with no matching style profile → these post
+        // RAW (video + SEO, no logo). Offer the "create a style preference"
+        // path the brand spec asks for, otherwise they proceed raw.
+        const unmatchedSelected = integrations.filter(
+          (i) => value.selectedIds.has(i.id) && !matchChannelForIntegration(i, channels)
+        );
+        if (unmatchedSelected.length === 0) return null;
+        return (
+          <div className="mt-3 text-[10px] text-yellow-300/90 bg-yellow-950/20 border border-yellow-900/40 rounded p-2 leading-relaxed">
+            <div className="flex items-start gap-1">
+              <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+              <span>
+                <strong>{unmatchedSelected.length}</strong>{" "}
+                selected channel{unmatchedSelected.length === 1 ? "" : "s"} (
+                {unmatchedSelected.map((i) => i.name || i.identifier).join(", ")}) have no style
+                profile, so they'll post <strong>raw</strong> — video + SEO, no logo/watermark.{" "}
+                <RLink to="/channels" className="text-purple-300 underline">
+                  Create a style profile
+                </RLink>{" "}
+                with the exact channel name to brand them next time.
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       <p className="text-[10px] text-gray-500 mt-2 leading-relaxed flex items-center gap-1">
         <Send size={10} className="text-purple-400" />

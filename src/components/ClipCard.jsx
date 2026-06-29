@@ -12,6 +12,10 @@ export default function ClipCard({ clip, jobId, index }) {
   const [showDownload, setShowDownload] = useState(false);
   const navigate = useNavigate();
   const hasSeo = !!(clip.seo && clip.seo.title);
+  // Per-short selection label. Prefer the top-level fields; fall back to
+  // clip.meta (always served) so labels show without a backend restart.
+  const shortPriority = clip.short_priority ?? clip.meta?.short_priority ?? null;
+  const shortWhy = clip.short_why || clip.meta?.short_why || "";
 
   return (
     <div className="card overflow-hidden group hover:border-border-hover transition-all duration-150">
@@ -50,7 +54,7 @@ export default function ClipCard({ clip, jobId, index }) {
                           bg-emerald-500/95 text-black
                           shadow-lg shadow-emerald-900/40
                           ring-1 ring-emerald-300/40">
-            ★ Bulletin
+            ★ Full Video
           </div>
         ) : (
           <>
@@ -59,7 +63,7 @@ export default function ClipCard({ clip, jobId, index }) {
                             bg-rose-500/95 text-white
                             shadow-lg shadow-rose-900/40
                             ring-1 ring-rose-300/40">
-              Short
+              Short{shortPriority ? ` · #${shortPriority}` : ""}
             </div>
             {clip.frame_type && (
               <div className="absolute bottom-1.5 right-1.5 text-[9px] uppercase tracking-wider
@@ -77,6 +81,14 @@ export default function ClipCard({ clip, jobId, index }) {
         <p className="text-xs text-gray-300 line-clamp-2 leading-relaxed min-h-[2.5rem]">
           {clip.text || <span className="text-gray-600">No text</span>}
         </p>
+        {/* Per-short selection label — why this segment was auto-picked. */}
+        {shortWhy && (
+          <p className="text-[10px] text-accent2/90 leading-snug flex items-start gap-1"
+             title="Why this segment was selected as a short">
+            <Sparkles size={10} className="shrink-0 mt-0.5" />
+            <span>{shortWhy}</span>
+          </p>
+        )}
         {/* Button row — Edit grows but is allowed to shrink below its
             content width via ``min-w-0`` + ``truncate``, so the two
             icon-only action buttons (Publish / Download) on the right
@@ -85,9 +97,9 @@ export default function ClipCard({ clip, jobId, index }) {
             stay perfectly square even when the row is tight. */}
         <div className="flex gap-1 items-stretch">
           <Link
-            to={`/jobs/${jobId}/edit/${clip.id}`}
+            to={`/jobs/${jobId}/v4-edit`}
             className="btn btn-secondary flex-1 min-w-0 flex items-center justify-center gap-1.5 text-xs py-1.5"
-            title={hasSeo ? "Edit clip" : "Edit clip — generate SEO here"}
+            title={hasSeo ? "Edit in canvas editor" : "Edit in canvas editor — generate SEO here"}
           >
             <Edit2 size={12} className="shrink-0" />
             <span className="truncate">Edit</span>
@@ -123,7 +135,11 @@ export default function ClipCard({ clip, jobId, index }) {
         onClose={() => setShowPublish(false)}
         clip={clip}
         jobId={jobId}
-        onPublished={() => navigate("/uploads")}
+        onPublished={(res) =>
+          // Deep-link to the job-wise publish audit page when the backend
+          // returned a publish_task_id; otherwise fall back to the list.
+          navigate(res?.publish_task_id ? `/uploads/${res.publish_task_id}` : "/uploads")
+        }
       />
       <DownloadModal
         open={showDownload}

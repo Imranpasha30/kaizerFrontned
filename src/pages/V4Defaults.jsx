@@ -96,7 +96,7 @@ export default function V4Defaults() {
   return (
     <div className="max-w-3xl mx-auto p-4 sm:p-6">
       <div className="flex items-center gap-3 mb-1">
-        <Link to="/" className="text-gray-500 hover:text-white text-sm flex items-center gap-1">
+        <Link to="/app" className="text-gray-500 hover:text-white text-sm flex items-center gap-1">
           <ArrowLeft size={14} /> Back
         </Link>
       </div>
@@ -211,7 +211,7 @@ export default function V4Defaults() {
               type="text"
               value={d.brand_suffix}
               onChange={(e) => update({ brand_suffix: e.target.value })}
-              placeholder=" | KAIZER NEWS"
+              placeholder=" | KAIZER X"
               className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-sm text-gray-200"
             />
           </Field>
@@ -224,7 +224,7 @@ export default function V4Defaults() {
             type="text"
             value={d.watermark_text}
             onChange={(e) => update({ watermark_text: e.target.value })}
-            placeholder="e.g. KAIZER NEWS"
+            placeholder="e.g. KAIZER X"
             maxLength={30}
             className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-sm text-gray-200"
           />
@@ -253,7 +253,7 @@ export default function V4Defaults() {
           </Field>
         </div>
         <p className="text-[11px] text-gray-500 leading-snug">
-          Painted on every rendered output — bulletin AND every short. The logo comes from
+          Painted on every rendered output — full video AND every short. The logo comes from
           your channel's "VIDEO OVERLAY LOGO" upload; text + opacity + corner are picked here.
         </p>
       </Section>

@@ -1061,6 +1061,7 @@ function HistoryRow({ batch, channels, onCancelStream }) {
   // having to click. Collapsed once everything is terminal.
   const streams = batch.streams || [];
   const hasInFlight = streams.some((s) => !["done", "failed", "canceled"].includes(s.status));
+  const canceledCount = streams.filter((s) => s.status === "canceled").length;
   const [open, setOpen] = useState(hasInFlight);
   const hasStreams = streams.length > 0;
 
@@ -1078,11 +1079,13 @@ function HistoryRow({ batch, channels, onCancelStream }) {
         <span className={
           batch.status === "done"     ? "text-emerald-300" :
           batch.status === "failed"   ? "text-red-300" :
+          batch.status === "canceled" ? "text-gray-500" :
           batch.status === "queued"   ? "text-gray-400" : "text-accent2"
         }>{batch.status}</span>
         <span className="text-gray-500">{batch.total} stream{batch.total === 1 ? "" : "s"}</span>
-        {batch.done > 0   && <span className="text-emerald-400">{batch.done} done</span>}
-        {batch.failed > 0 && <span className="text-red-400">{batch.failed} failed</span>}
+        {batch.done > 0     && <span className="text-emerald-400">{batch.done} done</span>}
+        {batch.failed > 0   && <span className="text-red-400">{batch.failed} failed</span>}
+        {canceledCount > 0  && <span className="text-gray-500">{canceledCount} canceled</span>}
         <span className="ml-auto text-[10px] text-gray-600">
           {batch.created_at ? new Date(batch.created_at).toLocaleString() : ""}
         </span>

@@ -116,7 +116,7 @@ export default function ProgramPreview({
           // Centred "BRIDGE" text on a dark card
           ctx.fillStyle = "#0c0c0c";
           ctx.fillRect(0, 0, w, h);
-          ctx.fillStyle = "#e74c3c";
+          ctx.fillStyle = "#FF4B45";
           ctx.font = "bold 28px Inter, sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";

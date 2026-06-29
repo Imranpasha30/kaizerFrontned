@@ -22,7 +22,10 @@ export default function Login() {
   const { loginEmail, loginGoogle, config, isAuthenticated, loading } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
-  const to  = loc.state?.from || "/app";
+  // Post-login landing → Library (shared company source-video pool).
+  // Existing /app deep links still work because loc.state.from wins when
+  // an unauth visitor was redirected here from a protected route.
+  const to  = loc.state?.from || "/library";
 
   const [email, setEmail] = useState("");
   const [pw,    setPw]    = useState("");
@@ -162,7 +165,7 @@ export default function Login() {
           </ul>
 
           <div className="mt-auto pt-10 text-[10px] tracking-[0.28em] uppercase font-bold text-gray-600">
-            &mdash; Kaizer News
+            &mdash; Kaizer X
           </div>
         </div>
       </aside>

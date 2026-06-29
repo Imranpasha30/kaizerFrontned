@@ -4,6 +4,7 @@ import {
   Home, Plus, Menu, X, Palette, UploadCloud, CalendarClock, LineChart,
   Compass, Zap, LogOut, LogIn, UserPlus, Image as ImageIcon,
   Settings as SettingsIcon, CreditCard, Radio, Shield, Rocket, BarChart3,
+  Library as LibraryIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import ThemeToggle from "./ThemeToggle";
@@ -44,10 +45,10 @@ export default function NavBar() {
     path === "/admin" ? loc.pathname.startsWith("/admin") : loc.pathname === path;
 
   const navLinks = [
+    { to: "/library",       icon: LibraryIcon, label: "Library" },
     { to: "/app",           icon: Home,        label: "Jobs" },
     { to: "/new",           icon: Plus,        label: "New Job" },
     { to: "/quick-publish", icon: Zap,         label: "Quick Publish" },
-    { to: "/express",       icon: Rocket,      label: "Express Mode", badge: "NEW" },
     { to: "/live-studio",   icon: Radio,       label: "Live Studio",  badge: "NEW" },
     { to: "/live",          icon: Radio,       label: "Live", badge: "NEW" },
     { to: "/assets",        icon: ImageIcon,   label: "Assets" },
@@ -55,8 +56,7 @@ export default function NavBar() {
     { to: "/uploads",       icon: UploadCloud, label: "Uploads" },
     { to: "/campaigns",     icon: CalendarClock, label: "Publishing Plans" },
     { to: "/performance",   icon: LineChart,     label: "Insights" },
-    { to: "/trending",      icon: Compass,       label: "Topic Radar" },
-    { to: "/v2-stats",      icon: BarChart3,     label: "V2 Beta stats", badge: "BETA" },
+    { to: "/trending",      icon: Compass,       label: "Trend Finder" },
     ...(user?.is_admin ? [{ to: "/admin", icon: Shield, label: "Admin" }] : []),
   ];
 
@@ -81,8 +81,8 @@ export default function NavBar() {
         <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
           KAIZER
         </div>
-        <span className="text-gray-400 text-sm font-medium tracking-wider">
-          NEWS
+        <span className="text-accent2 text-sm font-black tracking-wider">
+          X
         </span>
       </Link>
 
@@ -204,7 +204,7 @@ export default function NavBar() {
           <div className="bg-accent rounded px-2 py-0.5 text-white font-black text-sm tracking-widest">
             KAIZER
           </div>
-          <span className="text-gray-400 text-sm font-medium tracking-wider">NEWS</span>
+          <span className="text-accent2 text-sm font-black tracking-wider">X</span>
         </Link>
         <button
           onClick={() => setOpen((v) => !v)}

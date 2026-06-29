@@ -68,27 +68,29 @@ function relTime(iso) {
 // Aligned with the admin theme palette: violet+cyan+emerald+amber. Each
 // provider gets a distinct hue + supplemental dash style on its line.
 const COLORS = {
-  gemini:  "#7c3aed",  // violet — top-of-stack provider
-  openai:  "#22c55e",  // emerald
-  youtube: "#06b6d4",  // cyan
-  total:   "#f59e0b",  // amber
-  muted:   "#64748b",
-  grid:    "rgba(148, 163, 184, 0.08)",
-  text:    "#94a3b8",
+  gemini:    "#7c3aed",  // violet — top-of-stack provider
+  openai:    "#22c55e",  // emerald
+  anthropic: "#d97706",  // amber-orange — Claude
+  youtube:   "#06b6d4",  // cyan
+  total:     "#f59e0b",  // amber
+  muted:     "#64748b",
+  grid:      "rgba(148, 163, 184, 0.08)",
+  text:      "#94a3b8",
 };
 
-const DONUT_COLORS = [COLORS.gemini, COLORS.openai, COLORS.youtube, COLORS.total, "#a78bfa", "#ec4899"];
+const DONUT_COLORS = [COLORS.gemini, COLORS.openai, COLORS.anthropic, COLORS.youtube, COLORS.total, "#ec4899"];
 
 // ─── KPI Tile ─────────────────────────────────────────────────────────
 
 function KpiTile({ icon: Icon, label, value, sub, tone = "default", trend, loading }) {
   // Map provider tone → admin theme gradient class
   const gradTone = {
-    default: "",
-    gemini:  "adm-kpi--violet",
-    openai:  "adm-kpi--emerald",
-    youtube: "",       // cyan is default
-    accent:  "adm-kpi--amber",
+    default:   "",
+    gemini:    "adm-kpi--violet",
+    openai:    "adm-kpi--emerald",
+    anthropic: "adm-kpi--amber",
+    youtube:   "",       // cyan is default
+    accent:    "adm-kpi--amber",
   }[tone] || "";
 
   return (
@@ -246,7 +248,7 @@ export default function AdminUsage() {
     for (let i = span - 1; i >= 0; i--) {
       const d = new Date(today.getTime() - i * 86400_000);
       const key = d.toISOString().slice(0, 10);
-      byDay.set(key, { day: key, gemini: 0, openai: 0, youtube: 0, total: 0 });
+      byDay.set(key, { day: key, gemini: 0, openai: 0, anthropic: 0, youtube: 0, total: 0 });
     }
     (data?.timeseries?.gemini || []).forEach((r) => {
       const row = byDay.get(String(r.day).slice(0, 10));
@@ -256,12 +258,16 @@ export default function AdminUsage() {
       const row = byDay.get(String(r.day).slice(0, 10));
       if (row) row.openai = Number(r.cost_usd || 0);
     });
+    (data?.timeseries?.anthropic || []).forEach((r) => {
+      const row = byDay.get(String(r.day).slice(0, 10));
+      if (row) row.anthropic = Number(r.cost_usd || 0);
+    });
     (data?.timeseries?.youtube || []).forEach((r) => {
       const row = byDay.get(String(r.day).slice(0, 10));
       if (row) row.youtube = Number(r.quota || 0);
     });
     const rows = Array.from(byDay.values());
-    rows.forEach((r) => { r.total = +(r.gemini + r.openai).toFixed(4); });
+    rows.forEach((r) => { r.total = +(r.gemini + r.openai + r.anthropic).toFixed(4); });
     // Show last 14 ticks on the X axis for a clean look — full series still
     // renders for accurate area under the curve.
     return rows;
@@ -271,12 +277,14 @@ export default function AdminUsage() {
     if (!data) return [];
     const g = Number(data?.overview?.gemini?.window_cost_usd || 0);
     const o = Number(data?.overview?.openai?.window_cost_usd || 0);
+    const a = Number(data?.overview?.anthropic?.window_cost_usd || 0);
     // YouTube isn't $-priced, but quota burn against the cap is a useful
     // "spend" proxy — show it as % of the daily cap for the day-mix donut.
     const ytPct = Number(data?.overview?.youtube?.today_pct || 0);
     return [
       { name: "Gemini", value: +g.toFixed(4), display: fmtMoney(g) },
       { name: "OpenAI", value: +o.toFixed(4), display: fmtMoney(o) },
+      { name: "Claude",  value: +a.toFixed(4), display: fmtMoney(a) },
       { name: "YouTube quota", value: ytPct,  display: `${ytPct.toFixed(1)}% of cap` },
     ].filter((r) => r.value > 0);
   }, [data]);
@@ -336,13 +344,13 @@ export default function AdminUsage() {
       )}
 
       {/* ─── KPI strip ──────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
         <KpiTile
           icon={DollarSign}
           tone="accent"
           label="Today's AI spend"
           value={fmtMoney(data?.overview?.total_cost_today_usd)}
-          sub="Gemini + OpenAI"
+          sub="Gemini + OpenAI + Claude"
           loading={loading}
         />
         <KpiTile
@@ -362,6 +370,14 @@ export default function AdminUsage() {
           loading={loading}
         />
         <KpiTile
+          icon={Sparkles}
+          tone="anthropic"
+          label="Claude today"
+          value={fmtMoney(data?.overview?.anthropic?.today_cost_usd)}
+          sub={`${fmtInt(data?.overview?.anthropic?.today_calls)} calls`}
+          loading={loading}
+        />
+        <KpiTile
           icon={Youtube}
           tone="youtube"
           label="YouTube quota used"
@@ -373,7 +389,7 @@ export default function AdminUsage() {
           icon={TrendingUp}
           label={`${days}-day total`}
           value={fmtMoney(data?.overview?.total_cost_window_usd)}
-          sub={`${fmtInt((data?.overview?.gemini?.window_calls || 0) + (data?.overview?.openai?.window_calls || 0))} calls`}
+          sub={`${fmtInt((data?.overview?.gemini?.window_calls || 0) + (data?.overview?.openai?.window_calls || 0) + (data?.overview?.anthropic?.window_calls || 0))} calls`}
           loading={loading}
         />
         <KpiTile
@@ -404,6 +420,10 @@ export default function AdminUsage() {
                       <stop offset="0%"  stopColor={COLORS.openai} stopOpacity={0.4} />
                       <stop offset="100%" stopColor={COLORS.openai} stopOpacity={0} />
                     </linearGradient>
+                    <linearGradient id="anFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"  stopColor={COLORS.anthropic} stopOpacity={0.4} />
+                      <stop offset="100%" stopColor={COLORS.anthropic} stopOpacity={0} />
+                    </linearGradient>
                   </defs>
                   <CartesianGrid stroke={COLORS.grid} strokeDasharray="3 3" />
                   <XAxis
@@ -421,8 +441,9 @@ export default function AdminUsage() {
                   />
                   <Tooltip content={(p) => <ChartTooltip {...p} formatter={fmtMoney} />} />
                   <Legend wrapperStyle={{ fontSize: 11, color: COLORS.text }} iconType="circle" />
-                  <Area type="monotone" dataKey="gemini" name="Gemini"  stroke={COLORS.gemini} fill="url(#gemFill)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="openai" name="OpenAI"  stroke={COLORS.openai} fill="url(#oaFill)"  strokeWidth={2} />
+                  <Area type="monotone" dataKey="gemini"    name="Gemini"  stroke={COLORS.gemini}    fill="url(#gemFill)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="openai"    name="OpenAI"  stroke={COLORS.openai}    fill="url(#oaFill)"  strokeWidth={2} />
+                  <Area type="monotone" dataKey="anthropic" name="Claude"  stroke={COLORS.anthropic} fill="url(#anFill)"  strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             )}

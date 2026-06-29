@@ -290,7 +290,7 @@ function drawTicker(ctx, layout, stories, outputTimeSec, tickerSpeedPxS = 200) {
   const headlines = (stories || [])
     .map((s) => (s.title_native || s.title_english || "").trim())
     .filter(Boolean);
-  const text = (headlines.join("  ★  ") || "KAIZER NEWS") + "    ";
+  const text = (headlines.join("  ★  ") || "KAIZER X") + "    ";
 
   // Need the ticker BG colour from any story's ticker block (server
   // uses the first story's). Falls back to broadcast yellow.

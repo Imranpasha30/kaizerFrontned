@@ -120,7 +120,7 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Kaizer News Telugu"
+            placeholder="Kaizer X Telugu"
             maxLength={255}
             required
             className="mt-1 w-full bg-black/40 border border-border rounded px-2.5 py-1.5 text-gray-100 focus:border-accent focus:outline-none"
@@ -133,7 +133,7 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
             type="text"
             value={handle}
             onChange={(e) => setHandle(e.target.value)}
-            placeholder="@KaizerNewsTelugu"
+            placeholder="@KaizerXTelugu"
             maxLength={100}
             className="mt-1 w-full bg-black/40 border border-border rounded px-2.5 py-1.5 text-gray-100 focus:border-accent focus:outline-none"
           />
@@ -194,7 +194,7 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         <span className="text-xs text-gray-500 block mb-1">
           Always included in the 30-tag output. The AI fills the rest.
         </span>
-        <TagInput value={fixedTags} onChange={setFixedTags} placeholder="telugu news, kaizer news" />
+        <TagInput value={fixedTags} onChange={setFixedTags} placeholder="telugu news, kaizer x" />
       </div>
 
       <div>
@@ -214,7 +214,7 @@ export default function ChannelForm({ initial = null, onSubmit, onCancel }) {
         <span className="text-xs text-gray-500 block mb-1">
           Always prepended to every video (branding — usually the channel's own tag).
         </span>
-        <TagInput value={mandatoryHashtags} onChange={setMandatoryHashtags} placeholder="#KaizerNews" hashtagMode />
+        <TagInput value={mandatoryHashtags} onChange={setMandatoryHashtags} placeholder="#KaizerX" hashtagMode />
       </div>
 
       {/* Logo moved to the YouTube Account cards at the top of the page —

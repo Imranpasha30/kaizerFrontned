@@ -17,9 +17,9 @@ export default function ClipEnginePreview({ size = "full", className = "" }) {
   const wrap = sizeStyles[size] || sizeStyles.full;
 
   const tiles = [
-    { id: 0, format: "9:16", label: "REEL",  color: "#e74c3c", delay: 0   },
-    { id: 1, format: "9:16", label: "REEL",  color: "#e74c3c", delay: 80  },
-    { id: 2, format: "1:1",  label: "IG",    color: "#f39c12", delay: 160, live: true },
+    { id: 0, format: "9:16", label: "REEL",  color: "#FF4B45", delay: 0   },
+    { id: 1, format: "9:16", label: "REEL",  color: "#FF4B45", delay: 80  },
+    { id: 2, format: "1:1",  label: "IG",    color: "#F5C518", delay: 160, live: true },
     { id: 3, format: "16:9", label: "SHORT", color: "#3aa0c9", delay: 240 },
     { id: 4, format: "16:9", label: "SHORT", color: "#3aa0c9", delay: 320 },
   ];
@@ -43,10 +43,10 @@ export default function ClipEnginePreview({ size = "full", className = "" }) {
           ))}
           {/* scene blocks */}
           {[
-            { l: 6,  w: 10, c: "rgba(231,76,60,0.35)" },
+            { l: 6,  w: 10, c: "rgba(255, 75, 69,0.35)" },
             { l: 22, w: 14, c: "rgba(243,156,18,0.32)" },
             { l: 42, w: 8,  c: "rgba(58,160,201,0.32)" },
-            { l: 58, w: 16, c: "rgba(231,76,60,0.28)" },
+            { l: 58, w: 16, c: "rgba(255, 75, 69,0.28)" },
             { l: 80, w: 12, c: "rgba(243,156,18,0.30)" },
           ].map((b, i) => (
             <span

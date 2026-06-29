@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Youtube, Plus, CheckCircle2, Loader2, RefreshCw, AlertCircle, Users,
-  Image as ImageIcon, X, Unlink, Trash2,
+  Image as ImageIcon, X, Unlink, Trash2, Copy,
 } from "lucide-react";
 import { api } from "../api/client";
 import LogoPicker from "./LogoPicker";
@@ -41,6 +41,23 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
   const [wmPos, setWmPos]         = useState("top-right");
   const [socials, setSocials]     = useState({});
   const [brandSaving, setBrandSaving] = useState(false);
+  // Per-channel intro video — registered alongside logo/watermark so it's
+  // not forgotten. Prepended to every clip published to this channel.
+  const [introAssetId, setIntroAssetId]   = useState(null);
+  const [introUploading, setIntroUploading] = useState(false);
+  const [introPct, setIntroPct]           = useState(0);
+  // "Choose an existing intro" picker — lists previously-uploaded intros
+  // (Assets / channel_intros folder) so the user can reuse one without
+  // re-uploading the same file.
+  const [introPicker, setIntroPicker]     = useState(false);
+  const [introList, setIntroList]         = useState([]);
+  const [introListLoading, setIntroListLoading] = useState(false);
+  // Per-channel YouTube publish defaults (set here so you never open Studio).
+  const [ytCategory, setYtCategory]       = useState("");
+  const [ytPlaylist, setYtPlaylist]       = useState("");
+  const [ytLanguage, setYtLanguage]       = useState("");
+  const [ytMadeForKids, setYtMadeForKids] = useState(false);
+  const [ytLicense, setYtLicense]         = useState("");
 
   function openBrandEditor(acc) {
     setBrandAcc(acc);
@@ -48,8 +65,103 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
     setWmOp(acc.watermark_opacity ?? 0.35);
     setWmPos(acc.watermark_position || "top-right");
     setSocials(acc.socials || {});
+    setIntroAssetId(acc.intro_asset_id ?? null);
+    setIntroPicker(false);
+    setYtCategory(acc.yt_category_id || "");
+    setYtPlaylist(acc.yt_playlist_id || "");
+    setYtLanguage(acc.yt_default_language || "");
+    setYtMadeForKids(!!acc.yt_made_for_kids);
+    setYtLicense(acc.yt_license || "");
   }
-  function closeBrandEditor() { setBrandAcc(null); }
+
+  async function onIntroFile(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setIntroUploading(true); setError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("kind", "video");
+      fd.append("folder_path", "channel_intros");
+      const asset = await api.uploadAsset(fd, (pct) => setIntroPct(pct));
+      setIntroAssetId(asset?.id ?? null);
+    } catch (err) {
+      setError(err.message || "Intro upload failed");
+    } finally {
+      setIntroUploading(false); setIntroPct(0);
+    }
+  }
+  async function loadIntroAssets() {
+    setIntroListLoading(true);
+    try {
+      // Intros live in the "channel_intros" folder; fall back to filtering
+      // any video asset if the folder query returns nothing.
+      let rows = await api.listAssets("channel_intros").catch(() => []);
+      if (!Array.isArray(rows) || rows.length === 0) {
+        const all = await api.listAssets().catch(() => []);
+        rows = (all || []).filter((a) => {
+          const m = (a.mime || "").toLowerCase();
+          const fn = (a.filename || "").toLowerCase();
+          return m.startsWith("video/") || /\.(mp4|webm|mov|mkv)$/.test(fn);
+        });
+      }
+      setIntroList(rows || []);
+    } catch {
+      setIntroList([]);
+    } finally {
+      setIntroListLoading(false);
+    }
+  }
+
+  function closeBrandEditor() { setBrandAcc(null); setIntroPicker(false); }
+
+  // Bulk "copy branding to other channels" modal state. Source = the card
+  // whose branding we copy FROM; targets = other channels to copy ONTO.
+  const [copyAcc, setCopyAcc]       = useState(null);
+  const [copyFields, setCopyFields] = useState({ logo: true, watermark: true, socials: true });
+  const [copyTargets, setCopyTargets] = useState(() => new Set());
+  const [copySaving, setCopySaving] = useState(false);
+
+  function openCopyModal(acc) {
+    setCopyAcc(acc);
+    setCopyFields({ logo: true, watermark: true, socials: true });
+    setCopyTargets(new Set());
+  }
+  function closeCopyModal() { setCopyAcc(null); }
+  function toggleCopyTarget(id) {
+    setCopyTargets((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+  async function applyCopy() {
+    if (!copyAcc?.primary_profile_id) return;
+    const targets = [...copyTargets];
+    if (!copyFields.logo && !copyFields.watermark && !copyFields.socials) {
+      setError("Pick at least one of logo / watermark / socials to copy."); return;
+    }
+    if (targets.length === 0) { setError("Pick at least one target channel."); return; }
+    setCopySaving(true); setError(""); setNotice("");
+    try {
+      const r = await api.bulkBrand({
+        source_channel_id: copyAcc.primary_profile_id,
+        target_channel_ids: targets,
+        copy_logo: copyFields.logo,
+        copy_watermark: copyFields.watermark,
+        copy_socials: copyFields.socials,
+      });
+      setNotice(`Copied ${(r.fields || []).join(" + ") || "branding"} from `
+        + `${copyAcc.youtube_channel_title || "source"} to ${r.applied} channel(s).`);
+      closeCopyModal();
+      await load();
+      onRefresh?.();
+    } catch (e) {
+      setError(e.message || "Bulk copy failed");
+    } finally {
+      setCopySaving(false);
+    }
+  }
   async function saveBrand() {
     if (!brandAcc?.primary_profile_id) { closeBrandEditor(); return; }
     setBrandSaving(true);
@@ -59,6 +171,12 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
         watermark_opacity: wmOp,
         watermark_position: wmPos,
         socials,
+        intro_asset_id: introAssetId,
+        yt_category_id: ytCategory || null,
+        yt_playlist_id: ytPlaylist || null,
+        yt_default_language: ytLanguage || null,
+        yt_made_for_kids: ytMadeForKids,
+        yt_license: ytLicense || null,
       });
       closeBrandEditor();
       await load();
@@ -164,7 +282,7 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
     const channelTitle = acc.youtube_channel_title || "this YouTube account";
     const confirmed = window.confirm(
       `Disconnect ${channelTitle}?\n\n` +
-      `Kaizer News will stop being able to upload to this channel. ` +
+      `Kaizer X will stop being able to upload to this channel. ` +
       `Pending or scheduled uploads to it will fail until you re-authorise. ` +
       `For complete revocation, also remove access at ` +
       `https://myaccount.google.com/permissions.\n\n` +
@@ -521,21 +639,7 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                 )}
 
                 <div className="border-t border-border/60 pt-2">
-                  <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-                    Style profiles on this account
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {acc.profiles.map((p) => (
-                      <span
-                        key={p.id}
-                        className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 text-gray-300"
-                        title={`Language: ${p.language}`}
-                      >
-                        {p.is_priority ? "★ " : ""}{p.name}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="text-[10px] text-gray-600 mt-2 flex items-center gap-2 flex-wrap">
+                  <div className="text-[10px] text-gray-600 flex items-center gap-2 flex-wrap">
                     {acc.connected_at && (
                       <span>Linked {new Date(acc.connected_at).toLocaleDateString()}</span>
                     )}
@@ -559,6 +663,21 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                       <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Configured" />
                     )}
                   </button>
+
+                  {/* Copy this channel's branding onto many others at once —
+                      the time-saver when dozens of channels share a logo /
+                      watermark / social links. Only useful with >1 account. */}
+                  {accounts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => openCopyModal(acc)}
+                      disabled={!acc.primary_profile_id}
+                      title="Copy this channel's logo / watermark / socials onto other channels in one click"
+                      className="mt-2 w-full inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-gray-300 hover:text-white hover:bg-white/5 border border-border hover:border-gray-600 rounded-md py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Copy size={11} /> Copy branding to other channels…
+                    </button>
+                  )}
 
                   {/* Disconnect — required by Google's policy that users
                       can withdraw OAuth access in-app. Calls
@@ -716,6 +835,150 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
               </div>
             </div>
 
+            {/* Per-channel intro video (anti-duplicate) */}
+            <div className="mb-4 p-3 rounded border border-border bg-black/30 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Intro video</div>
+              <div className="text-[10px] text-gray-500 leading-relaxed">
+                Prepended to every clip published to this channel. A unique intro per channel
+                makes each upload distinct — this is what stops YouTube treating the same video
+                across channels as a duplicate. Uploads are saved to your Assets for reuse.
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-[11px] ${introAssetId ? "text-emerald-400" : "text-gray-500"}`}>
+                  {introUploading
+                    ? `Uploading… ${introPct}%`
+                    : introAssetId
+                      ? `✓ Intro set (asset #${introAssetId})`
+                      : "No intro set"}
+                </span>
+                {introAssetId && !introUploading && (
+                  <button type="button" onClick={() => setIntroAssetId(null)}
+                    className="text-[10px] text-rose-400 hover:text-rose-300 underline">Remove</button>
+                )}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-accent2 hover:text-accent2/80 cursor-pointer">
+                  <Plus size={12} />
+                  {introAssetId ? "Replace intro (upload from computer)" : "Upload intro from computer"}
+                  <input type="file" accept="video/*" className="hidden"
+                    disabled={introUploading} onChange={onIntroFile} />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIntroPicker((v) => {
+                    const nv = !v;
+                    if (nv && introList.length === 0) loadIntroAssets();
+                    return nv;
+                  })}
+                  className="inline-flex items-center gap-1.5 text-[11px] text-gray-300 hover:text-white"
+                >
+                  <ImageIcon size={12} /> {introPicker ? "Hide saved intros" : "Choose from saved intros"}
+                </button>
+              </div>
+              {introPicker && (
+                <div className="mt-1 rounded border border-border bg-black/40 p-2">
+                  {introListLoading ? (
+                    <div className="text-[11px] text-gray-500 inline-flex items-center gap-1">
+                      <Loader2 size={11} className="animate-spin" /> loading saved intros…
+                    </div>
+                  ) : introList.length === 0 ? (
+                    <div className="text-[11px] text-gray-500 italic">
+                      No saved intros yet — upload one above and it&apos;ll appear here for reuse.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
+                      {introList.map((a) => {
+                        const sel = a.id === introAssetId;
+                        return (
+                          <button
+                            type="button"
+                            key={a.id}
+                            onClick={() => { setIntroAssetId(a.id); setIntroPicker(false); }}
+                            title={a.filename}
+                            className={`relative rounded overflow-hidden border text-left ${
+                              sel ? "border-accent2 ring-2 ring-accent2/40" : "border-border hover:border-border-hover"
+                            }`}
+                          >
+                            <div className="aspect-video bg-black flex items-center justify-center">
+                              {a.thumb_url ? (
+                                <img src={a.thumb_url} alt={a.filename} className="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <ImageIcon size={18} className="text-gray-600" />
+                              )}
+                            </div>
+                            <div className="absolute inset-x-0 bottom-0 bg-black/70 text-[9px] px-1 py-0.5 text-gray-300 truncate">
+                              {a.filename}
+                            </div>
+                            {sel && (
+                              <div className="absolute top-1 left-1 bg-accent2 text-white rounded-full p-0.5">
+                                <CheckCircle2 size={9} />
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Per-channel YouTube publish defaults */}
+            <div className="mb-4 p-3 rounded border border-border bg-black/30 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">YouTube publish defaults</div>
+              <div className="text-[10px] text-gray-500 leading-relaxed">
+                Applied to every video published to this channel — set once so you never open
+                YouTube Studio. (Monetization, comments &amp; remixing stay on YouTube — those
+                aren&apos;t settable via the API. A monetized channel auto-monetizes its uploads.)
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">Category</div>
+                  <select value={ytCategory} onChange={(e) => setYtCategory(e.target.value)}
+                    className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200">
+                    <option value="">Default (News &amp; Politics)</option>
+                    <option value="25">News &amp; Politics</option>
+                    <option value="24">Entertainment</option>
+                    <option value="22">People &amp; Blogs</option>
+                    <option value="27">Education</option>
+                    <option value="28">Science &amp; Technology</option>
+                    <option value="17">Sports</option>
+                    <option value="23">Comedy</option>
+                    <option value="26">Howto &amp; Style</option>
+                    <option value="10">Music</option>
+                    <option value="20">Gaming</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">Video language</div>
+                  <input type="text" value={ytLanguage} onChange={(e) => setYtLanguage(e.target.value)}
+                    placeholder="te" maxLength={10}
+                    className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200" />
+                </label>
+              </div>
+              <label className="block">
+                <div className="text-[10px] text-gray-500 mb-1">Playlist ID (optional — video is added to it after upload)</div>
+                <input type="text" value={ytPlaylist} onChange={(e) => setYtPlaylist(e.target.value)}
+                  placeholder="PLxxxxxxxxxxxxxxxx"
+                  className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200" />
+              </label>
+              <div className="grid grid-cols-2 gap-2 items-end">
+                <label className="block">
+                  <div className="text-[10px] text-gray-500 mb-1">License</div>
+                  <select value={ytLicense} onChange={(e) => setYtLicense(e.target.value)}
+                    className="w-full bg-black/60 border border-border rounded px-2 py-1.5 text-xs text-gray-200">
+                    <option value="">Standard YouTube License</option>
+                    <option value="creativeCommon">Creative Commons</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 pb-1.5 text-[11px] text-gray-300">
+                  <input type="checkbox" checked={ytMadeForKids}
+                    onChange={(e) => setYtMadeForKids(e.target.checked)} />
+                  Made for kids
+                </label>
+              </div>
+            </div>
+
             {/* Per-account socials */}
             <div className="p-3 rounded border border-border bg-black/30">
               <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Social links (injected into description)</div>
@@ -764,6 +1027,120 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
           </div>
         </div>
       )}
+
+      {/* Bulk "copy branding to other channels" modal */}
+      {copyAcc && (() => {
+        const others = accounts.filter(
+          (a) => a.primary_profile_id && a.primary_profile_id !== copyAcc.primary_profile_id
+        );
+        const allSelected = others.length > 0 && others.every((a) => copyTargets.has(a.primary_profile_id));
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 overflow-y-auto py-6"
+            onClick={closeCopyModal}
+          >
+            <div
+              className="bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-100 flex items-center gap-2">
+                  <Copy size={14} className="text-accent2" />
+                  Copy branding from <span className="text-green-300">{copyAcc.youtube_channel_title || copyAcc.name}</span>
+                </h3>
+                <button onClick={closeCopyModal} className="text-gray-500 hover:text-white">
+                  <X size={14} />
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 mb-4 leading-snug">
+                Pick what to copy from this channel, then the channels to copy it onto.
+                Their existing values for the selected items are overwritten; anything not
+                ticked is left untouched.
+              </p>
+
+              {/* What to copy */}
+              <div className="mb-4 p-3 rounded border border-border bg-black/30">
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">What to copy</div>
+                <div className="space-y-1.5">
+                  {[
+                    ["logo",      "Overlay logo",  copyAcc.logo?.filename ? `(${copyAcc.logo.filename})` : "(no logo set)"],
+                    ["watermark", "Watermark",     copyAcc.watermark_text ? `("${copyAcc.watermark_text}")` : "(logo-only / none)"],
+                    ["socials",   "Social links",  Object.values(copyAcc.socials || {}).some(Boolean) ? "(configured)" : "(none set)"],
+                  ].map(([k, label, hint]) => (
+                    <label key={k} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!copyFields[k]}
+                        onChange={(e) => setCopyFields((f) => ({ ...f, [k]: e.target.checked }))}
+                      />
+                      <span className="text-[12px] text-gray-200">{label}</span>
+                      <span className="text-[10px] text-gray-500">{hint}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Target channels */}
+              <div className="p-3 rounded border border-border bg-black/30">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">
+                    Apply to ({copyTargets.size}/{others.length})
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCopyTargets(allSelected ? new Set() : new Set(others.map((a) => a.primary_profile_id)))}
+                    className="text-[11px] text-accent2 hover:text-white"
+                  >
+                    {allSelected ? "Clear all" : "Select all"}
+                  </button>
+                </div>
+                {others.length === 0 ? (
+                  <div className="text-[11px] text-gray-500 italic">No other channels to copy to.</div>
+                ) : (
+                  <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
+                    {others.map((a) => (
+                      <label
+                        key={a.primary_profile_id}
+                        className="flex items-center gap-2 p-1.5 rounded bg-black/30 border border-border/40 cursor-pointer hover:border-gray-600"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={copyTargets.has(a.primary_profile_id)}
+                          onChange={() => toggleCopyTarget(a.primary_profile_id)}
+                        />
+                        {a.thumbnail_url ? (
+                          <img src={a.thumbnail_url} alt="" className="w-6 h-6 rounded-full object-cover bg-black/40 flex-shrink-0"
+                               onError={(e) => { e.target.style.display = "none"; }} />
+                        ) : (
+                          <Youtube size={12} className="text-red-500/70 flex-shrink-0" />
+                        )}
+                        <span className="text-[12px] text-gray-200 truncate flex-1" title={a.youtube_channel_title}>
+                          {a.youtube_channel_title || a.name}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={closeCopyModal} className="btn btn-secondary text-xs py-1 px-3" disabled={copySaving}>
+                  Cancel
+                </button>
+                <button
+                  onClick={applyCopy}
+                  disabled={copySaving || copyTargets.size === 0}
+                  className="btn btn-primary text-xs py-1 px-3 flex items-center gap-1 disabled:opacity-50"
+                >
+                  {copySaving
+                    ? (<><Loader2 size={11} className="animate-spin" /> applying…</>)
+                    : `Apply to ${copyTargets.size} channel${copyTargets.size === 1 ? "" : "s"}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Logo editor modal — overlay for the YT account being edited */}
       {logoAcc && (

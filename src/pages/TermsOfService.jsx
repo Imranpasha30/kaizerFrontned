@@ -27,7 +27,7 @@ export default function TermsOfService() {
         <div className="prose prose-sm max-w-none space-y-6 leading-relaxed text-[15px]">
           <p>
             These Terms of Service (&ldquo;<strong>Terms</strong>&rdquo;) govern your
-            use of <strong>Kaizer News</strong> (&ldquo;<strong>Kaizer</strong>&rdquo;,
+            use of <strong>Kaizer X</strong> (&ldquo;<strong>Kaizer</strong>&rdquo;,
             &ldquo;<strong>we</strong>&rdquo;, &ldquo;<strong>us</strong>&rdquo;, &ldquo;<strong>our</strong>&rdquo;)
             and any related services (the &ldquo;<strong>Service</strong>&rdquo;) operated by
             us. By creating an account or using the Service, you agree to
@@ -36,7 +36,7 @@ export default function TermsOfService() {
 
           <h2 className="text-xl font-semibold mt-10 mb-3">1. The Service</h2>
           <p>
-            Kaizer News is a SaaS platform that helps YouTube creators
+            Kaizer X is a SaaS platform that helps YouTube creators
             transform long-form videos into short, vertical clips with
             AI-generated captions and SEO metadata, and publish those clips
             to YouTube channels they own and have authorised.
@@ -172,7 +172,7 @@ export default function TermsOfService() {
           <h2 className="text-xl font-semibold mt-10 mb-3">8. Intellectual property</h2>
           <p>
             The Service, including its software, design, branding, and
-            documentation, is owned by Kaizer News and is protected by
+            documentation, is owned by Kaizer X and is protected by
             copyright, trademark, and other intellectual-property laws.
             Nothing in these Terms grants you any right to our trademarks.
           </p>
@@ -188,7 +188,7 @@ export default function TermsOfService() {
 
           <h2 className="text-xl font-semibold mt-10 mb-3">10. Limitation of liability</h2>
           <p className="uppercase text-xs">
-            To the maximum extent permitted by law, Kaizer News and its
+            To the maximum extent permitted by law, Kaizer X and its
             officers, employees, and agents will not be liable for any
             indirect, incidental, special, consequential, or punitive
             damages, or for lost profits, revenue, or data, arising out of
@@ -200,7 +200,7 @@ export default function TermsOfService() {
 
           <h2 className="text-xl font-semibold mt-10 mb-3">11. Indemnity</h2>
           <p>
-            You agree to defend and indemnify Kaizer News from any claim,
+            You agree to defend and indemnify Kaizer X from any claim,
             loss, or expense (including reasonable legal fees) arising out
             of your Content, your breach of these Terms, or your violation
             of any third-party rights.
@@ -219,7 +219,7 @@ export default function TermsOfService() {
           <h2 className="text-xl font-semibold mt-10 mb-3">13. Governing law</h2>
           <p>
             These Terms are governed by the laws of India (or the
-            jurisdiction in which Kaizer News is incorporated, if
+            jurisdiction in which Kaizer X is incorporated, if
             different), without regard to conflict-of-law principles. Any
             disputes will be resolved in the courts of that jurisdiction.
           </p>
@@ -243,7 +243,7 @@ export default function TermsOfService() {
         </div>
 
         <div className="mt-16 pt-6 border-t border-gray-200 text-xs text-gray-400 text-center">
-          © {new Date().getFullYear()} Kaizer News. All rights reserved.
+          © {new Date().getFullYear()} Kaizer X. All rights reserved.
         </div>
       </div>
     </div>

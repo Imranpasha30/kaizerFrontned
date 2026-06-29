@@ -20,7 +20,7 @@
   pointer-events: none;
   background: radial-gradient(
     600px circle at var(--cursor-x) var(--cursor-y),
-    rgba(231, 76, 60, 0.06),
+    rgba(255, 75, 69, 0.06),
     transparent 70%
   );
   transition: opacity 220ms ease;
@@ -44,7 +44,7 @@
   left: 0;
   width: 36px;
   height: 36px;
-  border: 1.5px solid rgba(231, 76, 60, 0.55);
+  border: 1.5px solid rgba(255, 75, 69, 0.55);
   border-radius: 999px;
   transform: translate3d(-50%, -50%, 0);
   mix-blend-mode: difference;
@@ -61,7 +61,7 @@
   left: 0;
   width: 6px;
   height: 6px;
-  background: #e74c3c;
+  background: #FF4B45;
   border-radius: 999px;
   transform: translate3d(-50%, -50%, 0);
   pointer-events: none;
@@ -72,7 +72,7 @@
 .cursor-ring.is-interactive {
   width: 64px;
   height: 64px;
-  border-color: rgba(231, 76, 60, 0.75);
+  border-color: rgba(255, 75, 69, 0.75);
 }
 
 /* Text-mode: thin tall I-beam instead of the ring+dot pair. */
@@ -80,7 +80,7 @@
   width: 3px;
   height: 28px;
   border-radius: 1px;
-  background: rgba(231, 76, 60, 0.85);
+  background: rgba(255, 75, 69, 0.85);
   border-color: transparent;
 }
 .cursor-ring.is-text + .cursor-dot {

@@ -172,7 +172,7 @@ function FollowBarPreview({
           maxHeight: txtH - topMy,
           overflow: "hidden",
         }}>
-          {text || "KAIZER NEWS"}
+          {text || "KAIZER X"}
         </div>
       </div>
 
@@ -214,7 +214,7 @@ function FollowBarPreview({
           letterSpacing: 1,
           textShadow: "1px 1px 2px rgba(0,0,0,0.5)",
         }}>
-          {followText || "FOLLOW KAIZER NEWS TELUGU"}
+          {followText || "FOLLOW KAIZER X TELUGU"}
         </span>
       </div>
     </div>
@@ -283,7 +283,7 @@ function TornCardPreview({
           maxHeight: textH - 8,
           overflow: "hidden",
         }}>
-          {text || "KAIZER NEWS"}
+          {text || "KAIZER X"}
         </div>
       </div>
 

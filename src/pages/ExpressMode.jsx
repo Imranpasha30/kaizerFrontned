@@ -70,7 +70,7 @@ export default function ExpressMode() {
   const [colorGrade,   setColorGrade]  = useState("subtle"); // off | subtle | cinematic | news-vivid | warm | cool
   const [cinematic,    setCinematic]   = useState(false);    // AI Trim + Shorts
   const [panelColor,   setPanelColor]  = useState("#dc2626"); // Shorts only
-  const [footerText,   setFooterText]  = useState("KAIZER NEWS NETWORK");
+  const [footerText,   setFooterText]  = useState("KAIZER X NETWORK");
   const [shortCount,   setShortCount]  = useState("");        // blank = auto from duration
   const [insetStrategy,    setInsetStrategy]    = useState("frame"); // frame | ai
   const [thumbnailStrategy,setThumbnailStrategy]= useState("none");  // none | ai

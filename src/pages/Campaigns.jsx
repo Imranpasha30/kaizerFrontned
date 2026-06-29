@@ -88,7 +88,10 @@ export default function Campaigns() {
 
   async function load() {
     try {
-      const [cs, chs] = await Promise.all([api.listCampaigns(), api.listChannels()]);
+      // Publishing Plans publish TO your connected YouTube accounts — not to
+      // style references (which are SEO-only and can't be published to). So
+      // the picker shows kind=accounts, respecting the account/style split.
+      const [cs, chs] = await Promise.all([api.listCampaigns(), api.listChannels({ kind: "accounts" })]);
       setRows(cs || []);
       setChannels(chs || []);
       setError("");
@@ -131,9 +134,11 @@ export default function Campaigns() {
     }
   }
 
+  // Prefer the REAL YouTube channel title over the legacy "Personal N"
+  // profile placeholder so the user sees the account they actually publish to.
   const channelLabel = (id) => {
     const c = channels.find((x) => x.id === id);
-    return c ? c.name : `#${id}`;
+    return c ? (c.youtube_channel_title || c.name) : `#${id}`;
   };
 
   return (
@@ -234,7 +239,7 @@ export default function Campaigns() {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400">
-                    <span className="flex items-center gap-1" title="Style profiles (SEO voice). Upload destination is decided by which one is linked to YouTube."><Youtube size={12} /> {c.channel_ids.length} profile{c.channel_ids.length === 1 ? "" : "s"}</span>
+                    <span className="flex items-center gap-1" title="Connected YouTube accounts this plan publishes to."><Youtube size={12} /> {c.channel_ids.length} channel{c.channel_ids.length === 1 ? "" : "s"}</span>
                     <span className="flex items-center gap-1"><Clock size={12} /> every {c.spacing_minutes}m</span>
                     <span>{c.privacy_status}</span>
                     {c.daily_cap > 0 && <span>cap {c.daily_cap}/day</span>}
@@ -324,12 +329,12 @@ function CampaignForm({ initial, channels, onSave, onCancel }) {
           </div>
 
           <div>
-            <label className="block text-gray-400 mb-1">Target Style Profiles</label>
+            <label className="block text-gray-400 mb-1">Target Channels</label>
             <p className="text-[11px] text-gray-600 mb-2 leading-relaxed">
-              Each profile is a writing-style template. The campaign auto-publishes clips using the profile's SEO style — the actual YouTube channel is whichever account that profile is linked to.
+              Your connected YouTube accounts to publish to. Each clip is uploaded to every account you pick, with that account's own SEO + branding. Style references (SEO-only) aren't shown here — you can't publish to those.
             </p>
             <div className="flex flex-wrap gap-2">
-              {channels.length === 0 && <span className="text-gray-500 text-xs">No style profiles yet.</span>}
+              {channels.length === 0 && <span className="text-gray-500 text-xs">No connected YouTube accounts yet — connect one under YouTube Accounts.</span>}
               {channels.map((c) => (
                 <button
                   key={c.id}
@@ -340,7 +345,7 @@ function CampaignForm({ initial, channels, onSave, onCancel }) {
                       : "bg-white/5 text-gray-300 hover:bg-white/10"
                   }`}
                 >
-                  {c.name}
+                  {c.youtube_channel_title || c.name}
                 </button>
               ))}
             </div>
@@ -367,7 +372,7 @@ function CampaignForm({ initial, channels, onSave, onCancel }) {
               />
               <p className="text-[11px] text-gray-500 mt-1 leading-snug">
                 Max uploads <strong>per calendar day</strong> before overflow parks for tomorrow.
-                Remember fan-out math: {form.channel_ids.length} profile{form.channel_ids.length === 1 ? "" : "s"} × 4 clips = <strong className="text-gray-300">{form.channel_ids.length * 4} uploads</strong> per pipeline run.
+                Remember fan-out math: {form.channel_ids.length} channel{form.channel_ids.length === 1 ? "" : "s"} × 4 clips = <strong className="text-gray-300">{form.channel_ids.length * 4} uploads</strong> per pipeline run.
                 Safe start: <span className="text-gray-400">6–12</span>.
               </p>
             </div>

@@ -1,20 +1,26 @@
 import React from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, Navigate, useParams } from "react-router-dom";
 import NavBar   from "./components/NavBar";
 import Home     from "./pages/Home";
 import NewJob   from "./pages/NewJob";
+import Library           from "./pages/Library";
+import LibraryUpload     from "./pages/LibraryUpload";
+import LibraryCreator    from "./pages/LibraryCreator";
+import LibraryCategories from "./pages/LibraryCategories";
 import JobDetail from "./pages/JobDetail";
-import JobsStats from "./pages/JobsStats";
-import Editor   from "./pages/Editor";
+// Editor.jsx (legacy clip editor) is retired — every job now opens in the
+// canvas editor (V4Editor). The file is kept on disk for one release as a
+// rollback safety net but is no longer imported or routed.
 import V4Editor from "./pages/V4Editor";
+import TemplateBuilder from "./pages/TemplateBuilder";
 import V4Defaults from "./pages/V4Defaults";
 import Channels from "./pages/Channels";
 import Uploads  from "./pages/Uploads";
+import PublishDetail from "./pages/PublishDetail";
 import Campaigns from "./pages/Campaigns";
 import Performance from "./pages/Performance";
 import Trending from "./pages/Trending";
 import QuickPublish from "./pages/QuickPublish";
-import ExpressMode  from "./pages/ExpressMode";
 import LiveStudio   from "./pages/LiveStudio";
 import Assets from "./pages/Assets";
 import Settings from "./pages/Settings";
@@ -84,6 +90,13 @@ function GlobalCursor() {
   return <CursorLayer />;
 }
 
+// Legacy /jobs/:id/edit[/:clipId] -> canvas editor. <Navigate> can't read
+// route params on its own, so this tiny wrapper pulls jobId and redirects.
+function EditRedirect() {
+  const { jobId } = useParams();
+  return <Navigate to={`/jobs/${jobId}/v4-edit`} replace />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -110,24 +123,31 @@ export default function App() {
 
           {/* App routes — ProtectedRoute redirects to /login when auth is required */}
           <Route path="/app"                           element={<ProtectedRoute><Home /></ProtectedRoute>} />
+          <Route path="/library"                       element={<ProtectedRoute><Library /></ProtectedRoute>} />
+          <Route path="/library/upload"                element={<ProtectedRoute><LibraryUpload /></ProtectedRoute>} />
+          <Route path="/library/categories"            element={<ProtectedRoute><LibraryCategories /></ProtectedRoute>} />
+          <Route path="/library/creator/:creatorId"    element={<ProtectedRoute><LibraryCreator /></ProtectedRoute>} />
           <Route path="/new"                           element={<ProtectedRoute><NewJob /></ProtectedRoute>} />
           <Route path="/quick-publish"                 element={<ProtectedRoute><QuickPublish /></ProtectedRoute>} />
-          <Route path="/express"                       element={<ProtectedRoute><ExpressMode /></ProtectedRoute>} />
           <Route path="/live-studio"                   element={<ProtectedRoute><LiveStudio /></ProtectedRoute>} />
           <Route path="/assets"                        element={<ProtectedRoute><Assets /></ProtectedRoute>} />
           <Route path="/settings"                      element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/settings/meta"                 element={<ProtectedRoute><MetaSettings /></ProtectedRoute>} />
           <Route path="/jobs/:jobId"                   element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
-          <Route path="/jobs/:jobId/edit"              element={<ProtectedRoute><Editor /></ProtectedRoute>} />
-          <Route path="/jobs/:jobId/edit/:clipId"      element={<ProtectedRoute><Editor /></ProtectedRoute>} />
+          {/* Legacy editor routes redirect to the canvas editor (old links
+              + bookmarks keep working; the :clipId form drops to job level). */}
+          <Route path="/jobs/:jobId/edit"              element={<ProtectedRoute><EditRedirect /></ProtectedRoute>} />
+          <Route path="/jobs/:jobId/edit/:clipId"      element={<ProtectedRoute><EditRedirect /></ProtectedRoute>} />
           <Route path="/jobs/:jobId/v4-edit"            element={<ProtectedRoute><V4Editor /></ProtectedRoute>} />
+          <Route path="/builder"                        element={<ProtectedRoute><TemplateBuilder /></ProtectedRoute>} />
+          <Route path="/builder/:tid"                   element={<ProtectedRoute><TemplateBuilder /></ProtectedRoute>} />
           <Route path="/v4-defaults"                    element={<ProtectedRoute><V4Defaults /></ProtectedRoute>} />
           <Route path="/channels"                      element={<ProtectedRoute><Channels /></ProtectedRoute>} />
           <Route path="/uploads"                       element={<ProtectedRoute><Uploads /></ProtectedRoute>} />
+          <Route path="/uploads/:publishId"            element={<ProtectedRoute><PublishDetail /></ProtectedRoute>} />
           <Route path="/campaigns"                     element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
           <Route path="/performance"                   element={<ProtectedRoute><Performance /></ProtectedRoute>} />
           <Route path="/trending"                      element={<ProtectedRoute><Trending /></ProtectedRoute>} />
-          <Route path="/v2-stats"                      element={<ProtectedRoute><JobsStats /></ProtectedRoute>} />
           <Route path="/billing"                       element={<ProtectedRoute><Billing /></ProtectedRoute>} />
           <Route path="/live"                          element={<ProtectedRoute><LiveDirector /></ProtectedRoute>} />
           <Route path="/program/:eventId"              element={<ProtectedRoute><ProgramMonitor /></ProtectedRoute>} />

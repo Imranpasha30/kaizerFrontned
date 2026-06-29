@@ -7,6 +7,8 @@ import {
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { PasswordInput } from "../components/ui";
+import AvatarUploader from "../components/AvatarUploader";
+import PostizConnectPanel from "../components/PostizConnectPanel";
 
 /**
  * Settings → Social Links.
@@ -71,9 +73,15 @@ export default function Settings() {
           <GearIcon size={22} className="text-accent2" /> Settings
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Cross-promo links appended to every generated SEO description.
+          Profile picture and cross-promo links appended to every generated SEO description.
         </p>
       </header>
+
+      {/* Profile picture — image or GIF, surfaces next to every library
+          card by this user + on the creator profile page. */}
+      <div className="mb-5 p-5 rounded-2xl border border-border bg-panel">
+        <AvatarUploader/>
+      </div>
 
       {/* How it works */}
       <div className="mb-4 p-3 bg-blue-950/20 border border-blue-900/40 rounded text-xs text-gray-300 flex items-start gap-2">
@@ -168,6 +176,8 @@ export default function Settings() {
           )}
         </>
       )}
+
+      <PostizConnectPanel />
     </div>
   );
 }

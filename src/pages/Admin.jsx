@@ -5,7 +5,7 @@ import {
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
   BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
-  Gauge, Terminal, Star,
+  Gauge, Terminal, Star, Workflow, Brain, Layers,
 } from "lucide-react";
 import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
@@ -16,6 +16,9 @@ import AdminUsage from "./AdminUsage";
 import AdminCapacity from "./AdminCapacity";
 import AdminLogs from "./AdminLogs";
 import AdminV2Dashboard from "./AdminV2Dashboard";
+import AdminPipelineFlow from "./AdminPipelineFlow";
+import AdminLearning from "./AdminLearning";
+import AdminPlanTiers from "./AdminPlanTiers";
 import "../theme/admin-theme.css";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -152,7 +155,7 @@ function usePolling(fn, intervalMs, { enabled = true, deps = [] } = {}) {
  * SparkLine — a polyline of values 0..n with nice padding + last-point dot.
  * `values` is a numeric array.  `max` clamps the Y axis (defaults to data max).
  */
-function SparkLine({ values = [], width = 220, height = 44, color = "#e74c3c", max }) {
+function SparkLine({ values = [], width = 220, height = 44, color = "#FF4B45", max }) {
   const pts = useMemo(() => {
     if (!values.length) return { poly: "", fill: "", last: null };
     const vmax = max != null ? max : Math.max(1, ...values);
@@ -185,7 +188,7 @@ function SparkLine({ values = [], width = 220, height = 44, color = "#e74c3c", m
 /**
  * BarChart — horizontal bars of {label, value} rows.  Good for by-day.
  */
-function BarChart({ data = [], valueKey = "value", labelKey = "label", color = "#e74c3c", format = fmtInt, height = 160 }) {
+function BarChart({ data = [], valueKey = "value", labelKey = "label", color = "#FF4B45", format = fmtInt, height = 160 }) {
   const max = Math.max(1, ...data.map((d) => Number(d[valueKey]) || 0));
   return (
     <div className="flex items-end gap-1" style={{ height }}>
@@ -402,7 +405,7 @@ function OverviewTab() {
           label="RAM"
           value={loading ? "…" : `${Math.round(snap?.ram_percent ?? 0)}%`}
           sublabel={snap ? `${fmtBytes(snap.ram_used_gb)} / ${fmtBytes(snap.ram_total_gb)}` : ""}
-          spark={<SparkLine values={ramVals} max={100} color="#f39c12" />}
+          spark={<SparkLine values={ramVals} max={100} color="#F5C518" />}
         />
         <StatCard
           icon={Server}
@@ -477,7 +480,7 @@ function OverviewTab() {
 // Tab: System
 // ──────────────────────────────────────────────────────────────────────────
 
-function MetricBar({ label, value, suffix = "%", color = "#e74c3c" }) {
+function MetricBar({ label, value, suffix = "%", color = "#FF4B45" }) {
   const v = Math.max(0, Math.min(100, Number(value) || 0));
   return (
     <div>
@@ -525,11 +528,11 @@ function SystemTab() {
             <Database size={14} /> RAM
             {snap && <span className="text-xs font-normal text-gray-500">• {fmtBytes(snap.ram_total_gb)} total</span>}
           </div>
-          <MetricBar label="Used" value={snap?.ram_percent ?? 0} color="#f39c12" />
+          <MetricBar label="Used" value={snap?.ram_percent ?? 0} color="#F5C518" />
           <div className="text-xs text-gray-500">
             {snap ? `${fmtBytes(snap.ram_used_gb)} of ${fmtBytes(snap.ram_total_gb)}` : "—"}
           </div>
-          <SparkLine values={history.map((h) => h.ram)} max={100} color="#f39c12" width={440} height={60} />
+          <SparkLine values={history.map((h) => h.ram)} max={100} color="#F5C518" width={440} height={60} />
         </Card>
 
         <Card className="p-4 space-y-3">
@@ -734,17 +737,43 @@ function UserDrillDownModal({ user, onClose, onUpdated }) {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
   const [togglingAdmin, setTogglingAdmin] = useState(false);
+  // Plan-tier picker (admin can move this user between tiers).
+  const [tiers, setTiers]         = useState([]);
+  const [tierSaving, setTierSaving] = useState(false);
+  const [tierMsg, setTierMsg]     = useState("");
 
   useEffect(() => {
     if (!user) { setDetail(null); return; }
     let alive = true;
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setTierMsg("");
     adminApi.getUser(user.id)
       .then((d) => { if (alive) setDetail(d); })
       .catch((e) => { if (alive) setError(e.message || "Failed to load user"); })
       .finally(() => { if (alive) setLoading(false); });
+    // The tier list for the picker — best-effort, never blocks the modal.
+    adminApi.listPlanTiers()
+      .then((r) => { if (alive) setTiers(r?.tiers || []); })
+      .catch(() => { if (alive) setTiers([]); });
     return () => { alive = false; };
   }, [user]);
+
+  async function handleAssignTier(e) {
+    const v = e.target.value;
+    if (!user || v === "") return;
+    const id = Number(v);
+    if (id === detail?.plan_tier_id) return;
+    setTierSaving(true); setError(""); setTierMsg("");
+    try {
+      const res = await adminApi.assignUserTier(user.id, id);
+      setDetail((d) => (d ? { ...d, plan_tier_id: res.plan_tier_id, plan_tier_name: res.plan_tier_name } : d));
+      setTierMsg(`Moved to ${res.plan_tier_name}`);
+      setTimeout(() => setTierMsg(""), 2500);
+    } catch (err) {
+      setError(err.message || "Failed to assign tier");
+    } finally {
+      setTierSaving(false);
+    }
+  }
 
   async function handleToggleAdmin() {
     if (!user) return;
@@ -784,7 +813,7 @@ function UserDrillDownModal({ user, onClose, onUpdated }) {
             <SafeKV k="last login" v={relTime(user.last_login_at)} />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant={user.is_admin ? "ghost" : "primary"}
               size="sm"
@@ -794,6 +823,27 @@ function UserDrillDownModal({ user, onClose, onUpdated }) {
             >
               {user.is_admin ? "Revoke admin" : "Make admin"}
             </Button>
+
+            {/* Subscription tier — change applies on the user's next request. */}
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-xs text-gray-500 flex items-center gap-1">
+                <Layers size={12} /> Plan tier
+              </span>
+              <select
+                className="ui-input !py-1 !text-xs !w-auto"
+                value={detail?.plan_tier_id != null ? String(detail.plan_tier_id) : ""}
+                onChange={handleAssignTier}
+                disabled={tierSaving || !detail || tiers.length === 0}
+                title="Move this user to a different subscription tier"
+              >
+                {(detail?.plan_tier_id == null) && <option value="">— none —</option>}
+                {tiers.map((t) => (
+                  <option key={t.id} value={String(t.id)}>{t.name}</option>
+                ))}
+              </select>
+              {tierSaving && <Loader2 size={12} className="animate-spin text-gray-400" />}
+              {tierMsg && <span className="text-[11px] text-emerald-400">{tierMsg}</span>}
+            </div>
           </div>
 
           {loading ? (
@@ -802,11 +852,11 @@ function UserDrillDownModal({ user, onClose, onUpdated }) {
             </div>
           ) : detail ? (
             <>
-              {detail.storage_breakdown && (
+              {detail.storage_breakdown_mb && (
                 <div>
                   <div className="text-xs font-semibold text-gray-400 mb-1">Storage breakdown</div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {Object.entries(detail.storage_breakdown).map(([k, v]) => (
+                    {Object.entries(detail.storage_breakdown_mb).map(([k, v]) => (
                       <div key={k} className="bg-panel border border-border rounded px-2 py-1 text-xs">
                         <span className="text-gray-500">{k}: </span>
                         <span className="text-gray-200 font-mono">
@@ -1519,6 +1569,52 @@ function SettingsTab() {
           </div>
         </div>
       )}
+
+      {/* delivery_mode toggle — Postiz auto-fallback (testing | production) */}
+      {settings?.delivery_mode && (
+        <div className="bg-surface border border-border rounded-lg p-4">
+          <div className="flex items-start gap-3 mb-3">
+            <Globe size={18} className="text-amber-400 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-semibold text-gray-100">Delivery mode — Postiz auto-fallback</h3>
+              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                {settings.delivery_mode.description}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 max-w-md">
+            {settings.delivery_mode.options.map((opt) => {
+              const active = settings.delivery_mode.value === opt;
+              const busy = !!saving.delivery_mode;
+              return (
+                <button
+                  key={opt}
+                  onClick={() => !active && update("delivery_mode", opt)}
+                  disabled={busy}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-md border text-xs font-medium transition-colors ${
+                    active
+                      ? opt === "production"
+                        ? "bg-green-600/20 border-green-500 text-green-200"
+                        : "bg-accent/20 border-accent text-accent2"
+                      : "bg-black/30 border-border text-gray-400 hover:border-gray-500"
+                  } disabled:opacity-50`}
+                >
+                  {opt === "production" ? "Production (auto-fallback)" : "Testing (manual)"}
+                  {active && <CheckCircle2 size={12} />}
+                  {busy && active && <Loader2 size={12} className="animate-spin" />}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-[10px] text-gray-600 mt-3 leading-relaxed">
+            Default: <strong className="text-gray-400">{settings.delivery_mode.default}</strong>.
+            <strong> Testing</strong>: channels upload on our quota unless a user explicitly picks Postiz — no fallback.
+            <strong> Production</strong>: channels with a bound Postiz integration auto-fall-back to Postiz when the YouTube daily quota runs out.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1612,7 +1708,10 @@ const TABS = [
   { path: "usage",    label: "AI & quota",  icon: BarChart3,   comp: AdminUsage    },
   { path: "gemini",   label: "Gemini usage",icon: Sparkles,    comp: GeminiTab     },
   { path: "v2",       label: "V2 Beta",     icon: Star,        comp: AdminV2Dashboard },
+  { path: "pipeline", label: "Pipeline Flow", icon: Workflow,  comp: AdminPipelineFlow },
+  { path: "learning", label: "Learning",    icon: Brain,       comp: AdminLearning },
   { path: "live",     label: "Live events", icon: Radio,       comp: LiveEventsTab },
+  { path: "plan-tiers", label: "Plan Tiers", icon: Layers,     comp: AdminPlanTiers },
   { path: "settings", label: "Settings",    icon: SettingsIcon, comp: SettingsTab  },
   { path: "audit",    label: "Audit log",   icon: Shield,      comp: AuditTab      },
 ];

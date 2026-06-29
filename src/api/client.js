@@ -76,9 +76,121 @@ export const api = {
   platforms:     () => req("GET", "/platforms/"),
   frameLayouts:  () => req("GET", "/frame-layouts/"),
   listLanguages: () => req("GET", "/languages/"),
+
+  // ── Custom (developer-uploaded) HTML/CSS templates ──
+  listTemplates:      (opts)     => req("GET",    `/templates/${opts && opts.kind ? `?kind=${encodeURIComponent(opts.kind)}` : ""}`),
+  patchTemplate:      (id, body) => req("PATCH",  `/templates/${id}`, body),
+  rateTemplate:       (id, stars)=> req("POST",   `/templates/${id}/rate`, { stars }),
+  deleteTemplate:     (id)       => req("DELETE", `/templates/${id}`),
+  // ── visual builder ──
+  createBlankTemplate:(body)     => req("POST",   "/templates/blank", body),
+  getTemplate:        (id)       => req("GET",    `/templates/${id}`),
+  saveTemplateHtml:   (id, body) => req("PUT",    `/templates/${id}`, body),
+  forkTemplate:       (id, body) => req("POST",   `/templates/${id}/fork`, body),
+  templatePreviewUrl: (id)       => `${BASE}/templates/${id}/preview`,
+  templateContractUrl: ()        => `${BASE}/templates/contract`,
+  uploadTemplate:     (form, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/templates`);
+    const _tok = getToken();
+    if (_tok) xhr.setRequestHeader("Authorization", `Bearer ${_tok}`);
+    if (onProgress) xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText || "{}"));
+      else { try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
+             catch { reject(new Error(xhr.statusText || "Upload failed")); } }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.send(form);
+  }),
   // V2 (Step 11.2) — STT provider catalog for the "Full Video +
   // Shorts (V2 Beta)" wizard's provider-picker step.
   v2SttProviders: () => req("GET", "/v2/stt/providers/"),
+
+  // ─── Library (shared company source-video pool) ──────────────────
+  // Paginated + filtered + sorted listing.
+  // Params: { q?, category_id?, creator_id?, sort?: "newest"|"trending"|"most_used"|"top_rated", page?, page_size? }
+  listLibrary:        (params={})  => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+    }
+    const tail = qs.toString();
+    return req("GET", `/library/${tail ? "?" + tail : ""}`);
+  },
+  getLibraryItem:     (id)         => req("GET",    `/library/${id}`),
+  deleteLibraryItem:  (id)         => req("DELETE", `/library/${id}`),
+  rateLibraryItem:    (id, stars)  => req("POST",   `/library/${id}/rate`, { stars }),
+  // Anti-download: 60s signed R2 URL minted only via play-ticket call.
+  getLibraryPlayUrl:  (id)         => req("POST",   `/library/${id}/play-ticket`),
+  // Tier-aware download URL. Paid users → original, free users →
+  // watermarked (lazy-rendered + cached on R2). Response includes
+  // `watermarked: bool` so the UI can show the right copy.
+  getLibraryDownloadUrl: (id)      => req("POST",   `/library/${id}/download-ticket`),
+  // Category taxonomy (read = all users; write = admin)
+  listLibraryCategories:   ()                  => req("GET",    "/library/categories"),
+  createLibraryCategory:   (body)              => req("POST",   "/library/categories", body),
+  updateLibraryCategory:   (id, body)          => req("PATCH",  `/library/categories/${id}`, body),
+  deleteLibraryCategory:   (id)                => req("DELETE", `/library/categories/${id}`),
+  // Creator profile + rating
+  getLibraryCreator:       (id, params = {})   => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+    }
+    const tail = qs.toString();
+    return req("GET", `/library/creator/${id}${tail ? "?" + tail : ""}`);
+  },
+  rateCreator:             (id, stars)         => req("POST", `/profile/creators/${id}/rate`, { stars }),
+  // Avatar (image or GIF)
+  uploadAvatar: (file) => {
+    const fd = new FormData(); fd.append("image", file);
+    return req("POST", "/profile/me/avatar", fd, true);
+  },
+  deleteAvatar:            ()                  => req("DELETE", "/profile/me/avatar"),
+  // Two-step upload:
+  //  1. POST /api/library/upload-session  →  { token, endpoint, ... }
+  //     Token is HMAC-signed, single-use, 5-min TTL, bound to caller.
+  //  2. POST the multipart body to the returned `endpoint` (which
+  //     contains the token as a nonce in the URL path). Devtools
+  //     inspection gives nothing reusable: the URL is dead after one
+  //     successful POST or 5 minutes — whichever comes first.
+  uploadLibraryItem: async (form, onProgress) => {
+    // Step 1 — get a fresh session token. Hits role gate + rate limit
+    // + origin check on the backend.
+    const session = await req("POST", "/library/upload-session");
+    if (!session?.endpoint) throw new Error("Could not start upload session");
+
+    // Step 2 — actual upload with progress.
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      // Use the SERVER-supplied endpoint string verbatim. The token
+      // segment changes on every upload, so dumping the URL into a
+      // cURL won't replay.
+      xhr.open("POST", `${BASE}${session.endpoint.replace(/^\/api/, "")}`);
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      const _tok = getToken();
+      if (_tok) xhr.setRequestHeader("Authorization", `Bearer ${_tok}`);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
+          catch { reject(new Error(xhr.statusText || "Upload failed")); }
+        }
+      };
+      xhr.onerror   = () => reject(new Error("Network error — check your connection"));
+      xhr.ontimeout = () => reject(new Error("Upload timed out"));
+      xhr.timeout   = 1200000; // 20 minutes for large library uploads
+      xhr.send(form);
+    });
+  },
 
   // Jobs
   listJobs:     ()           => req("GET",    "/jobs/"),
@@ -156,6 +268,22 @@ export const api = {
     xhr.timeout = 600000;
     xhr.send(form);
   }),
+  // ── Quick Publish wizard (raw-upload clips) ──────────────────────
+  // SEO for a raw-upload clip. mode="manual" persists the user's own
+  // fields; "description" prompts the AI with the user's summary text;
+  // "transcript" runs audio-extract → Deepgram → Gemini server-side
+  // SYNCHRONOUSLY (20–60s — callers should show staged progress).
+  quickSeo:           (clipId, body)  => req("POST", `/clips/${clipId}/quick-seo`, body),
+  // Channel-wise SEO: each connected channel gets its own keyword-tuned
+  // title/tags, applied per channel at publish. body = {mode, channel_ids?}.
+  quickSeoPerChannel: (clipId, body)  => req("POST", `/clips/${clipId}/quick-seo/per-channel`, body || { mode: "per_channel" }),
+  // AI thumbnail from the saved SEO (409 until SEO exists). ~15–40s.
+  quickThumbGenerate: (clipId)        => req("POST", `/clips/${clipId}/quick-thumbnail/generate`, {}),
+  // User-supplied thumbnail — multipart field "image" (jpg/png ≤4MB).
+  quickThumbUpload:   (clipId, form)  => req("POST", `/clips/${clipId}/quick-thumbnail/upload`, form, true),
+  // Wizard resume — everything QuickPublish needs to rehydrate state.
+  quickState:         (clipId)        => req("GET",  `/clips/${clipId}/quick-state`),
+
   rerenderClip: (id, edits)  => req("POST", `/clips/${id}/rerender/`, edits),
   uploadImage:  (id, form)   => req("POST", `/clips/${id}/upload-image/`, form, true),
 
@@ -192,11 +320,22 @@ export const api = {
     req("GET", `/express/status/${jobId}`),
 
   // Channels (phase 1)
-  listChannels:   ()             => req("GET",    "/channels/"),
+  // Optional kind filter: {kind:"accounts"} → only connected YouTube
+  // accounts; {kind:"styles"} → only SEO style references. No arg →
+  // full list (back-compat).
+  listChannels:   (opts = {})    => req("GET",    `/channels/${opts.kind ? `?kind=${opts.kind}` : ""}`),
+
+  // ── Postiz (3rd-party delivery) — admin. Key is env-only; we only
+  // read connectivity status + the integrations to bind, never set it.
+  postizGetConfig:        ()      => req("GET",  "/postiz/config"),
+  postizListIntegrations: ()      => req("GET",  "/postiz/integrations"),
   getChannel:     (id)           => req("GET",    `/channels/${id}/`),
   createChannel:  (payload)      => req("POST",   "/channels/", payload),
   updateChannel:  (id, payload)  => req("PATCH",  `/channels/${id}/`, payload),
   deleteChannel:  (id)           => req("DELETE", `/channels/${id}/`),
+  // Copy branding (logo / watermark / socials) from one channel onto many.
+  // Body: { source_channel_id, target_channel_ids:[], copy_logo, copy_watermark, copy_socials }.
+  bulkBrand:      (payload)      => req("POST",   "/channels/bulk-brand", payload),
 
   // Channel learning corpus (phase 7)
   getChannelCorpus: (id) => req("GET",  `/channels/${id}/corpus`),
@@ -258,6 +397,19 @@ export const api = {
   postizIntegrations:  ()           => req("GET",  "/postiz/integrations"),
   postizSchedule:      (payload)    => req("POST", "/postiz/schedule", payload),
 
+  // ── Postiz per-user channel connect ─────────────────────────────────
+  // Each user connects their OWN socials into our single business Postiz
+  // org; Kaizer owns the per-user mapping so users never log into Postiz.
+  // Default delivery stays native (our quota); binding a channel to Postiz
+  // is opt-in (and, in production mode, the auto-fallback target).
+  postizMeStatus:        ()                       => req("GET",    "/postiz/me/status"),
+  postizMeIntegrations:  ()                       => req("GET",    "/postiz/me/integrations"),
+  postizMeConnect:       (provider, refresh = null) =>
+                                                     req("POST",   "/postiz/me/connect", { provider, refresh }),
+  postizMeFinalize:      ()                       => req("POST",   "/postiz/me/connect/finalize"),
+  postizMeDisconnect:    (iid)                    =>
+                                                     req("DELETE", `/postiz/me/integrations/${encodeURIComponent(iid)}`),
+
   // ── YouTube channel lookup (powers the Style References search) ─────
   // Paste a handle (@TV9Telugu), channel ID (UC…), URL, or free text →
   // backend hits the YouTube Data API and returns name / handle /
@@ -278,6 +430,9 @@ export const api = {
 
   // Publish / Uploads (phase 5)
   publishClip:    (clipId, payload) => req("POST",   `/clips/${clipId}/publish`, payload),
+  // Which of these clips are already published, per channel — lets the
+  // bulk modal badge + auto-deselect channels that already have them.
+  clipsPublishedStatus: (clipIds)  => req("POST",   `/clips/published-status`, { clip_ids: clipIds }),
   listUploads:    (opts = {})       => {
     const q = new URLSearchParams();
     if (opts.status) q.set("status", opts.status);
@@ -290,6 +445,26 @@ export const api = {
   cancelUpload:   (id)              => req("DELETE", `/uploads/${id}`),
   retryUpload:    (id)              => req("POST",   `/uploads/${id}/retry`),
   getQuota:       ()                => req("GET",    `/quota`),
+
+  // Publish tasks (job-wise fan-out). One task = one Publish click fanned
+  // out to N channels; the per-channel children live in `upload_jobs` on
+  // the detail endpoint. Listing rows carry aggregate counts + enrichment
+  // (video_title, thumb_url, channels_preview) for the /uploads cards.
+  listPublishTasks: (opts = {})     => {
+    const q = new URLSearchParams();
+    if (opts.status) q.set("status", opts.status);
+    if (opts.limit != null) q.set("limit", opts.limit);
+    if (opts.offset != null) q.set("offset", opts.offset);
+    const s = q.toString();
+    return req("GET", `/publish-tasks${s ? "?" + s : ""}`);
+  },
+  getPublishTask:   (id)            => req("GET",  `/publish-tasks/${id}`),
+  // Per-child retry/cancel — 409 with code "not_retryable"/"not_cancellable"
+  // when the child isn't in a state the action applies to.
+  retryPublishJob:  (tid, jid)      => req("POST", `/publish-tasks/${tid}/jobs/${jid}/retry`),
+  cancelPublishJob: (tid, jid)      => req("POST", `/publish-tasks/${tid}/jobs/${jid}/cancel`),
+  // Bulk: re-queue every failed/cancelled child of this task.
+  retryAllFailed:   (tid)           => req("POST", `/publish-tasks/${tid}/retry-failed`),
 
   // SEO (phase 2+3 + Content+Brand Overlay refactor)
   generateClipSEO: (clipId, payload) => req("POST",   `/clips/${clipId}/seo/generate`, payload),
@@ -353,6 +528,15 @@ export const api = {
     req("GET", `/performance/compare/video/${encodeURIComponent(videoId)}/across-channels`),
   // Phase 4 — every connected channel side-by-side
   compareChannels: () => req("GET", "/performance/compare/channels"),
+  // ── AI-powered analytics (Insights page) ─────────────────────────
+  // Resolve ANY public channel (handle/URL/name) + its recent metrics.
+  analyticsExternal: (q) =>
+    req("GET", `/analytics-ai/external?q=${encodeURIComponent(q)}`),
+  // My channel vs (my other channel | external channel), optional AI verdict.
+  analyticsCompare: (body) => req("POST", "/analytics-ai/compare", body),
+  // AI Coach report. gcid null = all channels. force = regenerate.
+  analyticsAiReport: (body) => req("POST", "/analytics-ai/report", body),
+
   // Stats poll trigger.  channelId null = poll every recent upload (old
   // behaviour); channelId set = refresh ONLY that channel's numbers,
   // saving YouTube Data API quota on the others.
@@ -419,6 +603,17 @@ export const api = {
   v4DeletePoolImage:   (jobId, fn)    => req("DELETE", `/v4/jobs/${jobId}/pool/${encodeURIComponent(fn)}`),
   v4TriggerRender:     (jobId, body)  => req("POST", `/v4/jobs/${jobId}/render`, body),
   v4RenderState:       (jobId)        => req("GET",  `/v4/jobs/${jobId}/render/state`),
+  // Custom-template editor: get edit context (per-slot text/media + switchable templates)
+  // and save edits (text overrides / media / switch template). Re-render after saving.
+  v4GetCustomTemplate: (jobId, target = "bulletin", index = 0) =>
+    req("GET", `/v4/jobs/${jobId}/custom-template?target=${encodeURIComponent(target)}&index=${index}`),
+  v4SaveCustomTemplate:(jobId, body)  => req("POST", `/v4/jobs/${jobId}/custom-template`, body),
+  // Per-job VISUAL design override (inline builder): get the HTML to edit (saved override
+  // else the parent template pre-filled with this job's text), and save the edited HTML as a
+  // per-job override (parent template untouched). Empty html on save reverts to the template.
+  v4GetJobCustomHtml:  (jobId, target = "bulletin", index = 0) =>
+    req("GET", `/v4/jobs/${jobId}/custom-html?target=${encodeURIComponent(target)}&index=${index}`),
+  v4SaveJobCustomHtml: (jobId, body)  => req("POST", `/v4/jobs/${jobId}/custom-html`, body),
   v4FetchPoolImage:    (jobId, body)  => req("POST", `/v4/jobs/${jobId}/pool/fetch`, body),
   v4AiGenImage:        (jobId, body)  => req("POST", `/v4/jobs/${jobId}/pool/ai-generate`, body),
   v4AutoDistribute:    (jobId, body)  => req("POST", `/v4/jobs/${jobId}/bulletin/auto-distribute`, body),
@@ -445,6 +640,29 @@ export const api = {
     return res.json();
   },
   v4DeleteUserAsset:   (assetId)      => req("DELETE", `/assets/${assetId}`),
+  // Upload an intro video to the user-assets pool (folder "job_intros"),
+  // returns the created asset (with id). Reuses the global assets route.
+  uploadIntroVideo: async (file) => {
+    const tok = getToken();
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("kind", "video");
+    fd.append("folder_path", "job_intros");
+    const headers = {};
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(`${BASE}/assets/upload`, { method: "POST", headers, body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `intro upload ${res.status}`);
+    }
+    return res.json();
+  },
+  // List the user's saved intro videos (folder "job_intros").
+  listIntroAssets:     ()             => req("GET",  `/assets/?folder_path=job_intros`),
+  // Copy a platform demo sample (bg-samples file) into the user's Assets so it
+  // can be used as a per-job intro by id. Body: {filename, folder_path, kind}.
+  importSampleAsset:   (filename, folder_path = "job_intros", kind = "video") =>
+    req("POST", `/assets/import-sample`, { filename, folder_path, kind }),
   // ── Meta (Facebook + Instagram) OAuth + publishing ─────────────
   metaConfig:          ()             => req("GET", `/meta/oauth/config`),
   metaStartOAuth:      ()             => req("GET", `/meta/oauth/start`),
@@ -453,7 +671,70 @@ export const api = {
   // ── YouTube quota dashboard ────────────────────────────────────
   youtubeQuotaToday:   ()             => req("GET", `/youtube/quota/today`),
   v4RegenSeo:          (jobId, body)  => req("POST", `/v4/jobs/${jobId}/seo/regenerate`, body),
+  // SEO head-to-head: score our canvas SEO vs a paste-in YouTube URL.
+  // Body shape: { target: "bulletin"|"short", index, youtube_url }.
+  v4CompareSeoWithYoutube: (jobId, body) =>
+    req("POST", `/v4/jobs/${jobId}/seo/compare-with-youtube`, body),
+  // Rewrite our canvas SEO using a prior comparison's verdict so
+  // Gemini specifically closes the gap on losing axes. Body:
+  // { target, index, theirs, comparison }.
+  v4RegenSeoFromComparison: (jobId, body) =>
+    req("POST", `/v4/jobs/${jobId}/seo/regenerate-from-comparison`, body),
   v4GenThumbnail:      (jobId, body)  => req("POST", `/v4/jobs/${jobId}/thumbnail/generate`, body),
+  // Per-channel SEO learning for the channel-wise Insights tab: what the
+  // feedback loop has learnt per channel (winning keywords, signal, status).
+  seoLearning:         ()             => req("GET", "/performance/seo-learning"),
+  // Per-channel SEO preview for a job: exact title/desc/tags per channel + why.
+  v4PerChannelSeoPreview: (jobId, mode = "per_channel", target = "bulletin", index = 0, generate = false) =>
+    req("GET", `/v4/jobs/${jobId}/seo/per-channel-preview?mode=${encodeURIComponent(mode)}&target=${encodeURIComponent(target)}&index=${index}&generate=${generate ? 1 : 0}`),
+  // Persist per-channel SEO so each channel publishes with its own title/tags
+  // (paid). mode "shared" reverts to one SEO for all. Body: {clip_id, mode, target, index}.
+  v4ApplyPerChannelSeo: (jobId, body) =>
+    req("POST", `/v4/jobs/${jobId}/seo/apply-per-channel`, body),
+  // Batch-render the FULL branded clip for every selected channel (each with
+  // its own logo/watermark/zoom/nudge + intro) in the editor. Background +
+  // poll. The rendered files are served by the per-channel-video preview route.
+  v4PrepareChannelVideos: (jobId, target = "bulletin", index = 0) =>
+    req("POST", `/v4/jobs/${jobId}/prepare-channel-videos`, { target, index }),
+  v4PrepareChannelVideosState: (jobId) =>
+    req("GET", `/v4/jobs/${jobId}/prepare-channel-videos/state`),
+  // Per-PLATFORM SEO preview: YouTube keeps title+desc+tags; Instagram /
+  // Facebook get a native caption + hashtags from a dedicated AI call,
+  // cached onto the clip so what you preview is what publishes.
+  // Body: { clip_id, platform, channel_id?, force? }.
+  v4PlatformSeoPreview: (jobId, body) =>
+    req("POST", `/v4/jobs/${jobId}/seo/platform-preview`, body),
+  // Re-paint the text overlay on an already-generated thumbnail.
+  // Body: { target, index, text, x_pct, y_pct, w_pct, h_pct,
+  //         color_preset, language }. Cheap (~200ms Pillow only,
+  // no AI). Requires the original generation ran in
+  // text_mode=overlay (so a bare plate was saved).
+  v4ReoverlayThumbnail: (jobId, body) =>
+    req("POST", `/v4/jobs/${jobId}/thumbnail/reoverlay`, body),
+  v4GetThumbnail:      (jobId, target = "bulletin", index = 0) =>
+    req("GET", `/v4/jobs/${jobId}/thumbnail?target=${encodeURIComponent(target)}&index=${index}`),
+  // Thumbnail style catalog — drives the editor's style picker.
+  v4ThumbnailStyles:   ()             => req("GET", `/v4/thumbnail/styles`),
+  // Reference images live in the shared user_assets pool with
+  // folder_path="thumbnail_refs" so they survive across jobs + show up
+  // on the standard /assets page too.
+  v4ListThumbnailRefs: ()             => req("GET", `/assets/?folder_path=thumbnail_refs`),
+  v4UploadThumbnailRef: async (file, label = "") => {
+    const tok = getToken();
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("kind", "image");
+    fd.append("folder_path", "thumbnail_refs");
+    if (label) fd.append("tags", label);
+    const headers = {};
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(`${BASE}/assets/upload`, { method: "POST", headers, body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `thumbnail ref upload ${res.status}`);
+    }
+    return res.json();
+  },
   seoGenerate:         (clipId, body) => req("POST", `/clips/${clipId}/seo/generate`, body),
   seoStatus:           (clipId)       => req("GET",  `/clips/${clipId}/seo/status`),
   listClipUploads:     (clipId)       => req("GET",  `/uploads?clip_id=${clipId}`),
@@ -488,6 +769,36 @@ export const api = {
     const cd = res.headers.get("content-disposition") || "";
     const m = cd.match(/filename="?([^"]+)"?/i);
     const filename = (m && m[1]) || defaultFilename || `${target}_${index + 1}.mp4`;
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(blobUrl); a.remove(); }, 1500);
+  },
+  // Download the canvas SEO as a .txt. channelId=null -> plain SEO;
+  // channelId set -> account-specific (that account's social links +
+  // brand footer injected into the description, via the publish-time
+  // composer). Same auth-via-header + blob save-as pattern as the video
+  // download above.
+  v4DownloadSeoBlob: async (jobId, target, index = 0, channelId = null) => {
+    const params = new URLSearchParams({ target, index: String(index) });
+    if (channelId) params.set("channel_id", String(channelId));
+    const tok = getToken();
+    const res = await fetch(`/api/v4/jobs/${jobId}/seo/download?${params.toString()}`, {
+      method: "GET",
+      headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json())?.detail || detail; } catch {}
+      throw new Error(detail || `SEO download failed (HTTP ${res.status})`);
+    }
+    const cd = res.headers.get("content-disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/i);
+    const filename = (m && m[1]) || `${target}_${index + 1}_seo.txt`;
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -611,6 +922,25 @@ export const api = {
     xhr.onerror = () => reject(new Error("Network error"));
     xhr.send(form);
   }),
+
+  // AI-generate an image from a prompt and save it as a user asset (job-agnostic) — returns
+  // the asset dict (id + url), usable in a template slot just like an upload.
+  aiGenerateAsset: (body) => req("POST", "/assets/ai-generate", body),
+
+  // AI-generate a STORY-DRIVEN SEQUENCE of distinct images (one per visual beat) and save each
+  // as a user asset — for a carousel/slideshow. body: {story, count?, language?, width?, height?}.
+  // count omitted = the planner decides how many the story needs. Returns {assets:[…], count}.
+  aiGenerateBatch: (body) => req("POST", "/assets/ai-generate-batch", body),
+
+  // Insights / Trend Finder — channel root-cause analyzer.
+  // analyze: {google_channel_id, force?, provider?} → queues a BACKGROUND run, returns {run_id, status}.
+  insightsAnalyze: (body) => req("POST", "/insights/analyze", body),
+  // poll a background run → {status: queued|running|done|failed, msg, progress, error?, result?}.
+  insightsAnalyzeStatus: (runId) => req("GET", `/insights/analyze-status/${encodeURIComponent(runId)}`),
+  // latest: most recent report for a channel (no re-run); 404 if none yet.
+  insightsLatest: (gcid) => req("GET", `/insights/latest/${encodeURIComponent(gcid)}`),
+  // bootstrap: start the thumbnail-CTR collection clock (Reporting API job) for a channel.
+  insightsBootstrap: (gcid) => req("POST", `/insights/bootstrap/${encodeURIComponent(gcid)}`),
 
   // File URL — points to backend for serving pipeline output files
   fileUrl: (path) => path ? `${ORIGIN}/api/file/?path=${encodeURIComponent(path)}` : "",
@@ -842,6 +1172,50 @@ export const adminApi = {
   },
   liveEvents:   ()                          => req("GET",  "/admin/live-events"),
   audit:        ()                          => req("GET",  "/admin/audit"),
+  // Staged "factory" pipeline live snapshot — station occupancy, recent
+  // stage transitions, queue depths. Poll ~every 1.5s for the conveyor view.
+  pipelineFlow: ()                          => req("GET",  "/admin/pipeline/flow"),
+  // Tap a unit on the conveyor to inspect why it is where it is (diagnosis
+  // + recent transitions). kind = "publish" | "render".
+  pipelineUnit: (kind, id)                  =>
+    req("GET", `/admin/pipeline/unit?kind=${encodeURIComponent(kind)}&id=${id}`),
+  // Safe live smoke test — push synthetic units through the real engine.
+  pipelineSimulate: (units = 5, delayMs = 1500) =>
+    req("POST", `/admin/pipeline/simulate?units=${units}&delay_ms=${delayMs}`),
+
+  // ── Plan tiers (subscription parameters) ──────────────────────────────
+  // Edits take effect on the user's next publish/claim — every enforcement
+  // site reads the PlanTier row live (no restart needed).
+  listPlanTiers:  ()            => req("GET",   "/admin/plan-tiers"),
+  updatePlanTier: (id, payload) => req("PATCH", `/admin/plan-tiers/${id}`, payload),
+  // Put a user on a tier. body: { plan_tier_id }
+  assignUserTier: (userId, planTierId) =>
+    req("POST", `/admin/users/${userId}/assign-tier`, { plan_tier_id: planTierId }),
+
+  // ── Learning / training data ──────────────────────────────────────────
+  learningOverview: ()  => req("GET",  "/admin/learning/overview"),
+  learningBackfill: ()  => req("POST", "/admin/learning/backfill"),
+  // Auth'd download of the JSONL training set → triggers a browser download.
+  learningDatasetDownload: async (limit) => {
+    const qs  = limit ? `?limit=${limit}` : "";
+    const tok = getToken();
+    const res = await fetch(`${BASE}/admin/learning/dataset.jsonl${qs}`, {
+      headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || res.statusText);
+    }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = "kaizer_seo_training.jsonl";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
 // ── Wave 2 — editor beta ────────────────────────────────────────────────────

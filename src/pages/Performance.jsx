@@ -3,8 +3,15 @@ import {
   LineChart, Loader2, AlertCircle, RefreshCw, ExternalLink,
   TrendingUp, Eye, ThumbsUp, MessageSquare, Youtube, Award, Activity,
   Search, Download, ArrowUpDown, Calendar, X, Layers, Zap, Trophy,
+  Flame, BarChart3, ChevronRight, SlidersHorizontal,
 } from "lucide-react";
 import { api } from "../api/client";
+import {
+  AiCoachPanel, CompareChannelsPanel, MetricHelp, METRIC_HELP, cadenceLabel,
+  RadialGauge, KpiRing, fmtN as fmtNAI,
+} from "../components/AnalyticsAI";
+import ComplianceNote, { NoteLink } from "../components/ComplianceNote";
+import TrendFinderTab from "../components/TrendFinderTab";
 
 export default function Performance() {
   const [leaderboard, setLeaderboard] = useState([]);
@@ -29,6 +36,15 @@ export default function Performance() {
   const [catalogLoading,  setCatalogLoading]  = useState(false);
   const [syncing,         setSyncing]         = useState(false);
   const [lastSyncResult,  setLastSyncResult]  = useState(null);
+  // "Sync All" — sequential catalogue sync across every connected channel.
+  const [syncingAll,      setSyncingAll]      = useState(false);
+  const [syncAllMsg,      setSyncAllMsg]      = useState("");
+  // Hide the expert charts (SEO-score calibration, cross-channel compare,
+  // percentile ranks) behind a toggle so normal users aren't overwhelmed.
+  const [showAdvanced,    setShowAdvanced]    = useState(false);
+  // Insights sub-tab: "performance" (the stats view) | "learning" (per-channel
+  // SEO feedback-loop learning — what the system learnt from past results).
+  const [tab,             setTab]             = useState("performance");
 
   // Phase 3 — single-video comparison
   const [selectedVideoId, setSelectedVideoId] = useState("");
@@ -172,6 +188,40 @@ export default function Performance() {
     }
   }
 
+  // Universal "Sync All": pull the full video catalogue for EVERY
+  // connected channel, one at a time. Sequential (not parallel) so we
+  // pace YouTube Data API quota and the cards fill in progressively.
+  async function handleSyncAll() {
+    const chans = ytChannels.filter((c) => c.google_channel_id);
+    if (!chans.length || syncingAll) return;
+    setSyncingAll(true); setError(""); setNotice("");
+    let ok = 0, failed = 0, totalVideos = 0;
+    for (let i = 0; i < chans.length; i++) {
+      const c = chans[i];
+      const who = c.youtube_channel_title || c.google_channel_id;
+      setSyncAllMsg(`Syncing ${i + 1}/${chans.length} — ${who}…`);
+      try {
+        const res = await api.syncChannelVideos(c.google_channel_id, 200);
+        ok += 1;
+        totalVideos += (res?.synced || 0);
+        setLastSyncResult(res);
+        // Refresh just the cards so this channel fills in live.
+        try { setYtChannels((await api.getPerfChannels()) || []); } catch { /* keep going */ }
+      } catch {
+        failed += 1;
+      }
+    }
+    setSyncAllMsg("");
+    setSyncingAll(false);
+    try { await load(); } catch { /* surfaced in load() */ }
+    setNotice(
+      `Sync All complete — ${ok}/${chans.length} channels synced `
+      + `(${totalVideos} videos cached)`
+      + (failed ? `, ${failed} failed.` : ".")
+    );
+    setTimeout(() => setNotice(""), 8000);
+  }
+
   async function handlePoll() {
     try {
       setPolling(true);
@@ -220,6 +270,36 @@ export default function Performance() {
     [ytChannels, selectedGcid]
   );
 
+  // "Top Channels" lane — every channel with at least one view, ranked
+  // by total views (most-watched first).
+  const topChannels = useMemo(
+    () => [...ytChannels]
+      .filter((c) => (c.total_views || 0) > 0)
+      .sort((a, b) => (b.total_views || 0) - (a.total_views || 0)),
+    [ytChannels]
+  );
+
+  // Headline KPIs for the circular-gauge overview strip.
+  const overview = useMemo(() => {
+    const withData = ytChannels.filter((c) => (c.video_count || 0) > 0);
+    const active = ytChannels.filter((c) => (c.total_views || 0) > 0);
+    const totalViews = ytChannels.reduce((s, c) => s + (c.total_views || 0), 0);
+    const totalVideos = ytChannels.reduce((s, c) => s + (c.total_videos || 0), 0);
+    const engRates = active.map((c) => c.engagement_rate || 0);
+    const avgEng = engRates.length
+      ? engRates.reduce((s, v) => s + v, 0) / engRates.length : 0;
+    const paces = active.map((c) => c.cadence_per_week || 0);
+    const avgPace = paces.length ? paces.reduce((s, v) => s + v, 0) / paces.length : 0;
+    return {
+      totalViews, totalVideos,
+      total: ytChannels.length,
+      withData: withData.length,
+      active: active.length,
+      avgEng, avgPace,
+      best: active[0] || null,
+    };
+  }, [ytChannels]);
+
   const maxBucketViews = calibration
     ? Math.max(...calibration.by_bucket.map((b) => b.mean_views || 0), 1)
     : 1;
@@ -245,6 +325,15 @@ export default function Performance() {
             ))}
           </select>
           <button
+            onClick={handleSyncAll}
+            disabled={syncingAll || !ytChannels.length}
+            title="Pull the full video catalogue for EVERY connected channel (one at a time). Heavier on YouTube quota than Poll."
+            className="flex items-center gap-1.5 bg-accent2 hover:bg-accent2/80 text-white px-3 py-1.5 rounded text-sm disabled:opacity-50"
+          >
+            {syncingAll ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
+            {syncingAll ? "Syncing…" : "Sync All"}
+          </button>
+          <button
             onClick={handlePoll}
             disabled={polling}
             title={selectedYt
@@ -255,8 +344,61 @@ export default function Performance() {
             {polling ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
             {selectedYt ? `Poll ${selectedYt.youtube_channel_title}` : "Poll All"}
           </button>
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            title="Show or hide the expert charts (SEO-score patterns, channel comparison)"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm border ${
+              showAdvanced
+                ? "bg-accent2/15 border-accent2/40 text-accent2"
+                : "bg-transparent border-border text-gray-400 hover:text-white"
+            }`}
+          >
+            <SlidersHorizontal size={14} />
+            {showAdvanced ? "Hide advanced" : "Advanced"}
+          </button>
         </div>
       </header>
+
+      <ComplianceNote className="mb-4">
+        <p>
+          Insights shows public stats (views, likes, comments) for your own connected channels, retrieved
+          through YouTube API Services. These are public metrics, not private YouTube Analytics, and may differ
+          from YouTube Studio. We do not sell, share, or train AI on this data.
+        </p>
+        <p>
+          Disconnecting a channel stops access immediately. Subject to the{" "}
+          <NoteLink href="https://www.youtube.com/t/terms">YouTube ToS</NoteLink> and{" "}
+          <NoteLink href="https://policies.google.com/privacy">Google Privacy Policy</NoteLink>.
+        </p>
+      </ComplianceNote>
+
+      {/* Insights sub-tabs */}
+      <div className="flex items-center gap-1 mb-4 border-b border-border">
+        {[
+          { k: "performance", label: "Performance" },
+          { k: "trend", label: "Channel Doctor" },
+          { k: "learning", label: "SEO Learning" },
+        ].map((t) => (
+          <button
+            key={t.k}
+            onClick={() => setTab(t.k)}
+            className={`px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
+              tab === t.k
+                ? "border-accent2 text-white"
+                : "border-transparent text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {syncingAll && syncAllMsg && (
+        <div className="mb-3 p-2 bg-accent2/10 border border-accent2/30 text-accent2 text-sm rounded flex items-center gap-2">
+          <Loader2 className="animate-spin" size={14} /> {syncAllMsg}
+          <span className="text-gray-500 text-xs">— keep this tab open until it finishes</span>
+        </div>
+      )}
 
       {error && (
         <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded flex items-center gap-2">
@@ -271,137 +413,297 @@ export default function Performance() {
 
       {loading ? (
         <div className="text-gray-400 flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Loading…</div>
+      ) : tab === "trend" ? (
+        <TrendFinderTab ytChannels={ytChannels} initialGcid={selectedGcid || ""} />
+      ) : tab === "learning" ? (
+        <SeoLearningTab />
       ) : (
         <>
-          {/* Per-YT-channel summary cards. Always show all connected
-              channels (dropdown filter affects the histogram + leader-
-              board grid below, not these — they're the "what each
-              channel is doing" overview). */}
-          {ytChannels.length > 0 && (
-            <section className="mb-6">
-              <h2 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                <Youtube size={14} className="text-red-500" /> Your YouTube Channels
-                <span className="text-xs text-gray-500">
-                  ({ytChannels.length} connected)
-                </span>
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {ytChannels.map((c) => (
-                  <ChannelCard
-                    key={c.google_channel_id}
-                    channel={c}
-                    selected={selectedGcid === c.google_channel_id}
-                    onClick={() =>
-                      setSelectedGcid(
-                        selectedGcid === c.google_channel_id ? "" : c.google_channel_id
-                      )
-                    }
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+          {/* ── Overview hero: circular KPI gauges ─────────────────── */}
+          <OverviewStrip overview={overview} />
 
-          {/* Phase 4 — cross-channel comparison bars. Only renders when
-              we have synced catalogue data for 2+ channels (single
-              channel = nothing to compare to). */}
-          {channelCompare.length >= 2 && (
-            <ChannelCompareSection rows={channelCompare} />
-          )}
+          {/* ── AI Coach (kept on top) ─────────────────────────────── */}
+          <AiCoachPanel
+            ytChannels={ytChannels}
+            initialGcid={selectedGcid || ""}
+            hasData={topChannels.length > 0 || leaderboard.length > 0}
+          />
 
-          {/* Calibration histogram */}
-          <section className="mb-6">
-            <h2 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-              <TrendingUp size={14} /> SEO-Score Calibration
-              <span className="text-xs text-gray-500">
-                ({calibration?.total_samples || 0} samples)
-              </span>
-            </h2>
-            {calibration?.total_samples > 0 ? (
-              <div className="bg-[#111] border border-border rounded p-4">
-                <div className="space-y-2">
-                  {calibration.by_bucket.map((b) => (
-                    <div key={b.bucket} className="flex items-center gap-3">
-                      <div className="w-16 text-xs text-gray-400">{b.bucket}</div>
-                      <div className="flex-1 h-5 bg-black rounded overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-accent to-accent2"
-                          style={{ width: `${((b.mean_views || 0) / maxBucketViews) * 100}%` }}
-                        />
-                      </div>
-                      <div className="w-24 text-right text-xs text-gray-300">
-                        {b.n > 0 ? `${b.mean_views.toLocaleString()} avg` : "—"}
-                      </div>
-                      <div className="w-12 text-right text-xs text-gray-500">n={b.n}</div>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-3 text-xs text-gray-500">
-                  Mean views per SEO-score bucket. A healthy pattern: higher score → higher views.
-                </p>
-              </div>
-            ) : (
-              <div className="bg-[#111] border border-border rounded p-4 text-sm text-gray-500 text-center">
-                No samples yet — wait for the hourly analytics poller, or click "Poll Now" after your first uploads go live.
-              </div>
-            )}
-          </section>
+          {/* ── Compare (kept on top) ──────────────────────────────── */}
+          <CompareChannelsPanel ytChannels={ytChannels} />
 
-          {/* Phase 2 + 3 — Video Explorer for the selected channel.
-              Shows nothing when no channel is selected (the empty
-              state would just be a "pick a channel" message). */}
+          {/* ── Lane 1: Your Channels (horizontal scroll) ──────────── */}
+          <Lane
+            title="Your Channels"
+            icon={Youtube}
+            iconColor="text-red-500"
+            count={ytChannels.length}
+            hint="Tap a channel to see its videos below"
+            empty={ytChannels.length === 0 ? "No channels connected yet." : null}
+          >
+            {ytChannels.map((c) => (
+              <div key={c.google_channel_id} className="w-[260px] flex-shrink-0 snap-start">
+                <ChannelCard
+                  channel={c}
+                  selected={selectedGcid === c.google_channel_id}
+                  onClick={() =>
+                    setSelectedGcid(
+                      selectedGcid === c.google_channel_id ? "" : c.google_channel_id
+                    )
+                  }
+                />
+              </div>
+            ))}
+          </Lane>
+
+          {/* ── Lane 2: Best Videos (horizontal scroll) ────────────── */}
+          <Lane
+            title="Best Videos"
+            icon={Flame}
+            iconColor="text-orange-400"
+            subtitle={selectedYt ? selectedYt.youtube_channel_title : "across all your channels"}
+            empty={leaderboard.length === 0
+              ? "No videos yet — hit \"Sync All\" or \"Poll All\" above to pull your numbers."
+              : null}
+          >
+            {leaderboard.map((r) => (
+              <div key={r.upload_job_id} className="w-[280px] flex-shrink-0 snap-start">
+                <PerfClipCard clip={r} />
+              </div>
+            ))}
+          </Lane>
+
+          {/* ── Lane 3: Top Channels (ranked by views) ─────────────── */}
+          <Lane
+            title="Top Channels"
+            icon={Trophy}
+            iconColor="text-yellow-400"
+            subtitle="most watched first"
+            empty={topChannels.length === 0
+              ? "No views yet — your channels will rank here once videos get views."
+              : null}
+          >
+            {topChannels.map((c, i) => (
+              <RankCard
+                key={c.google_channel_id}
+                rank={i + 1}
+                channel={c}
+                selected={selectedGcid === c.google_channel_id}
+                onClick={() =>
+                  setSelectedGcid(
+                    selectedGcid === c.google_channel_id ? "" : c.google_channel_id
+                  )
+                }
+              />
+            ))}
+          </Lane>
+
+          {/* ── Channel detail: videos for the tapped channel ──────── */}
           {selectedYt && (
-            <VideoExplorerSection
-              channel={selectedYt}
-              videos={catalogVideos}
-              total={catalogTotal}
-              query={catalogQuery}
-              setQuery={setCatalogQuery}
-              orderBy={catalogOrderBy}
-              setOrderBy={setCatalogOrderBy}
-              loading={catalogLoading}
-              syncing={syncing}
-              onSync={handleSync}
-              selectedVideoId={selectedVideoId}
-              setSelectedVideoId={setSelectedVideoId}
-              compare={videoCompare}
-              acrossChannels={acrossChannels}
-              comparing={comparingVideo}
-            />
+            <div className="mt-1 rounded-lg border border-accent2/30 bg-accent2/[0.03] p-1">
+              <VideoExplorerSection
+                channel={selectedYt}
+                videos={catalogVideos}
+                total={catalogTotal}
+                query={catalogQuery}
+                setQuery={setCatalogQuery}
+                orderBy={catalogOrderBy}
+                setOrderBy={setCatalogOrderBy}
+                loading={catalogLoading}
+                syncing={syncing}
+                onSync={handleSync}
+                selectedVideoId={selectedVideoId}
+                setSelectedVideoId={setSelectedVideoId}
+                compare={videoCompare}
+                acrossChannels={acrossChannels}
+                comparing={comparingVideo}
+              />
+            </div>
           )}
 
-          {/* Leaderboard — card grid (one card per top-performing clip). */}
-          <section>
-            <h2 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-              <Award size={14} className="text-accent2" /> Top Performing Clips
-              {selectedYt && (
-                <span className="text-xs text-gray-500">
-                  · {selectedYt.youtube_channel_title}
-                </span>
+          {/* ── Advanced (hidden by default) ───────────────────────── */}
+          {showAdvanced && (
+            <div className="mt-4 border-t border-border pt-5 space-y-6">
+              <div className="text-[11px] uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+                <SlidersHorizontal size={12} /> Advanced analytics
+              </div>
+
+              {channelCompare.length >= 2 && (
+                <ChannelCompareSection rows={channelCompare} />
               )}
-            </h2>
-            {leaderboard.length === 0 ? (
-              <div className="bg-[#111] border border-border rounded p-6 text-sm text-gray-500 text-center">
-                No data yet — wait for the hourly poller or click "Poll {selectedYt ? selectedYt.youtube_channel_title : "All"}" above.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {leaderboard.map((r) => (
-                  <PerfClipCard key={r.upload_job_id} clip={r} />
-                ))}
-              </div>
-            )}
-          </section>
+
+              {/* SEO-score calibration histogram (expert chart) */}
+              <section>
+                <h2 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+                  <TrendingUp size={14} /> SEO-Score vs Views
+                  <span className="text-xs text-gray-500">
+                    ({calibration?.total_samples || 0} samples)
+                  </span>
+                </h2>
+                {calibration?.total_samples > 0 ? (
+                  <div className="bg-[#111] border border-border rounded p-4">
+                    <div className="space-y-2">
+                      {calibration.by_bucket.map((b) => (
+                        <div key={b.bucket} className="flex items-center gap-3">
+                          <div className="w-16 text-xs text-gray-400">{b.bucket}</div>
+                          <div className="flex-1 h-5 bg-black rounded overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-accent to-accent2"
+                              style={{ width: `${((b.mean_views || 0) / maxBucketViews) * 100}%` }}
+                            />
+                          </div>
+                          <div className="w-24 text-right text-xs text-gray-300">
+                            {b.n > 0 ? `${b.mean_views.toLocaleString()} avg` : "—"}
+                          </div>
+                          <div className="w-12 text-right text-xs text-gray-500">n={b.n}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-xs text-gray-500">
+                      Average views per SEO-score band. A healthy pattern: higher score → more views.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-[#111] border border-border rounded p-4 text-sm text-gray-500 text-center">
+                    No samples yet — wait for the hourly poller, or click "Poll All" after your uploads go live.
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
         </>
       )}
     </div>
   );
 }
 
+// Circular-gauge KPI tile for the overview hero.
+function GaugeCard({ label, help, value, max, color, display, sublabel }) {
+  return (
+    <div className="rounded-xl border border-border bg-[#0e1218] p-3 flex items-center gap-3">
+      <RadialGauge value={value} max={max} color={color} display={display} sublabel={sublabel} size={70} />
+      <div className="min-w-0">
+        <div className="text-[11px] text-gray-400 flex items-center gap-1 leading-snug">
+          {label} {help && <MetricHelp text={help} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Dashboard hero: total reach + circular gauges at a glance.
+function OverviewStrip({ overview: o }) {
+  if (!o || o.total === 0) return null;
+  return (
+    <section className="mb-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-cyan-800/30 bg-gradient-to-br from-cyan-950/40 to-[#0e1218] p-4 flex flex-col justify-between">
+          <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
+            <Eye size={12} className="text-cyan-400" /> Total reach
+          </div>
+          <div className="text-3xl font-black text-white mt-1 leading-none">{fmtNAI(o.totalViews)}</div>
+          <div className="text-[10px] text-gray-500 mt-1">
+            {fmtNAI(o.totalVideos)} videos · {o.total} channels
+          </div>
+        </div>
+        <GaugeCard
+          label="Channels with views"
+          help="How many of your connected channels actually have views yet."
+          value={o.active} max={Math.max(o.total, 1)} color="#a78bfa"
+          display={`${o.active}/${o.total}`}
+        />
+        <GaugeCard
+          label="Avg interaction"
+          help={METRIC_HELP.interaction}
+          value={o.avgEng} max={10} color="#34d399"
+          display={`${o.avgEng.toFixed(1)}%`}
+        />
+        <GaugeCard
+          label="Avg posting"
+          help={METRIC_HELP.uploads_week}
+          value={o.avgPace} max={7} color="#fbbf24"
+          display={o.avgPace.toFixed(1)} sublabel="/wk"
+        />
+      </div>
+    </section>
+  );
+}
+
+// A horizontally-scrolling section ("lane"). The row scrolls on its own
+// (overflow-x-auto) so the page itself stays short — the user scrolls a
+// section, not the whole page.
+function Lane({ title, icon: Icon, iconColor = "text-accent2", count, subtitle, hint, empty, children }) {
+  return (
+    <section className="mb-5">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <h2 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
+          {Icon && <Icon size={15} className={iconColor} />}
+          {title}
+        </h2>
+        {count != null && <span className="text-xs text-gray-500">· {count}</span>}
+        {subtitle && <span className="text-xs text-gray-500">· {subtitle}</span>}
+        {hint && <span className="ml-auto text-[10px] text-gray-600">{hint}</span>}
+      </div>
+      {empty != null ? (
+        <div className="bg-[#111] border border-border rounded-lg p-5 text-sm text-gray-500 text-center">
+          {empty}
+        </div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-2.5 px-0.5 snap-x scroll-smooth">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// Compact ranked channel card for the "Top Channels" lane.
+function RankCard({ rank, channel, selected, onClick }) {
+  const c = channel;
+  const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${c.youtube_channel_title} — ${fmtNum(c.total_views)} views`}
+      className={`w-[210px] flex-shrink-0 snap-start text-left bg-[#111] border rounded-lg p-3 transition-all hover:border-accent2 ${
+        selected ? "border-accent2 ring-1 ring-accent2/40" : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span className="w-7 text-center text-base font-bold text-gray-300">
+          {medal || `#${rank}`}
+        </span>
+        {c.channel_thumbnail_url ? (
+          <img
+            src={c.channel_thumbnail_url}
+            alt=""
+            className="w-8 h-8 rounded-full bg-black/40 object-cover flex-shrink-0"
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+        ) : (
+          <div className="w-8 h-8 rounded-full bg-red-900/40 flex items-center justify-center text-xs text-white flex-shrink-0">
+            {(c.youtube_channel_title || "?").slice(0, 1).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-white truncate">{c.youtube_channel_title}</div>
+          <div className="text-[11px] text-gray-400 flex items-center gap-1">
+            <Eye size={10} /> {fmtNum(c.total_views)} views
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function ChannelCard({ channel, selected, onClick }) {
   const c = channel;
   const eng = c.engagement_rate || 0;
-  const needsSync = c.needs_sync || (c.total_videos || 0) === 0;
+  // A channel with zero uploads on YouTube has nothing to sync — show a
+  // distinct "no videos yet" state instead of the "Sync me" prompt.
+  const ytEmpty = (c.video_count || 0) === 0;
+  const needsSync = !ytEmpty && (c.needs_sync || (c.total_videos || 0) === 0);
   return (
     <button
       type="button"
@@ -440,16 +742,25 @@ function ChannelCard({ channel, selected, onClick }) {
         </div>
       </div>
 
-      {needsSync ? (
+      {ytEmpty ? (
+        <div className="border border-dashed border-border bg-black/30 rounded p-3 text-center">
+          <div className="text-xs text-gray-400 font-medium mb-1">
+            No videos uploaded yet
+          </div>
+          <div className="text-[10px] text-gray-500 leading-relaxed">
+            This YouTube channel has no public videos to sync. Stats will
+            appear here once it has uploads.
+          </div>
+        </div>
+      ) : needsSync ? (
         <div className="border border-dashed border-accent2/50 bg-accent2/10 rounded p-3 text-center">
           <div className="text-xs text-accent2 font-medium mb-1">
             Not synced yet
           </div>
           <div className="text-[10px] text-gray-400 leading-relaxed">
-            Hit <span className="text-accent2 font-medium">Sync from YouTube</span> in the
-            Channel Video Explorer below to pull every video on this
-            channel — then this card shows totals, engagement, and the
-            top performer.
+            Tap this card, then hit <span className="text-accent2 font-medium">Sync from YouTube</span> —
+            or use <span className="text-accent2 font-medium">Sync All</span> up top to pull
+            every channel at once.
           </div>
         </div>
       ) : (
@@ -461,11 +772,11 @@ function ChannelCard({ channel, selected, onClick }) {
           </div>
 
           <div className="flex items-center justify-between text-[10px] text-gray-500 mb-2">
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title="Likes + comments per view">
               <Activity size={10} className="text-accent2" />
-              {eng.toFixed(2)}% engagement
+              {eng.toFixed(1)}% interaction
             </span>
-            <span>{c.total_videos} videos cached</span>
+            <span>{c.total_videos} videos</span>
             {(c.avg_seo_score || 0) > 0 && (
               <ScoreBadge score={Math.round(c.avg_seo_score || 0)} />
             )}
@@ -631,11 +942,19 @@ function ChannelCompareSection({ rows }) {
                 {r.total_videos} videos · {(r.subscriber_count || 0).toLocaleString()} subs
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <CmpBar label="Total views"   value={r.total_views}      max={max.views}   fmt={fmtNum} />
-              <CmpBar label="Median views"  value={r.median_views}     max={max.median}  fmt={fmtNum} />
-              <CmpBar label="Engagement %"  value={r.engagement_rate}  max={max.engage}  fmt={(v) => `${(v || 0).toFixed(2)}%`} />
-              <CmpBar label="Posts / week"  value={r.cadence_per_week} max={max.cadence} fmt={(v) => (v || 0).toFixed(2)} />
+            <div className="grid grid-cols-4 gap-1">
+              <CmpRing label="Views" help={METRIC_HELP.views}
+                       value={r.total_views} max={max.views} color="#22d3ee"
+                       display={fmtNum(r.total_views)} />
+              <CmpRing label="Typical" help={METRIC_HELP.typical}
+                       value={r.median_views} max={max.median} color="#a78bfa"
+                       display={fmtNum(r.median_views)} />
+              <CmpRing label="Interaction" help={METRIC_HELP.interaction}
+                       value={r.engagement_rate} max={max.engage} color="#34d399"
+                       display={`${(r.engagement_rate || 0).toFixed(1)}`} sublabel="/100" />
+              <CmpRing label="Posting" help={METRIC_HELP.uploads_week}
+                       value={r.cadence_per_week} max={max.cadence} color="#fbbf24"
+                       display={(r.cadence_per_week || 0).toFixed(1)} sublabel="/wk" />
             </div>
           </div>
         ))}
@@ -644,16 +963,32 @@ function ChannelCompareSection({ rows }) {
   );
 }
 
-function CmpBar({ label, value, max, fmt }) {
+// Circular version of a comparison metric — the arc fills relative to
+// the best channel for that metric (apples-to-apples across rows).
+function CmpRing({ label, help, value, max, color, display, sublabel }) {
+  return (
+    <div className="flex flex-col items-center gap-1 py-1">
+      <RadialGauge value={value} max={max} color={color} display={display}
+                   sublabel={sublabel} size={58} stroke={5} />
+      <span className="text-[9px] text-gray-500 flex items-center gap-0.5 text-center leading-tight">
+        {label}{help && <MetricHelp text={help} />}
+      </span>
+    </div>
+  );
+}
+
+function CmpBar({ label, help, value, max, fmt }) {
   const pct = max ? Math.min(100, Math.round((value || 0) / max * 100)) : 0;
   return (
     <div className="flex items-center gap-2 text-xs">
-      <div className="w-24 text-gray-500 flex-shrink-0">{label}</div>
+      <div className="w-28 text-gray-500 flex-shrink-0 flex items-center gap-1">
+        {label} {help && <MetricHelp text={help} />}
+      </div>
       <div className="flex-1 h-3 bg-black rounded overflow-hidden">
         <div className="h-full bg-gradient-to-r from-accent2 to-accent transition-all"
              style={{ width: `${pct}%` }} />
       </div>
-      <div className="w-20 text-right text-gray-200 tabular-nums">
+      <div className="w-28 text-right text-gray-200 tabular-nums text-[11px]">
         {fmt ? fmt(value) : value}
       </div>
     </div>
@@ -1049,5 +1384,113 @@ function ScoreBadge({ score }) {
     "bg-red-500/20 text-red-300";
   return (
     <span className={`text-xs px-1.5 py-0.5 rounded ${color}`}>{score || 0}</span>
+  );
+}
+
+// ── SEO Learning tab — per channel, what the feedback loop has learnt ──────
+// Reads /api/performance/seo-learning. Each card shows the channel's status
+// (learning vs collecting data), the signal in use (CTR once re-approved, else
+// views), how many videos it has learnt from, and its "winning keywords".
+function SeoLearningTab() {
+  const [data, setData]   = useState(null);
+  const [busy, setBusy]   = useState(true);
+  const [err, setErr]     = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    setBusy(true); setErr("");
+    api.seoLearning()
+      .then((d) => { if (alive) setData(d); })
+      .catch((e) => { if (alive) setErr(e?.message || "Failed to load SEO learning"); })
+      .finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; };
+  }, []);
+
+  if (busy) {
+    return <div className="text-gray-400 flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Loading SEO learning…</div>;
+  }
+  if (err) {
+    return <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-300 text-sm rounded flex items-center gap-2"><AlertCircle size={14} /> {err}</div>;
+  }
+  const channels = data?.channels || [];
+  const learning = channels.filter((c) => c.ready).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 text-sm text-gray-300">
+          <Zap size={15} className="text-accent2" />
+          <span><strong className="text-white">{learning}</strong> of {channels.length} channel{channels.length === 1 ? "" : "s"} actively learning</span>
+        </div>
+        {data?.note && <p className="text-[11px] text-gray-500 max-w-xl">{data.note}</p>}
+      </div>
+
+      {channels.length === 0 ? (
+        <div className="bg-[#111] border border-border rounded p-6 text-center text-sm text-gray-500">
+          No connected channels yet.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {channels.map((c) => (
+            <div
+              key={c.channel_id}
+              className={`rounded-xl border p-4 bg-panel transition-colors ${
+                c.ready ? "border-accent2/40" : "border-border"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Youtube size={14} className="text-red-400 flex-shrink-0" />
+                  <span className="text-sm font-semibold text-white truncate">{c.channel_name || `Channel #${c.channel_id}`}</span>
+                </div>
+                <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                  c.ready ? "bg-emerald-500/20 text-emerald-300" : "bg-gray-700 text-gray-400"
+                }`}>
+                  {c.ready ? "learning" : "collecting"}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 text-[11px] text-gray-400 mb-3">
+                <span className="inline-flex items-center gap-1" title="Signal used to rank what works">
+                  {c.signal === "ctr" ? <Trophy size={11} className="text-yellow-400" /> : <Eye size={11} />}
+                  {c.signal === "ctr" ? "CTR" : "views"}
+                </span>
+                <span>·</span>
+                <span>{c.videos_sampled} video{c.videos_sampled === 1 ? "" : "s"} learnt from</span>
+                {!c.ctr_unlocked && (
+                  <span className="ml-auto text-[10px] text-gray-600" title="Re-approve this channel for analytics to unlock CTR">CTR locked</span>
+                )}
+              </div>
+
+              {c.winning_keywords?.length > 0 ? (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Winning keywords</div>
+                  <div className="flex flex-wrap gap-1">
+                    {c.winning_keywords.slice(0, 10).map((k, i) => (
+                      <span key={i} className="text-[11px] px-1.5 py-0.5 rounded bg-accent2/10 text-accent2 border border-accent2/20">{k}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[11px] text-gray-500 italic">
+                  {c.ready ? "No standout keywords yet." : "Publish a few more videos here — learning kicks in once it has enough results."}
+                </div>
+              )}
+
+              {c.top_titles?.length > 0 && (
+                <div className="mt-3 pt-2 border-t border-border/60">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Top performers</div>
+                  <ul className="space-y-0.5">
+                    {c.top_titles.slice(0, 3).map((t, i) => (
+                      <li key={i} className="text-[11px] text-gray-400 truncate" title={t}>• {t}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

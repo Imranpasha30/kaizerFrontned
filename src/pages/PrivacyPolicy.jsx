@@ -27,7 +27,7 @@ export default function PrivacyPolicy() {
 
         <div className="prose prose-sm max-w-none space-y-6 leading-relaxed text-[15px]">
           <p>
-            This Privacy Policy explains how <strong>Kaizer News</strong>
+            This Privacy Policy explains how <strong>Kaizer X</strong>
             (&ldquo;<strong>Kaizer</strong>&rdquo;, &ldquo;<strong>we</strong>&rdquo;,
             &ldquo;<strong>us</strong>&rdquo;, &ldquo;<strong>our</strong>&rdquo;) collects, uses,
             stores, and discloses information when you use our SaaS
@@ -37,7 +37,7 @@ export default function PrivacyPolicy() {
 
           <h2 className="text-xl font-semibold mt-10 mb-3">1. Who we are</h2>
           <p>
-            Kaizer News is a software-as-a-service platform that helps
+            Kaizer X is a software-as-a-service platform that helps
             YouTube creators turn long-form videos into platform-native
             short clips and publish them to their own YouTube channels.
             You can contact us at{" "}
@@ -129,7 +129,7 @@ export default function PrivacyPolicy() {
           <ul className="list-disc pl-6 space-y-2">
             <li>
               Clicking <strong>Disconnect</strong> on the Style Profiles page in
-              the Kaizer News app, which immediately deletes our stored refresh
+              the Kaizer X app, which immediately deletes our stored refresh
               token; or
             </li>
             <li>
@@ -142,7 +142,7 @@ export default function PrivacyPolicy() {
               >
                 https://myaccount.google.com/permissions
               </a>{" "}
-              and removing access for &ldquo;Kaizer News&rdquo;.
+              and removing access for &ldquo;Kaizer X&rdquo;.
             </li>
           </ul>
 
@@ -229,7 +229,7 @@ export default function PrivacyPolicy() {
 
           <h2 className="text-xl font-semibold mt-10 mb-3">10. Children</h2>
           <p>
-            Kaizer News is not directed to children under 13 (or the
+            Kaizer X is not directed to children under 13 (or the
             applicable age in your country). We do not knowingly collect
             personal data from children. If you believe a child has
             provided us with personal data, contact us and we will delete
@@ -262,7 +262,7 @@ export default function PrivacyPolicy() {
         </div>
 
         <div className="mt-16 pt-6 border-t border-gray-200 text-xs text-gray-400 text-center">
-          © {new Date().getFullYear()} Kaizer News. All rights reserved.
+          © {new Date().getFullYear()} Kaizer X. All rights reserved.
         </div>
       </div>
     </div>

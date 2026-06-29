@@ -3,12 +3,14 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock,
   Clapperboard, CheckSquare, Square, StopCircle, ExternalLink,
-  Check, X, Star, Pencil,
+  Check, X, Star, Pencil, CalendarClock, Send,
 } from "lucide-react";
 import { api } from "../api/client";
+import { openJobProgress } from "../api/ws";
 import { parseV2Error } from "../api/errorMessages";
 import { useAuth } from "../auth/AuthProvider";
 import ProgressLog from "../components/ProgressLog";
+import JobPipelineV4 from "../components/jobPipelineV4/JobPipelineV4";
 import ClipCard from "../components/ClipCard";
 import BulkPublishModal from "../components/BulkPublishModal";
 
@@ -40,7 +42,7 @@ const V2_STAGE_LABELS = {
   stage_2_continuity: "Identifying cuts",
   stage_2_5_entities: "Canonicalizing entities",
   stage_3_fanout:     "Generating shorts + metadata + image plan",
-  stage_4_render:     "Rendering bulletin + shorts",
+  stage_4_render:     "Rendering full video + shorts",
   finalize:           "Finishing up",
 };
 
@@ -75,18 +77,65 @@ export default function JobDetail() {
   useEffect(() => {
     loadJob();
     pollStatus();
-    const t = setInterval(() => {
-      api.getJobStatus(jobId).then(s => {
-        setStatus(s);
-        // Stop polling on ALL terminal states — including the new
-        // "cancelled" one set by the Stop button.
-        if (s?.status === "done" || s?.status === "failed" || s?.status === "cancelled") {
-          clearInterval(t);
-          loadJob();
-        }
+
+    // Live progress: WebSocket-first (one shared DB tail on the server
+    // fans out to every viewer), with automatic fallback to the legacy
+    // 2s polling if the socket can't connect (old backend, proxy
+    // without WS, etc.). Both feeds produce the same `status` shape.
+    let pollTimer = null;
+    let stopped = false;
+    const TERMINAL = ["done", "failed", "cancelled"];
+
+    const startPolling = () => {
+      if (pollTimer || stopped) return;
+      pollTimer = setInterval(() => {
+        api.getJobStatus(jobId).then(s => {
+          setStatus(s);
+          // Stop polling on ALL terminal states — including the new
+          // "cancelled" one set by the Stop button.
+          if (TERMINAL.includes(s?.status)) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            loadJob();
+          }
+        });
+      }, 2000);
+    };
+
+    let sock = null;
+    try {
+      sock = openJobProgress(jobId, {
+        onFrame: (f) => {
+          if (f.type !== "job") return;
+          setStatus(prev => {
+            const incoming = f.log_lines || [];
+            const prevLines = (prev && prev.log_lines) || [];
+            // Server sends the FULL log when incoming length equals the
+            // total offset (first frame / resync); otherwise a delta.
+            const lines = incoming.length === (f.log_offset || 0)
+              ? incoming
+              : [...prevLines, ...incoming];
+            return {
+              ...(prev || {}),
+              status: f.status,
+              current_stage: f.current_stage,
+              error: f.error,
+              log_lines: lines,
+            };
+          });
+          if (TERMINAL.includes(f.status)) loadJob();
+        },
+        onDown: startPolling,
       });
-    }, 2000);
-    return () => clearInterval(t);
+    } catch {
+      startPolling();
+    }
+
+    return () => {
+      stopped = true;
+      if (pollTimer) clearInterval(pollTimer);
+      if (sock) sock.close();
+    };
   }, [jobId]);
 
   async function doExport() {
@@ -149,6 +198,10 @@ export default function JobDetail() {
   const isDone      = currentStatus === "done";
   const isFailed    = currentStatus === "failed";
   const isCancelled = currentStatus === "cancelled";
+  // Quick Publish / raw upload: published as-is, never edited here -> no canvas editor; link
+  // straight to the published YouTube video(s) instead.
+  const isQuickPublish = (job.frame_layout || "") === "raw_upload";
+  const publishedVideos = job.published_videos || [];
   const pct       = status?.progress_pct ?? job.progress_pct;
   const logLines  = status?.log_lines ?? job.log?.split("\n") ?? [];
 
@@ -156,7 +209,7 @@ export default function JobDetail() {
     <div className="max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 sm:px-6 py-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4 mb-6">
-        <Link to="/" className="btn btn-secondary py-1.5 px-2.5 self-start flex items-center gap-1">
+        <Link to="/app" className="btn btn-secondary py-1.5 px-2.5 self-start flex items-center gap-1">
           <ArrowLeft size={14} />
         </Link>
         <div className="flex-1 min-w-0">
@@ -209,17 +262,26 @@ export default function JobDetail() {
         </div>
 
         {isDone && (
-          <div className="flex gap-2 self-start flex-shrink-0">
-            {job.platform === "full_video_shorts_v4" ? (
-              // V4 jobs have their own canvas-based editor — different
-              // schema, different mutation model (canvas.json source of
-              // truth). Route there instead of the legacy clip editor.
+          <div className="flex gap-2 self-start flex-shrink-0 flex-wrap">
+            {isQuickPublish ? (
+              /* Quick Publish was never edited here — no canvas editor. Link to the published
+                 video(s) instead (one button per channel it went to). */
+              publishedVideos.length > 0 ? (
+                publishedVideos.map((pv) => (
+                  <a key={(pv.video_id || "") + (pv.channel || "")} href={pv.watch_url}
+                     target="_blank" rel="noopener noreferrer" title={pv.watch_url}
+                     className="btn btn-secondary flex items-center gap-1.5 text-sm text-red-300 hover:text-red-200">
+                    <ExternalLink size={14} /> {pv.channel ? `YouTube · ${pv.channel}` : "Watch on YouTube"}
+                  </a>
+                ))
+              ) : (
+                <span className="text-sm text-gray-500 self-center">Uploaded — no YouTube link yet</span>
+              )
+            ) : (
+              /* All pipeline jobs open in the canvas editor. Older V1 jobs have no canvas.json;
+                 the editor shows a graceful "older job" notice for those. */
               <Link to={`/jobs/${jobId}/v4-edit`} className="btn btn-secondary flex items-center gap-1.5 text-sm">
                 <Edit2 size={14} /> Canvas Editor
-              </Link>
-            ) : (
-              <Link to={`/jobs/${jobId}/edit`} className="btn btn-secondary flex items-center gap-1.5 text-sm">
-                <Edit2 size={14} /> Editor
               </Link>
             )}
             <button
@@ -309,7 +371,18 @@ export default function JobDetail() {
       {/* Progress */}
       {(isRunning || isFailed || (isDone && logLines.length > 0)) && (
         <div className="mb-6">
-          <ProgressLog lines={logLines} pct={pct} status={currentStatus} />
+          {job.platform === "full_video_shorts_v4" ? (
+            <JobPipelineV4
+              logLines={logLines}
+              status={currentStatus}
+              pct={pct}
+              clips={job.clips || []}
+              error={status?.error || job.error}
+              elapsedSec={status?.elapsed_seconds ?? job.elapsed_seconds ?? 0}
+            />
+          ) : (
+            <ProgressLog lines={logLines} pct={pct} status={currentStatus} />
+          )}
         </div>
       )}
 
@@ -436,6 +509,13 @@ export default function JobDetail() {
         <FeedbackPanel jobId={jobId} />
       )}
 
+      {/* Auto-publish via a Publishing Plan (Campaigns → live V2 publish
+          path). Fans this finished job's clips out to the plan's channels,
+          spaced per the plan's schedule. */}
+      {isDone && (
+        <PublishingPlanRunner jobId={jobId} />
+      )}
+
       {/* Bulk-publish modal — opened from the "Publish N selected" header
           button. Clips are passed in job-order so scheduled publishes go
           out in the order the editor sees them. */}
@@ -454,9 +534,15 @@ export default function JobDetail() {
               return next;
             });
           }
-          // Optimistic nav to /uploads when everything succeeded.
+          // Optimistic nav when everything succeeded. A single-clip batch
+          // deep-links to that publish's per-channel audit page; multiple
+          // clips → multiple publish tasks, so the /uploads list (one card
+          // per task) is the right landing spot.
           if (results?.failed?.length === 0 && results?.ok?.length > 0) {
-            setTimeout(() => navigate("/uploads"), 1300);
+            const tid = results.ok.length === 1
+              ? results.ok[0]?.res?.publish_task_id
+              : null;
+            setTimeout(() => navigate(tid ? `/uploads/${tid}` : "/uploads"), 1300);
           }
         }}
       />
@@ -751,6 +837,105 @@ function RenamableTitle({ jobId, initialName, videoName, onRenamed }) {
  * Backend returns 409 if the user already submitted — UI gracefully
  * collapses to a "you've already rated" notice in that case.
  */
+/** Run a Publishing Plan (Campaign) on a finished job — fans its clips out to
+ *  the plan's channels via the live V2 publish pipeline, spaced per the plan. */
+function PublishingPlanRunner({ jobId }) {
+  const [plans, setPlans]   = useState(null);   // null = loading, [] = none
+  const [planId, setPlanId] = useState("");
+  const [busy, setBusy]     = useState(false);
+  const [status, setStatus] = useState("idle"); // idle | queued | error
+  const [msg, setMsg]       = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api.listCampaigns()
+      .then((rows) => {
+        if (!alive) return;
+        setPlans(rows || []);
+        if (rows && rows.length) setPlanId(String(rows[0].id));
+      })
+      .catch(() => { if (alive) setPlans([]); });
+    return () => { alive = false; };
+  }, []);
+
+  async function run() {
+    if (!planId) return;
+    setBusy(true); setStatus("idle"); setMsg("");
+    try {
+      await api.runCampaign(Number(planId), jobId);
+      setStatus("queued");
+      setMsg("Publishing started — clips are being scheduled to the plan's channels.");
+    } catch (e) {
+      setStatus("error");
+      setMsg(e.message || "Failed to run plan");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (plans === null) return null; // still loading — keep the page quiet
+
+  return (
+    <div className="card p-4 sm:p-5 mb-6">
+      <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+        <CalendarClock size={14} className="text-accent2" />
+        Auto-publish with a Publishing Plan
+      </h3>
+      <p className="text-[12px] text-gray-500 mb-3">
+        Fan this job's clips out to a plan's channels on its schedule (spacing,
+        daily cap, quiet hours). Uploads go to YouTube via the live publish
+        pipeline.
+      </p>
+
+      {plans.length === 0 ? (
+        <div className="text-sm text-gray-400">
+          No Publishing Plans yet.{" "}
+          <Link to="/campaigns" className="text-accent2 hover:underline">Create one →</Link>
+        </div>
+      ) : status === "queued" ? (
+        <div className="text-sm text-green-300 flex items-start gap-2">
+          <Check size={14} className="text-green-400 mt-0.5 flex-shrink-0" />
+          <span>
+            {msg}{" "}
+            <Link to="/uploads" className="text-accent2 hover:underline">View uploads →</Link>
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <select
+            value={planId}
+            onChange={(e) => setPlanId(e.target.value)}
+            disabled={busy}
+            className="flex-1 bg-black border border-border rounded px-2 py-1.5 text-sm text-white"
+          >
+            {plans.map((p) => {
+              const n = p.channel_ids?.length || 0;
+              return (
+                <option key={p.id} value={p.id}>
+                  {p.name} · {n} channel{n === 1 ? "" : "s"} · every {p.spacing_minutes}m
+                  {p.active ? "" : " (paused)"}
+                </option>
+              );
+            })}
+          </select>
+          <button
+            onClick={run}
+            disabled={busy || !planId}
+            className="btn btn-primary text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            Run plan now
+          </button>
+        </div>
+      )}
+      {status === "error" && (
+        <p className="text-xs text-red-400 mt-2">{msg}</p>
+      )}
+    </div>
+  );
+}
+
+
 function FeedbackPanel({ jobId }) {
   const [rating,    setRating]    = useState(70);
   const [comment,   setComment]   = useState("");

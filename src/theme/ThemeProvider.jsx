@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 
 const STORAGE_KEY = "kaizer_theme";
-// Default theme: LIGHT. Kaizer News presents itself as a SaaS product
+// Default theme: LIGHT. Kaizer X presents itself as a SaaS product
 // and the YouTube compliance reviewer (and most creators) expect a
 // white-background interface. Users who want dark mode can toggle via
 // the sun/moon button in the NavBar; the choice is persisted in

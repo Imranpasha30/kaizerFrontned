@@ -36,7 +36,7 @@
 
 export const LANDING_CONTENT = {
   meta: {
-    title:       "Kaizer News — long videos in, vertical clips out",
+    title:       "Kaizer X — long videos in, vertical clips out",
     description:
       "Upload a recording. We handle trimming, captions, and "
     + "scheduled publishing. You approve every clip before it goes "
@@ -349,12 +349,12 @@ export const LANDING_CONTENT = {
       },
     ],
     smallprint:
-      "Kaizer News uses YouTube API Services. By using Kaizer News, "
+      "Kaizer X uses YouTube API Services. By using Kaizer X, "
     + "you agree to the YouTube Terms of Service "
     + "(https://www.youtube.com/t/terms) and the Google Privacy Policy "
     + "(https://policies.google.com/privacy). Limited Use disclosures "
     + "are documented on our Privacy page.",
-    copyright: "© Kaizer News. All rights reserved.",
+    copyright: "© Kaizer X. All rights reserved.",
   },
 
   // ─── Section navigation map (TOC) ─────────────────────────────

@@ -108,7 +108,7 @@ export default function MetaSettings() {
       </div>
       <p className="text-sm text-gray-400 mb-6">
         Connect Facebook Pages + linked Instagram Business / Creator accounts to publish
-        your finished bulletins (long-form) and shorts (Reels) without going through Postiz.
+        your finished full videos (long-form) and shorts (Reels) without going through Postiz.
         Each Page you connect becomes a destination in the V4 editor's publish modal.
       </p>
 

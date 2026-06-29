@@ -49,7 +49,7 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
       }
       setError("");
     } catch (e) {
-      setError(e?.message || "Failed to load bulletin images");
+      setError(e?.message || "Failed to load full video images");
     } finally {
       setLoading(false);
     }
@@ -109,14 +109,14 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
   if (loading) {
     return (
       <div className="p-4 text-xs text-gray-500 flex items-center gap-2">
-        <Loader2 size={14} className="animate-spin" /> Loading bulletin images…
+        <Loader2 size={14} className="animate-spin" /> Loading full video images…
       </div>
     );
   }
   if (!data || (!data.pool?.length && !data.stories?.length)) {
     return (
       <div className="p-4 text-xs text-gray-500 italic">
-        No bulletin images on disk yet. Did the pipeline finish?
+        No full video images on disk yet. Did the pipeline finish?
       </div>
     );
   }
@@ -133,7 +133,7 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-accent">
-            Bulletin images
+            Full Video images
           </div>
           <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
             {showPool ? (
@@ -197,10 +197,10 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
           <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded p-2 flex items-start gap-1.5">
             <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              <strong>Images updated.</strong> Click <strong>Re-compose bulletin</strong>
-              {" "}below to bake the changes into the final bulletin.mp4.
+              <strong>Images updated.</strong> Click <strong>Re-compose full video</strong>
+              {" "}below to bake the changes into the final video file.
               Gemini analysis + OpenAI generation are skipped (cached) — only
-              the FFmpeg compose runs, ~7–10 min for a typical bulletin.
+              the FFmpeg compose runs, ~7–10 min for a typical full video.
             </span>
           </div>
         )}
@@ -208,7 +208,7 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
           <div className="text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded p-2 flex items-start gap-1.5">
             <Loader2 size={12} className="mt-0.5 flex-shrink-0 animate-spin" />
             <span>
-              Re-composing bulletin.mp4 — polling every 5s. The preview will
+              Re-composing full video — polling every 5s. The preview will
               pick up the new render automatically when it lands. You can
               close this tab; the job keeps running in the background.
             </span>
@@ -282,7 +282,7 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
           {recomposing ? (
             <><Loader2 size={14} className="animate-spin" /> Re-composing…</>
           ) : (
-            <><RefreshCw size={14} /> Re-compose bulletin{scope !== "auto" ? ` (${scope})` : ""}</>
+            <><RefreshCw size={14} /> Re-compose full video{scope !== "auto" ? ` (${scope})` : ""}</>
           )}
         </button>
       </div>

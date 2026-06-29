@@ -12,7 +12,7 @@ import React, { useEffect, useRef } from "react";
  */
 export default function ParticleField({
   density = 40,
-  color = "231,76,60",
+  color = "255, 75, 69",
   className = "",
 }) {
   const canvasRef = useRef(null);

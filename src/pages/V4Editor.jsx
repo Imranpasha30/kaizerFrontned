@@ -3,9 +3,13 @@ import { useParams, Link } from "react-router-dom";
 import {
   RefreshCw, Loader2, Upload, Trash2, ArrowUp, ArrowDown,
   ImagePlus, AlertCircle, CheckCircle2, Plus, Play, ArrowLeft,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, FileText, Sparkles,
 } from "lucide-react";
 import { api, getToken } from "../api/client";
+import PublishModal from "../components/PublishModal";
+import CustomTemplateEditor from "../components/CustomTemplateEditor";
+import LiveCompositor from "../components/LiveCompositor";
+import ShortCompositor from "../components/ShortCompositor";
 import {
   exportBulletinClient,
   isClientExportSupported,
@@ -100,9 +104,11 @@ export default function V4Editor() {
   const [dirty, setDirty]       = useState(false);
   const [saving, setSaving]     = useState(false);
   const [renderState, setRenderState] = useState({ state: "idle", msg: "", target: "" });
+  const [deferred, setDeferred] = useState(false);   // Stage 2/3: pipeline produced the scene but skipped the up-front render
   const [bulletinUrl, setBulletinUrl] = useState("");
   const [trimmedUrl,  setTrimmedUrl]  = useState("");
   const [shortsUrls,  setShortsUrls]  = useState([]);
+  const [trimmedShortsUrls, setTrimmedShortsUrls] = useState([]);   // raw trimmed shorts (live preview)
   const [bulletinClipId, setBulletinClipId] = useState(null);
   const [shortsClipIds,  setShortsClipIds]  = useState([]);
   const [channels,    setChannels]    = useState([]);
@@ -124,6 +130,24 @@ export default function V4Editor() {
   // "first image of pool". Updated when the user clicks an image row /
   // opens replace / opens frame. {storyIdx, imgIdx} or null.
   const [activeImage, setActiveImage] = useState(null);
+  // V4 KEEP/CUT planner that ran for this job. NULL on pre-rollout
+  // rows; the header renders no badge in that case. One-shot fetch
+  // (the value never changes after Step 1 finishes).
+  const [trimPlanner, setTrimPlanner] = useState(null);
+  // V4 image provider that ran for this job ("auto" / "gemini" /
+  // "openai" / NULL on pre-rollout). Same one-shot pattern.
+  const [imageProvider, setImageProvider] = useState(null);
+  // Source-preserved indicator — set when the operator supplied a
+  // verbatim description at submit time. Drives the small badge
+  // and the "your source video kept as-is" hint on the bulletin row.
+  const [sourcePreserved, setSourcePreserved] = useState(false);
+  // Original publish target (instagram/youtube/facebook) the operator picked.
+  // The editor leads with this platform's SEO so an Instagram Reel job shows
+  // Instagram caption+hashtags, not YouTube title+tags.
+  const [targetPlatform, setTargetPlatform] = useState("youtube");
+  // Custom full-form template layout ("custom:<id>" or "") — when set, the bulletin
+  // viewport's "Edit layout" opens the custom-template editor instead of the canvas editor.
+  const [customFullLayout, setCustomFullLayout] = useState("");
 
   // Poll loop for render state when something is in flight
   const pollRef = useRef(null);
@@ -143,6 +167,8 @@ export default function V4Editor() {
       setBulletinClipId(r.bulletin_clip_id ?? null);
       setShortsClipIds(r.shorts_clip_ids || []);
       setShortsUrls(r.shorts_urls || []);
+      setTrimmedShortsUrls(r.trimmed_shorts_urls || []);
+      setDeferred(r.current_stage === "render_deferred");
       setErr("");
     } catch (e) {
       setErr(e?.message || "failed to load canvas");
@@ -152,6 +178,39 @@ export default function V4Editor() {
   }, [jobId]);
 
   useEffect(() => { fetchCanvas(); }, [fetchCanvas]);
+
+  // Snap the selection to a section that EXISTS for this output format:
+  // shorts-only jobs have no Full Video, full-only jobs have no shorts. Keeps
+  // the editor from opening on (or getting stuck on) a hidden section.
+  useEffect(() => {
+    if (!canvas) return;
+    const fmt = canvas.output_format || "both";
+    if (fmt === "shorts-only" && selected.kind === "bulletin") {
+      setSelected({ kind: "short", index: 0 });
+    } else if (fmt === "full-only" && selected.kind === "short") {
+      setSelected({ kind: "bulletin", index: 0 });
+    }
+  }, [canvas, selected.kind]);
+
+  // One-shot fetch of the Job row so we can show which AI engine ran
+  // Step 1's KEEP/CUT plan AND which provider generated the images.
+  // Soft-fails — badges just stay hidden.
+  useEffect(() => {
+    let alive = true;
+    api.getJob(jobId)
+      .then((j) => {
+        if (!alive) return;
+        setTrimPlanner(j?.v4_trim_planner || null);
+        setImageProvider(j?.v4_image_provider || null);
+        setSourcePreserved(Boolean(j?.v4_predefined_description));
+        setTargetPlatform((j?.v4_target_platform || "youtube").toLowerCase());
+        setCustomFullLayout(
+          String(j?.fullform_layout || "").startsWith("custom:") ? j.fullform_layout : ""
+        );
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [jobId]);
 
   // One-shot fetch:
   //   * listChannels() returns BOTH style profiles AND connected YT
@@ -220,6 +279,14 @@ export default function V4Editor() {
     return () => clearTimeout(pollRef.current);
   }, [renderState.state, jobId, fetchCanvas]);
 
+  // ── Bulk "apply to all shorts" ops ────────────────────────────
+  // Ports the two bulk actions the legacy editor had: copy one short's SEO
+  // to every short, and apply one short's image to every short (+ re-render).
+  // Both mutate the canvas then v4PutCanvas — which re-materialises Clip rows
+  // server-side, so the publish path picks up the change with no extra wiring.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg]   = useState("");
+
   // ── Save handler ──────────────────────────────────────────────
   async function saveCanvas() {
     if (!canvas) return;
@@ -253,6 +320,21 @@ export default function V4Editor() {
       const nc = structuredClone(c);
       const s = nc.bulletin.stories[storyIdx];
       mutator(s);
+      return nc;
+    });
+    setDirty(true);
+  }
+
+  // Apply a patch to EVERY ticker text-block across all stories. The live
+  // ticker controls are one global pair, and the renderer reads the first
+  // set value — so keeping them in sync avoids ambiguity.
+  function setAllTickerBlocks(patch) {
+    setCanvas((c) => {
+      if (!c) return c;
+      const nc = structuredClone(c);
+      for (const s of (nc.bulletin?.stories || []))
+        for (const b of (s.text_blocks || []))
+          if (b.kind === "ticker") Object.assign(b, patch);
       return nc;
     });
     setDirty(true);
@@ -420,7 +502,7 @@ export default function V4Editor() {
             vsid: 35, vcor: 72, vwid: 74, bgr0: 193, bgr1: 128,
           },
           follow_params: {
-            follow_text: "FOLLOW KAIZER NEWS TELUGU",
+            follow_text: "FOLLOW KAIZER X TELUGU",
             follow_text_color: "#FFFFFF",
             bg_color: "#1A0A2E",
             text_color: "#FFFF00",
@@ -454,6 +536,94 @@ export default function V4Editor() {
     }
   }
 
+  // Poll render state until it settles (the render-lock allows only ONE
+  // render per job at a time, so bulk re-renders must run sequentially).
+  async function waitForRenderIdle(timeoutMs = 180000) {
+    const t0 = Date.now();
+    for (;;) {
+      let st = "idle";
+      try { const r = await api.v4RenderState(jobId); st = r.state || "idle"; }
+      catch { /* transient — treat as still working */ }
+      if (st !== "running" && st !== "queued") return st;
+      if (Date.now() - t0 > timeoutMs) return "timeout";
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+  }
+
+  // Copy one short's SEO (title/description/tags/hashtags) onto EVERY other
+  // short. Pure metadata — no re-render needed. v4PutCanvas syncs clip.seo so
+  // the publish flow uses the copied SEO too.
+  async function applySeoToAllShorts(srcIdx) {
+    if (!canvas?.shorts?.[srcIdx]) return;
+    const src = canvas.shorts[srcIdx].seo;
+    if (!src || !((src.title || "").trim() || (src.description || "").trim())) {
+      setErr("Generate SEO on this short first, then apply it to the others.");
+      return;
+    }
+    const others = canvas.shorts.length - 1;
+    if (others < 1) { setErr("There are no other shorts to apply to."); return; }
+    if (!window.confirm(
+      `Copy this short's SEO (title, description, tags, hashtags) to ${others} ` +
+      `other short${others > 1 ? "s" : ""}? This OVERWRITES their SEO.`
+    )) return;
+    setBulkBusy(true); setBulkMsg(""); setErr("");
+    try {
+      const nc = structuredClone(canvas);
+      for (let i = 0; i < nc.shorts.length; i++) {
+        if (i === srcIdx) continue;
+        nc.shorts[i].seo = structuredClone(src);
+        nc.shorts[i].seo.edited_by_user = true;
+      }
+      setCanvas(nc);
+      await api.v4PutCanvas(jobId, nc);   // re-materialises clip.seo for publish
+      setDirty(false);
+      setBulkMsg(`SEO applied to ${others} short${others > 1 ? "s" : ""}.`);
+    } catch (e) {
+      setErr(e?.message || "apply-to-all (SEO) failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Apply one short's image to EVERY other short, then re-render each so the
+  // new image is baked into the video. Sequential because of the render-lock.
+  async function applyImageToAllShorts(srcIdx) {
+    if (!canvas?.shorts?.[srcIdx]) return;
+    const img = canvas.shorts[srcIdx].short_config?.image_filename;
+    if (!img) { setErr("This short has no image yet — pick or fetch one first."); return; }
+    const targets = canvas.shorts.map((_, i) => i).filter((i) => i !== srcIdx);
+    if (targets.length < 1) { setErr("There are no other shorts to apply to."); return; }
+    if (!window.confirm(
+      `Apply this image to ${targets.length} other short${targets.length > 1 ? "s" : ""} ` +
+      `and re-render them? This OVERWRITES their image and runs one render each.`
+    )) return;
+    setBulkBusy(true); setBulkMsg("Applying image…"); setErr("");
+    try {
+      const nc = structuredClone(canvas);
+      for (const i of targets) {
+        if (!nc.shorts[i].short_config) nc.shorts[i].short_config = {};
+        nc.shorts[i].short_config.image_filename = img;
+      }
+      setCanvas(nc);
+      await api.v4PutCanvas(jobId, nc);
+      setDirty(false);
+      // Sequential re-render — one short at a time (render-lock).
+      for (let k = 0; k < targets.length; k++) {
+        const idx = targets[k];
+        setBulkMsg(`Re-rendering short ${idx + 1} (${k + 1}/${targets.length})…`);
+        await waitForRenderIdle();                 // wait for any in-flight render
+        await api.v4TriggerRender(jobId, { target: "short", index: idx });
+        await waitForRenderIdle();                 // wait for this one to finish
+      }
+      setBulkMsg(`Image applied + re-rendered ${targets.length} short${targets.length > 1 ? "s" : ""}.`);
+      await fetchCanvas();                          // refresh thumbs / URLs
+    } catch (e) {
+      setErr(e?.message || "apply-to-all (image) failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-8 text-center text-gray-400">
@@ -466,6 +636,15 @@ export default function V4Editor() {
       <div className="max-w-2xl mx-auto p-6">
         <div className="p-4 bg-red-500/10 border border-red-500/30 rounded text-red-200">
           <AlertCircle className="inline mr-2" /> {err}
+        </div>
+        {/* Older jobs were made with the retired V1 pipeline and have no
+            canvas.json, so they can't open in the canvas editor. Re-running
+            the source video creates a canvas-native job. */}
+        <div className="text-gray-400 text-sm mt-3">
+          This may be an older job created before the canvas editor — those
+          don&apos;t have an editable canvas. Re-run the video from{" "}
+          <Link to="/new" className="text-accent2 underline">New Job</Link>{" "}
+          to edit it here.
         </div>
         <Link to={`/jobs/${jobId}`} className="text-accent2 text-sm mt-3 inline-block">
           ← Back to job
@@ -494,6 +673,14 @@ export default function V4Editor() {
       ? shortsUrls[selected.index]
       : null;
 
+  // Respect the job's output-format choice: a shorts-only job (Instagram
+  // Reel / YouTube Short) has NO full video, and a full-only job (YouTube
+  // Full Video) has NO shorts — so the editor must not show the section
+  // that was never rendered. "both" shows everything.
+  const outputFormat = canvas?.output_format || "both";
+  const showFull   = outputFormat !== "shorts-only";
+  const showShorts = outputFormat !== "full-only";
+
   return (
     <div className="max-w-[1800px] mx-auto p-3">
       <V4EditorHeader
@@ -501,21 +688,48 @@ export default function V4Editor() {
         renderState={renderState}
         dirty={dirty}
         saving={saving}
+        trimPlanner={trimPlanner}
+        imageProvider={imageProvider}
+        sourcePreserved={sourcePreserved}
         onSave={saveCanvas}
         onRender={() => saveAndRender(selected.kind === "short" ? "short" : "bulletin", selected.index || 0)}
         onRefresh={fetchCanvas}
       />
 
+      {/* Stage 2/3: deferred render — the scene is ready but the MP4 hasn't been rendered yet
+          for the section being viewed. Edit freely, then Export on demand. */}
+      {deferred
+        && (selected.kind === "short" ? !shortsUrls[selected.index || 0] : !bulletinUrl)
+        && !["queued", "running"].includes(renderState.state) && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-amber-600/40 bg-amber-500/10 px-4 py-2.5">
+          <span className="text-amber-200 text-sm">
+            ✦ Scene ready — render was deferred. Edit freely, then export to MP4 when it's perfect.
+          </span>
+          <button
+            onClick={() => saveAndRender(selected.kind === "short" ? "short" : "bulletin", selected.index || 0)}
+            className="ml-auto px-4 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold shrink-0">
+            ⤓ Export {selected.kind === "short" ? "this short" : "full video"} to MP4
+          </button>
+        </div>
+      )}
+
       {publishTarget && (
         <PublishModal
-          target={publishTarget}
-          channels={channels}
+          open={!!publishTarget}
           onClose={() => setPublishTarget(null)}
+          clip={{
+            id: publishTarget.clipId,
+            seo: { title: publishTarget.title },
+            // PublishModal derives short-vs-video from these: a "bulletin"
+            // frame_type → long-form video; a ≤60s duration → short.
+            frame_type: publishTarget.kind === "video" ? "bulletin" : undefined,
+            duration: publishTarget.kind === "short" ? 30 : 0,
+          }}
+          jobId={jobId}
           onPublished={() => {
             setPublishTarget(null);
-            setErr("Published to YouTube — track progress in the Uploads tab.");
+            setErr("Published — track progress in the Uploads tab.");
           }}
-          setErr={setErr}
         />
       )}
 
@@ -536,7 +750,7 @@ export default function V4Editor() {
           <div className="flex-1 text-xs">
             <div className="font-semibold text-amber-200">Ready to publish</div>
             <div className="text-amber-300/70">
-              The pipeline finished. Confirm to publish bulletin + {(shortsClipIds || []).filter(Boolean).length} short(s)
+              The pipeline finished. Confirm to publish full video + {(shortsClipIds || []).filter(Boolean).length} short(s)
               to {defaults.channel_ids?.length || 0} channel(s) at {defaults.privacy || "public"} privacy.
             </div>
           </div>
@@ -561,28 +775,36 @@ export default function V4Editor() {
         {/* LEFT NAVIGATION — Bulletin + Shorts + Library */}
         <aside className="rounded-lg border border-border bg-panel p-2 overflow-y-auto shadow-card"
                style={{ maxHeight: "78vh" }}>
-          <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-ink-200 px-2 py-1 mb-1">Output</div>
-          <NavItem
-            active={selected.kind === "bulletin"}
-            onClick={() => setSelected({ kind: "bulletin", index: 0 })}
-            label="Bulletin"
-            sublabel="16:9 long-form · YouTube video"
-            url={bulletinUrl}
-          />
-          <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-ink-200 px-2 py-1 mt-3 mb-1">
-            Shorts ({canvas?.shorts?.length || 0})
-          </div>
-          {(canvas?.shorts || []).map((sc, i) => (
-            <NavItem
-              key={i}
-              active={selected.kind === "short" && selected.index === i}
-              onClick={() => setSelected({ kind: "short", index: i })}
-              label={`Short ${String(i + 1).padStart(2, "0")}`}
-              sublabel={sc.short_config?.layout || "torn_card"}
-              url={shortsUrls[i]}
-              vertical
-            />
-          ))}
+          {showFull && (
+            <>
+              <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-ink-200 px-2 py-1 mb-1">Output</div>
+              <NavItem
+                active={selected.kind === "bulletin"}
+                onClick={() => setSelected({ kind: "bulletin", index: 0 })}
+                label="Full Video"
+                sublabel="16:9 long-form · YouTube video"
+                url={bulletinUrl}
+              />
+            </>
+          )}
+          {showShorts && (
+            <>
+              <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-ink-200 px-2 py-1 mt-3 mb-1">
+                Shorts ({canvas?.shorts?.length || 0})
+              </div>
+              {(canvas?.shorts || []).map((sc, i) => (
+                <NavItem
+                  key={i}
+                  active={selected.kind === "short" && selected.index === i}
+                  onClick={() => setSelected({ kind: "short", index: i })}
+                  label={`Short ${String(i + 1).padStart(2, "0")}`}
+                  sublabel={sc.short_config?.layout || "torn_card"}
+                  url={shortsUrls[i]}
+                  vertical
+                />
+              ))}
+            </>
+          )}
           <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-ink-200 px-2 py-1 mt-3 mb-1">Library</div>
           <NavItem
             active={selected.kind === "pool"}
@@ -612,9 +834,11 @@ export default function V4Editor() {
               onPublish={() => setPublishTarget({
                 clipId: bulletinClipId,
                 kind: "video",
-                title: canvas?.bulletin?.seo?.title || "Bulletin",
+                title: canvas?.bulletin?.seo?.title || "Full Video",
               })}
               onLayoutChange={setLayout}
+              isCustomFull={!!customFullLayout}
+              onCustomRendered={fetchCanvas}
             />
           )}
           {selected.kind === "short" && selectedCanvas && (
@@ -623,6 +847,7 @@ export default function V4Editor() {
               index={selected.index}
               short={selectedCanvas}
               url={selectedUrl}
+              trimmedUrl={trimmedShortsUrls[selected.index] || ""}
               pool={pool}
               clipId={selectedClipId}
               accounts={ytAccounts}
@@ -673,13 +898,31 @@ export default function V4Editor() {
                 jobId={jobId}
                 clipId={bulletinClipId}
                 channels={channels}
-                onRegenerated={(freshSeo) => {
+                onRegenerated={async (freshSeo) => {
+                  // Update local state AND persist the canvas in one
+                  // pass — without this, the regenerated SEO is only in
+                  // memory and a page refresh wipes it back to whatever
+                  // was last written to canvas.json. Same idempotent
+                  // PUT the Save button uses; just runs implicitly so
+                  // the operator never has to "remember to save" after
+                  // a Regenerate.
                   setBulletinSeo((s) => {
                     Object.keys(s).forEach((k) => delete s[k]);
                     Object.assign(s, freshSeo);
                   });
+                  try {
+                    const nextCanvas = structuredClone(canvas);
+                    nextCanvas.bulletin.seo = { ...(nextCanvas.bulletin.seo || {}), ...freshSeo };
+                    await api.v4PutCanvas(jobId, nextCanvas);
+                    setDirty(false);
+                  } catch (e) {
+                    setErr(`Auto-save after SEO regen failed: ${e?.message || e}`);
+                  }
                 }}
               />
+              <PerChannelSeoPreview jobId={jobId} clipId={bulletinClipId} target="bulletin" index={0} />
+              <PerChannelVideoPreview jobId={jobId} target="bulletin" index={0} />
+              <PlatformSeoPreview jobId={jobId} clipId={bulletinClipId} />
               <ThumbnailPanel jobId={jobId} target="bulletin" index={0} />
 
               {/* Stories editor — title / summary / carousel images /
@@ -841,11 +1084,28 @@ export default function V4Editor() {
               channels={channels}
               onConfig={(m) => setShortConfig(selected.index, m)}
               onSeo={(m) => setShortSeo(selected.index, m)}
-              onSeoRegenerated={(freshSeo) => {
+              onSeoRegenerated={async (freshSeo) => {
+                // Mirror of the bulletin path: update local state AND
+                // persist the canvas in one go so the regenerated SEO
+                // survives a page refresh without the operator having
+                // to click Save changes.
                 setShortSeo(selected.index, (s) => {
                   Object.keys(s).forEach((k) => delete s[k]);
                   Object.assign(s, freshSeo);
                 });
+                try {
+                  const nextCanvas = structuredClone(canvas);
+                  if (nextCanvas?.shorts?.[selected.index]) {
+                    nextCanvas.shorts[selected.index].seo = {
+                      ...(nextCanvas.shorts[selected.index].seo || {}),
+                      ...freshSeo,
+                    };
+                    await api.v4PutCanvas(jobId, nextCanvas);
+                    setDirty(false);
+                  }
+                } catch (e) {
+                  setErr(`Auto-save after SEO regen failed: ${e?.message || e}`);
+                }
               }}
               onAutoFetchImage={async () => {
                 const story0 = selectedCanvas.stories?.[0] || {};
@@ -881,12 +1141,18 @@ export default function V4Editor() {
                   return r;
                 } catch (e) { setErr(e?.message || "AI generation failed"); return null; }
               }}
+              bulkBusy={bulkBusy}
+              bulkMsg={bulkMsg}
+              shortsCount={(canvas.shorts || []).length}
+              targetPlatform={targetPlatform}
+              onApplySeoToAllShorts={() => applySeoToAllShorts(selected.index)}
+              onApplyImageToAllShorts={() => applyImageToAllShorts(selected.index)}
             />
           )}
 
           {selected.kind === "pool" && (
             <div className="text-[11px] text-gray-500 italic">
-              Image pool is job-wide — pick the Bulletin or any Short on the left to see its inspector.
+              Image pool is job-wide — pick the Full Video or any Short on the left to see its inspector.
             </div>
           )}
         </aside>
@@ -959,8 +1225,27 @@ function YoutubeQuotaPill() {
 }
 
 
-function V4EditorHeader({ jobId, renderState, dirty, saving, onSave, onRender, onRefresh }) {
+function V4EditorHeader({ jobId, renderState, dirty, saving, trimPlanner, imageProvider, sourcePreserved, onSave, onRender, onRefresh }) {
   const running = ["queued", "running"].includes(renderState.state);
+  // Planner badge — only render when the Job row actually carries a
+  // value (NULL on pre-rollout jobs). Claude is purple-ish (Anthropic
+  // brand), Gemini is sky/cyan (Google brand) so they're scannable
+  // at a glance in the jobs grid.
+  const plannerBadge = trimPlanner === "claude"
+    ? { label: "Planned by Claude Opus 4.7", cls: "text-violet-300 border-violet-500/30 bg-violet-500/5" }
+    : trimPlanner === "gemini"
+      ? { label: "Planned by Gemini 2.5 Flash", cls: "text-sky-300 border-sky-500/30 bg-sky-500/5" }
+      : null;
+  // Image-provider badge. Distinct hues so it doesn't visually collide
+  // with the planner badge: amber for auto (mixed sources), sky for
+  // gemini (Google), emerald for openai. Hidden on pre-rollout jobs.
+  const imageBadge = imageProvider === "gemini"
+    ? { label: "Images: Gemini Nano Banana", cls: "text-sky-300 border-sky-500/30 bg-sky-500/5" }
+    : imageProvider === "openai"
+      ? { label: "Images: OpenAI gpt-image-1", cls: "text-emerald-300 border-emerald-500/30 bg-emerald-500/5" }
+      : imageProvider === "auto"
+        ? { label: "Images: Auto (multi-source)", cls: "text-amber-300 border-amber-500/30 bg-amber-500/5" }
+        : null;
   return (
     <div className="flex items-center gap-3 flex-wrap">
       <Link to={`/jobs/${jobId}`} className="text-gray-400 hover:text-white">
@@ -970,6 +1255,30 @@ function V4EditorHeader({ jobId, renderState, dirty, saving, onSave, onRender, o
       <div className="text-[10px] text-emerald-400/70 px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5">
         Lipsync locked · audio passthrough
       </div>
+      {plannerBadge && (
+        <div
+          className={`text-[10px] px-2 py-0.5 rounded border ${plannerBadge.cls}`}
+          title="Which AI engine decided Step 1's KEEP/CUT plan for this job"
+        >
+          {plannerBadge.label}
+        </div>
+      )}
+      {imageBadge && (
+        <div
+          className={`text-[10px] px-2 py-0.5 rounded border ${imageBadge.cls}`}
+          title="Which provider generated this job's sidebar images and thumbnail"
+        >
+          {imageBadge.label}
+        </div>
+      )}
+      {sourcePreserved && (
+        <div
+          className="text-[10px] px-2 py-0.5 rounded border text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/5"
+          title="Operator supplied a verbatim description at submit — full video source kept AS-IS (no Claude trim); shorts still carved; full video SEO description = operator text"
+        >
+          Source preserved
+        </div>
+      )}
       <div className="ml-auto flex items-center gap-2">
         <YoutubeQuotaPill />
         <button
@@ -995,7 +1304,7 @@ function V4EditorHeader({ jobId, renderState, dirty, saving, onSave, onRender, o
         >
           {running
             ? <LiveSpinner label={`Rendering ${renderState.target || ""}`.trim()} active={running} size={12} />
-            : <><Play size={12} /> Re-render bulletin</>}
+            : <><Play size={12} /> Re-render full video</>}
         </button>
       </div>
 
@@ -2034,7 +2343,7 @@ function BgVideoPanel({ layout, onSet }) {
               />
             </div>
             {userVids.length === 0 ? (
-              <div className="text-[10px] text-gray-500 italic">No saved bg videos yet — upload one to reuse it on future bulletins.</div>
+              <div className="text-[10px] text-gray-500 italic">No saved bg videos yet — upload one to reuse it on future full videos.</div>
             ) : (
               <div className="grid grid-cols-2 gap-1.5">
                 {userVids.map((a) => (
@@ -2099,10 +2408,10 @@ function BgVideoPanel({ layout, onSet }) {
               onChange={(e) => setIntro(parseFloat(e.target.value) || 0)}
               className="w-full"
               disabled={!current}
-              title={current ? "How long the bg plays full-screen at full volume before the bulletin starts" : "Pick a bg video first"}
+              title={current ? "How long the bg plays full-screen at full volume before the full video starts" : "Pick a bg video first"}
             />
             <div className="text-[10px] text-gray-400 mt-0.5">
-              Seconds the bg plays full-screen with full audio before the bulletin layout fades in.
+              Seconds the bg plays full-screen with full audio before the full video layout fades in.
             </div>
           </div>
           )}
@@ -2432,25 +2741,203 @@ function ShortCard({ jobId, index, canvasShort, url, pool, renderBusy, onRender,
 //   3. saves the JPG and updates Clip.thumb_path
 // User clicks Generate -> JPG preview appears here, automatically
 // becomes the YouTube thumbnail when the clip is published.
+// Shared text-color tokens for the style picker cards. Inline-styled
+// so we bypass any Tailwind purge / CSS-cascade weirdness — the
+// previous attempt used utility classes that should have been
+// visible at ~11:1 contrast but rendered washed out on screen.
+//
+// Title       #F4F4F5  near-white. Visible on every card variant.
+// Description #C8C8D0  light grey, clearly LIGHTER than the card
+//                      background (~#181818 inactive, ~#2A1820
+//                      pink-tinted). WCAG AA on both.
+// One source of truth — change here and every card updates. Not
+// exported, so the same hex can't accidentally show up dark-on-light
+// elsewhere in the app.
+const STYLE_CARD_TITLE_STYLE = { color: "#F4F4F5", fontWeight: 600 };
+const STYLE_CARD_DESC_STYLE  = { color: "#C8C8D0" };
+
+
 function ThumbnailPanel({ jobId, target, index = 0 }) {
   const [busy, setBusy]     = useState(false);
   const [mode, setMode]     = useState("none");      // "first" | "tweak"
+  // Style + references state. styles is the catalog from the backend;
+  // styleKey is which one the operator picked; refsByStyle keeps the
+  // selected reference asset ids PER STYLE so flipping back and forth
+  // doesn't lose what they picked. uploading flag drives the spinner
+  // on the upload button.
+  const [styles, setStyles]         = useState([]);
+  // Default style is "auto" — backend planner decides composition based
+  // on the news content. Operator can still override via the Advanced
+  // expander below for power-user control, but the default UX is one
+  // big Generate button and let Gemini pick everything.
+  const [styleKey, setStyleKey]     = useState("auto");
+  const [refLibrary, setRefLibrary] = useState([]); // [{id, url, thumb_url, filename, tags}]
+  const [refsByStyle, setRefsByStyle] = useState({}); // { [styleKey]: [assetId, ...] }
+  const [uploading, setUploading]   = useState(false);
+  const [styleListOpen, setStyleListOpen] = useState(false);
+  const refFileRef = useRef(null);
+  // Image-gen provider for THIS thumbnail. "gemini" (Nano Banana, default,
+  // supports reference images) or "openai" (gpt-image-1, no reference
+  // support but sharper photorealism for symbolic stories). Server
+  // coerces openai+references back to gemini automatically.
+  const [provider, setProvider] = useState("gemini");
+  // Director engine — picks which brain runs the planner + prompter
+  // passes. "gemini" (cheap), "hybrid" (Claude plans, Gemini prompts —
+  // recommended), or "claude" (premium). Default cheap. Visible as a
+  // 3-tier picker in the panel header.
+  const [engine, setEngine] = useState("gemini");
+  // Shout-text rendering mode. "ai" = image model renders text inside
+  // the plate (more dramatic / integrated; may garble Indic ligatures).
+  // "overlay" = Pillow paints native-script text after generation
+  // (perfect Telugu typography guaranteed, looks like a sticker).
+  // Default "ai" matches operator preference (more cinematic look).
+  const [textMode, setTextMode] = useState("ai");
+  // Per-thumbnail language override. "" = use the canvas's language
+  // (default — the most common case). Set to an ISO code (te / hi /
+  // ta / kn / ml / bn / mr / gu / en) to force the shout-text script
+  // for this generation only. Populated on mount from /api/languages.
+  const [thumbLanguage, setThumbLanguage] = useState("");
+  const [languageOptions, setLanguageOptions] = useState([]);
+  // Manual drag-to-position editor state. The plate URL is the
+  // text-less AI background that we paint on; editorOpen toggles
+  // the panel; geom holds the operator's drag-positioned text box
+  // (percentages 0-100); editorText / editorColor are the current
+  // overlay inputs. Reset on every successful AI generation.
+  const [plateUrl, setPlateUrl] = useState("");
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorText, setEditorText] = useState("");
+  const [editorColor, setEditorColor] = useState("white_on_red");
+  const [editorGeom, setEditorGeom] = useState({
+    x: 0, y: 72, w: 100, h: 28,
+  });
+  const [editorBusy, setEditorBusy] = useState(false);
+  const editorContainerRef = useRef(null);
+  const editorDragRef = useRef(null);
   const [url,  setUrl]      = useState("");
   const [tweak, setTweak]   = useState("");
   const [hasPrompt, setHasPrompt] = useState(false); // tweak path unlocked after first gen
   const [err, setErr]       = useState("");
 
+  // On mount (and whenever target/index changes), check disk for an
+  // already-generated thumbnail. Without this, refreshing the page
+  // wipes the preview even though the JPG is still saved server-side.
+  useEffect(() => {
+    let alive = true;
+    if (!jobId) return undefined;
+    api.v4GetThumbnail(jobId, target, index)
+      .then((r) => {
+        if (!alive) return;
+        if (r?.url) setUrl(r.url);
+        if (r?.prompt) setHasPrompt(true);
+        if (r?.plate_url) setPlateUrl(r.plate_url);
+      })
+      .catch(() => { /* missing = first generation hasn't run yet */ });
+    return () => { alive = false; };
+  }, [jobId, target, index]);
+
+  // Pull the style catalog + the operator's reference image library
+  // once on mount. The catalog is small (~7 entries today); the
+  // library refresh is also cheap because user_assets is paginated
+  // server-side. Failures are non-fatal — the picker just shows the
+  // legacy single-Generate flow.
+  useEffect(() => {
+    let alive = true;
+    api.v4ThumbnailStyles()
+      .then((r) => { if (alive && Array.isArray(r)) setStyles(r); })
+      .catch(() => {});
+    api.v4ListThumbnailRefs()
+      .then((r) => { if (alive && Array.isArray(r)) setRefLibrary(r); })
+      .catch(() => {});
+    // Pull the supported language catalog so the operator can override
+    // the canvas language for THIS thumbnail. Fail-soft — without it
+    // the dropdown just shows "Canvas default" and skips the override.
+    api.listLanguages()
+      .then((r) => { if (alive && Array.isArray(r)) setLanguageOptions(r); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // Helper: the operator's currently-selected references for THIS
+  // style, in the order they picked them.
+  const currentRefs = refsByStyle[styleKey] || [];
+  const styleCfg    = styles.find((s) => s.key === styleKey)
+                   || { needs_reference: 0, reference_kind: "" };
+
+  function toggleRef(assetId) {
+    setRefsByStyle((prev) => {
+      const list = prev[styleKey] || [];
+      // De-select if already picked. Otherwise add to the end of the
+      // list (order matters: split-screen left vs right).
+      const next = list.includes(assetId)
+        ? list.filter((x) => x !== assetId)
+        : [...list, assetId];
+      // Cap at the style's needs — drop the OLDEST selection so the
+      // most recent pick survives.
+      const cap = Math.max(1, styleCfg.needs_reference || 1);
+      return { ...prev, [styleKey]: next.slice(-cap) };
+    });
+  }
+
+  async function uploadRef(file) {
+    if (!file) return;
+    setUploading(true); setErr("");
+    try {
+      const r = await api.v4UploadThumbnailRef(file, file.name);
+      // Append the new asset and auto-select it for the current style
+      // (operator just uploaded it, they almost certainly want it).
+      setRefLibrary((prev) => [...prev, r]);
+      setRefsByStyle((prev) => {
+        const list = prev[styleKey] || [];
+        const cap = Math.max(1, styleCfg.needs_reference || 1);
+        return { ...prev, [styleKey]: [...list, r.id].slice(-cap) };
+      });
+    } catch (e) {
+      setErr(`Upload failed: ${e?.message || e}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function run(useTweak = false) {
     if (!jobId) return;
+    // Block the run if the style needs references but the operator
+    // didn't pick any — surface a concrete error instead of letting
+    // Nano Banana invent a face that breaks brand trust.
+    if (!useTweak && styleCfg.needs_reference > 0 && currentRefs.length === 0) {
+      setErr(
+        `This style needs ${styleCfg.needs_reference} reference image(s) — ` +
+        `pick from the library or upload one below.`
+      );
+      return;
+    }
     setMode(useTweak ? "tweak" : "first");
     setBusy(true); setErr("");
     try {
-      const body = { target, index };
+      const body = {
+        target,
+        index,
+        style: styleKey,
+        reference_asset_ids: currentRefs,
+        provider,
+        engine,
+        text_mode: textMode,
+      };
+      // Only send a language override if the operator actually picked
+      // one — empty string means "use the canvas's language", which is
+      // the backend default. Avoids polluting the request with a no-op.
+      if (thumbLanguage) body.language = thumbLanguage;
       if (useTweak && tweak.trim()) body.tweak = tweak.trim();
       const r = await api.v4GenThumbnail(jobId, body);
       setUrl(r?.url || "");
       if (r?.prompt) setHasPrompt(true);
       if (useTweak) setTweak("");
+      // After a fresh generation, re-pull GET so we pick up the new
+      // plate URL too. The generate endpoint doesn't return it but
+      // GET always does — and we need it for the drag editor.
+      try {
+        const after = await api.v4GetThumbnail(jobId, target, index);
+        if (after?.plate_url) setPlateUrl(after.plate_url);
+      } catch { /* non-fatal */ }
     } catch (e) {
       setErr(e?.message || "thumbnail generation failed");
     } finally {
@@ -2467,7 +2954,43 @@ function ThumbnailPanel({ jobId, target, index = 0 }) {
       <summary className="cursor-pointer select-none flex items-center gap-2 px-3 py-2.5
                           border-b border-border bg-dark/60">
         <span className="text-[10px] uppercase tracking-[0.12em] font-semibold text-ink-100">AI Thumbnail</span>
-        <span className="text-[10px] text-ink-300 font-mono">Nano Banana</span>
+        <span className="text-[10px] text-ink-300 font-mono">
+          {provider === "openai" ? "OpenAI gpt-image-1" : "Gemini Nano Banana"}
+        </span>
+        {/* Provider toggle. OpenAI doesn't accept image inputs, so
+            when a reference-style is active we hide the picker and
+            keep Gemini implicit. */}
+        {styleCfg.needs_reference === 0 && (
+          <div
+            className="inline-flex text-[10px] rounded border border-border overflow-hidden"
+            onClick={(e) => e.preventDefault() /* don't toggle the <details> */}
+          >
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setProvider("gemini"); }}
+              className={`px-2 py-0.5 transition-colors ${
+                provider === "gemini"
+                  ? "bg-sky-500/20 text-sky-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Gemini Nano Banana — supports reference images for face preservation"
+            >
+              Gemini
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setProvider("openai"); }}
+              className={`px-2 py-0.5 transition-colors ${
+                provider === "openai"
+                  ? "bg-emerald-500/20 text-emerald-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="OpenAI gpt-image-1 — sharper photorealism, no reference image support"
+            >
+              OpenAI
+            </button>
+          </div>
+        )}
         <button
           type="button"
           disabled={busy}
@@ -2486,6 +3009,303 @@ function ThumbnailPanel({ jobId, target, index = 0 }) {
       </summary>
 
       <div className="p-3 space-y-3">
+        {/* Director engine picker — picks which brain runs Pass 1
+            (planner) + Pass 2 (prompter). Lives in the panel body
+            (not the header) because the header is already crowded
+            with the image-provider toggle + Generate button. */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-ink-300 uppercase tracking-[0.12em] text-[10px] font-medium shrink-0">
+            Brain
+          </span>
+          <div className="inline-flex rounded border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setEngine("gemini"); }}
+              className={`px-2.5 py-0.5 transition-colors ${
+                engine === "gemini"
+                  ? "bg-sky-500/20 text-sky-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Gemini for both passes — ~$0.002 per thumbnail. Decent. Default."
+            >
+              Gemini
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setEngine("hybrid"); }}
+              className={`px-2.5 py-0.5 transition-colors border-l border-border ${
+                engine === "hybrid"
+                  ? "bg-amber-500/20 text-amber-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Hybrid — Claude plans, Gemini prompts. ~$0.012 per thumbnail. Best practical quality."
+            >
+              Hybrid
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setEngine("claude"); }}
+              className={`px-2.5 py-0.5 transition-colors border-l border-border ${
+                engine === "claude"
+                  ? "bg-violet-500/20 text-violet-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Claude for both passes — ~$0.025 per thumbnail. Premium. Use for A/B."
+            >
+              Claude
+            </button>
+          </div>
+          <span className="text-[10px] text-ink-300 truncate">
+            {engine === "gemini" && "$0.002 · cheap default"}
+            {engine === "hybrid" && "$0.012 · Claude plans · recommended"}
+            {engine === "claude" && "$0.025 · premium · for A/B testing"}
+          </span>
+        </div>
+
+        {/* Text-rendering mode toggle. "AI" = image model renders the
+            text inside the plate (dramatic, integrated, but Indic
+            ligatures may garble on rare characters). "Overlay" = Pillow
+            paints native-script text after the AI plate (guaranteed
+            perfect Telugu/Hindi/Tamil typography). */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-ink-300 uppercase tracking-[0.12em] text-[10px] font-medium shrink-0">
+            Text
+          </span>
+          <div className="inline-flex rounded border border-border overflow-hidden">
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setTextMode("ai"); }}
+              className={`px-2.5 py-0.5 transition-colors ${
+                textMode === "ai"
+                  ? "bg-pink-500/20 text-pink-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Image model renders the shout text inside the image — more dramatic, more integrated, but rare Indic ligatures may garble."
+            >
+              AI
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setTextMode("overlay"); }}
+              className={`px-2.5 py-0.5 transition-colors border-l border-border ${
+                textMode === "overlay"
+                  ? "bg-emerald-500/20 text-emerald-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="Pillow paints the shout text after generation using Noto Sans fonts — Telugu / Hindi ligatures guaranteed correct, looks like a sticker on top of the plate."
+            >
+              Overlay
+            </button>
+          </div>
+          <span className="text-[10px] text-ink-300 truncate">
+            {textMode === "ai"
+              ? "Text rendered inside the image"
+              : "Text painted post-generation (perfect Telugu)"}
+          </span>
+        </div>
+
+        {/* Per-thumbnail language override. Default ("Canvas default")
+            sends the canvas's language to the backend; pick any
+            specific entry to force the shout-text script just for
+            this generation. Useful for A/B comparing Hindi vs Telugu
+            rendering, or for a one-off English fallback. */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-ink-300 uppercase tracking-[0.12em] text-[10px] font-medium shrink-0">
+            Language
+          </span>
+          <select
+            value={thumbLanguage}
+            onChange={(e) => setThumbLanguage(e.target.value)}
+            className="bg-dark/60 border border-border rounded px-2 py-0.5 text-[11px] text-ink-100
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/40"
+            title="Override the canvas language for this thumbnail's shout text"
+          >
+            <option value="">Canvas default</option>
+            {(languageOptions || []).map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.english} ({l.native})
+              </option>
+            ))}
+          </select>
+          <span className="text-[10px] text-ink-300 truncate">
+            {thumbLanguage
+              ? `Forced ${thumbLanguage.toUpperCase()} for this generation`
+              : "Uses the canvas's job language"}
+          </span>
+        </div>
+
+        {/* One-button UX: by default Gemini reads the news and decides
+            the composition (style + palette + framing + overlay text).
+            The operator can still force a specific style via the
+            "Advanced" expander below for power-user control. Catalog
+            comes from the backend so adding a style on the server
+            doesn't need a UI deploy. */}
+        {styles.length > 0 && (
+          <div className="rounded-md border border-border bg-dark/60">
+            <button
+              type="button"
+              onClick={() => setStyleListOpen((v) => !v)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left
+                         hover:bg-dark/80 transition-colors"
+            >
+              <span className="text-[10px] uppercase tracking-[0.12em] text-ink-200 font-medium">
+                Design
+              </span>
+              <span className="text-[11px] text-white truncate flex-1">
+                {styleKey === "auto"
+                  ? "Auto — Gemini picks based on the news"
+                  : (styleCfg.label || styleKey)}
+              </span>
+              {styleCfg.needs_reference > 0 && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full
+                                 border border-amber-500/40 bg-amber-500/10 text-amber-200">
+                  needs {styleCfg.needs_reference} ref{styleCfg.needs_reference > 1 ? "s" : ""}
+                </span>
+              )}
+              <span className="text-[9px] text-ink-300">
+                {styleListOpen ? "hide" : "advanced"}
+              </span>
+              {styleListOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </button>
+            {styleListOpen && (
+              <div className="border-t border-border p-2 space-y-2">
+                <div className="text-[10px] text-ink-300 leading-snug">
+                  By default Gemini reads your news and picks the best composition.
+                  Override below if you want to force a specific look.
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {/* Auto tile lives at the top */}
+                  <button
+                    type="button"
+                    onClick={() => { setStyleKey("auto"); setStyleListOpen(false); }}
+                    className={`text-left p-2 rounded-md border text-[10px] transition-colors ${
+                      styleKey === "auto"
+                        ? "border-pink-500/60 bg-pink-500/10"
+                        : "border-border bg-dark/60 hover:border-pink-500/40 hover:bg-dark/80"
+                    }`}
+                  >
+                    <div className="mb-0.5 flex items-center gap-1" style={STYLE_CARD_TITLE_STYLE}>
+                      ✦ Auto
+                    </div>
+                    <div className="text-[10px] leading-tight" style={STYLE_CARD_DESC_STYLE}>
+                      Recommended. Gemini reads the news transcript + SEO and decides
+                      composition, palette, framing, and overlay text. One-button UX.
+                    </div>
+                  </button>
+                  {styles.map((s) => {
+                    const active = s.key === styleKey;
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => { setStyleKey(s.key); setStyleListOpen(false); }}
+                        className={`text-left p-2 rounded-md border text-[10px] transition-colors ${
+                          active
+                            ? "border-pink-500/60 bg-pink-500/10"
+                            : "border-border bg-dark/60 hover:border-pink-500/40 hover:bg-dark/80"
+                        }`}
+                      >
+                        <div className="mb-0.5 flex items-center gap-1" style={STYLE_CARD_TITLE_STYLE}>
+                          {s.label}
+                          {s.needs_reference > 0 && (
+                            <span className="text-[8px] uppercase text-amber-300 font-bold">
+                              {s.needs_reference} ref{s.needs_reference > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] leading-tight" style={STYLE_CARD_DESC_STYLE}>
+                          {s.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Reference picker — only relevant for styles that consume a
+            reference. Shows the library of saved refs + an upload
+            button. Selected refs get an amber border + ordinal badge
+            (matters for split-screen: 1=left, 2=right). */}
+        {styleCfg.needs_reference > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <ImagePlus size={11} className="text-amber-300" />
+              <span className="text-[10px] uppercase tracking-[0.12em] text-amber-200 font-medium">
+                Reference {styleCfg.reference_kind?.replace("_", " ") || "image"}{styleCfg.needs_reference > 1 ? "s" : ""}
+              </span>
+              <span className="text-[10px] text-ink-300 ml-auto">
+                {currentRefs.length} / {styleCfg.needs_reference} picked
+              </span>
+              <input
+                ref={refFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadRef(f);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => refFileRef.current?.click()}
+                disabled={uploading}
+                className="text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded
+                           border border-amber-500/40 text-amber-200 hover:text-white
+                           hover:bg-amber-500/20 disabled:opacity-40"
+              >
+                {uploading
+                  ? <LiveSpinner label="Up" active={uploading} size={9} />
+                  : (<><Upload size={9} /> Upload</>)}
+              </button>
+            </div>
+            {refLibrary.length === 0 ? (
+              <div className="text-[10px] text-ink-300 italic px-1 py-1.5">
+                No saved reference images yet. Upload one — it'll be reusable
+                across every job.
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 sm:grid-cols-5 gap-1">
+                {refLibrary.map((a) => {
+                  const pick = currentRefs.indexOf(a.id);
+                  const picked = pick >= 0;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => toggleRef(a.id)}
+                      title={a.filename || `Ref #${a.id}`}
+                      className={`relative aspect-square rounded overflow-hidden border ${
+                        picked
+                          ? "border-amber-400 ring-1 ring-amber-400/40"
+                          : "border-border hover:border-amber-500/60"
+                      }`}
+                    >
+                      <img
+                        src={a.thumb_url || a.url}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                      {picked && (
+                        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full
+                                        bg-amber-400 text-black text-[9px] font-bold
+                                        flex items-center justify-center">
+                          {pick + 1}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Preview */}
         {url ? (
           <a href={url} target="_blank" rel="noopener"
@@ -2504,6 +3324,219 @@ function ThumbnailPanel({ jobId, target, index = 0 }) {
             {busy
               ? "Asking Gemini for a prompt, then rendering…"
               : "No AI thumbnail yet — click ✦ Generate."}
+          </div>
+        )}
+
+        {/* Manual drag-to-position text overlay editor. Only meaningful
+            after a generation that produced a bare plate (text_mode=
+            overlay). Lets the operator edit text + drag the position
+            + tweak colour without a fresh AI call. */}
+        {url && plateUrl && (
+          <div className="rounded-md border border-border bg-dark/60 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => {
+                if (!editorOpen) {
+                  // Initialise editor from the URL's current overlay
+                  // (best-effort — we don't know the existing text
+                  // server-side so seed with the latest known good).
+                  setEditorText((prev) => prev || "");
+                  // If the operator hasn't chosen text mode yet, push
+                  // it to overlay so subsequent renders save a fresh
+                  // plate for editing.
+                  setTextMode("overlay");
+                }
+                setEditorOpen((v) => !v);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left
+                         hover:bg-dark/80 transition-colors"
+            >
+              <span className="text-[10px] uppercase tracking-[0.12em] text-ink-200 font-medium">
+                Edit text overlay
+              </span>
+              <span className="text-[10px] text-ink-300 truncate flex-1">
+                Drag to reposition · re-paints in ~200ms
+              </span>
+              {editorOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </button>
+            {editorOpen && (
+              <div className="border-t border-border p-3 space-y-2.5">
+                {/* Draggable canvas — shows the bare plate with a
+                    movable overlay rectangle. Mouse drag updates
+                    editorGeom percentages. */}
+                <div
+                  ref={editorContainerRef}
+                  className="relative w-full aspect-video rounded border border-border bg-black overflow-hidden select-none"
+                  onMouseMove={(e) => {
+                    const drag = editorDragRef.current;
+                    if (!drag || !editorContainerRef.current) return;
+                    const rect = editorContainerRef.current.getBoundingClientRect();
+                    const newX = ((e.clientX - rect.left) - drag.offsetX) / rect.width * 100;
+                    const newY = ((e.clientY - rect.top) - drag.offsetY) / rect.height * 100;
+                    setEditorGeom((g) => ({
+                      ...g,
+                      x: Math.max(0, Math.min(100 - g.w, newX)),
+                      y: Math.max(0, Math.min(100 - g.h, newY)),
+                    }));
+                  }}
+                  onMouseUp={() => { editorDragRef.current = null; }}
+                  onMouseLeave={() => { editorDragRef.current = null; }}
+                >
+                  <img
+                    src={plateUrl}
+                    alt="bare plate"
+                    className="w-full h-full object-cover pointer-events-none"
+                    draggable={false}
+                  />
+                  <div
+                    onMouseDown={(e) => {
+                      if (!editorContainerRef.current) return;
+                      const rect = editorContainerRef.current.getBoundingClientRect();
+                      const boxLeft = editorGeom.x / 100 * rect.width;
+                      const boxTop  = editorGeom.y / 100 * rect.height;
+                      editorDragRef.current = {
+                        offsetX: e.clientX - rect.left - boxLeft,
+                        offsetY: e.clientY - rect.top - boxTop,
+                      };
+                    }}
+                    style={{
+                      position: "absolute",
+                      left: `${editorGeom.x}%`,
+                      top: `${editorGeom.y}%`,
+                      width: `${editorGeom.w}%`,
+                      height: `${editorGeom.h}%`,
+                      cursor: "move",
+                      background: editorColor === "white_on_red" || editorColor === "yellow_on_red"
+                        ? "rgba(180, 0, 0, 0.7)"
+                        : editorColor === "gold_on_crimson"
+                          ? "rgba(110, 30, 0, 0.78)"
+                          : "rgba(0, 0, 0, 0.78)",
+                      color: editorColor === "yellow_on_red"
+                        ? "#FFD600"
+                        : editorColor === "gold_on_crimson"
+                          ? "#FFD700"
+                          : "#FFFFFF",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: 700,
+                      fontSize: "max(14px, 2.8vw)",
+                      textAlign: "center",
+                      padding: "4px",
+                      border: "2px dashed rgba(255,255,255,0.4)",
+                      lineHeight: 1.05,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {editorText || "Edit text below…"}
+                  </div>
+                </div>
+
+                {/* Text input */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-ink-300 mb-1">
+                    Shout text (any language)
+                  </div>
+                  <input
+                    type="text"
+                    value={editorText}
+                    onChange={(e) => setEditorText(e.target.value)}
+                    placeholder="రూ.500 కోట్లు! మహిళా శక్తి"
+                    className="w-full bg-black/60 border border-border rounded px-2 py-1 text-[12px] text-ink-100"
+                  />
+                </div>
+
+                {/* Width + height sliders */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-300 mb-1">
+                      Width {Math.round(editorGeom.w)}%
+                    </div>
+                    <input
+                      type="range" min={10} max={100} step={1}
+                      value={editorGeom.w}
+                      onChange={(e) => {
+                        const w = Number(e.target.value);
+                        setEditorGeom((g) => ({ ...g, w, x: Math.max(0, Math.min(100 - w, g.x)) }));
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-ink-300 mb-1">
+                      Height {Math.round(editorGeom.h)}%
+                    </div>
+                    <input
+                      type="range" min={8} max={100} step={1}
+                      value={editorGeom.h}
+                      onChange={(e) => {
+                        const h = Number(e.target.value);
+                        setEditorGeom((g) => ({ ...g, h, y: Math.max(0, Math.min(100 - h, g.y)) }));
+                      }}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                {/* Colour presets */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-ink-300 mb-1">Colour preset</div>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {[
+                      { key: "white_on_red",    label: "White / Red",    sw: "bg-red-600 text-white" },
+                      { key: "yellow_on_red",   label: "Yellow / Red",   sw: "bg-red-600 text-yellow-400" },
+                      { key: "gold_on_crimson", label: "Gold / Crimson", sw: "bg-amber-900 text-yellow-300" },
+                      { key: "white_on_black",  label: "White / Black",  sw: "bg-black text-white" },
+                    ].map((c) => (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => setEditorColor(c.key)}
+                        className={`text-[10px] px-2 py-1 rounded border transition-colors font-bold ${c.sw} ${
+                          editorColor === c.key ? "border-pink-500 ring-2 ring-pink-500/50" : "border-border"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Apply button */}
+                <button
+                  type="button"
+                  disabled={editorBusy || !editorText.trim()}
+                  onClick={async () => {
+                    if (!jobId) return;
+                    setEditorBusy(true);
+                    setErr("");
+                    try {
+                      const r = await api.v4ReoverlayThumbnail(jobId, {
+                        target,
+                        index,
+                        text: editorText.trim(),
+                        x_pct: editorGeom.x,
+                        y_pct: editorGeom.y,
+                        w_pct: editorGeom.w,
+                        h_pct: editorGeom.h,
+                        color_preset: editorColor,
+                        language: thumbLanguage || "",
+                      });
+                      if (r?.url) setUrl(r.url);
+                    } catch (e) {
+                      setErr(e?.message || "reoverlay failed");
+                    } finally {
+                      setEditorBusy(false);
+                    }
+                  }}
+                  className="w-full px-3 py-1.5 rounded bg-pink-500/15 border border-pink-500/40
+                             text-pink-200 hover:bg-pink-500/25 hover:text-white
+                             disabled:opacity-40 text-[11px] font-medium transition-colors"
+                >
+                  {editorBusy ? "Re-painting…" : "Apply text edit (≈200ms · no AI cost)"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -2573,6 +3606,59 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
   const [regenerating, setRegenerating] = useState(false);
   const [progress, setProgress] = useState("");
   const [styleSourceId, setStyleSourceId] = useState(0);
+  // Compare-vs-YouTube state. competitorUrl = the URL the operator
+  // pasted; comparing = in-flight Gemini call; comparison = the
+  // returned axes / overall verdict; compareError = any error message
+  // to surface inline. Stays inside SeoPanel scope so each canvas
+  // (bulletin + N shorts) has its own independent comparison memory.
+  const [competitorUrl, setCompetitorUrl] = useState("");
+  const [comparing, setComparing] = useState(false);
+  const [comparison, setComparison] = useState(null);
+  const [compareError, setCompareError] = useState("");
+
+  async function runComparison() {
+    if (!jobId) return;
+    setCompareError("");
+    setComparison(null);
+    setComparing(true);
+    try {
+      const r = await api.v4CompareSeoWithYoutube(jobId, {
+        target,
+        index: target === "short" ? (index ?? 0) : 0,
+        youtube_url: competitorUrl.trim(),
+      });
+      setComparison(r);
+    } catch (e) {
+      setCompareError(e?.message || "Comparison failed");
+    } finally {
+      setComparing(false);
+    }
+  }
+
+  // Regenerate-from-comparison state. Independent from the regular
+  // Regenerate button at the top of the panel so the operator can
+  // run a refinement without losing the comparison panel below.
+  const [regenFromCompareBusy, setRegenFromCompareBusy] = useState(false);
+  async function regenerateFromComparison() {
+    if (!jobId || !comparison) return;
+    setCompareError("");
+    setRegenFromCompareBusy(true);
+    try {
+      const r = await api.v4RegenSeoFromComparison(jobId, {
+        target,
+        index: target === "short" ? (index ?? 0) : 0,
+        theirs: comparison.theirs,
+        comparison: comparison.comparison,
+      });
+      if (r?.seo && onRegenerated) {
+        onRegenerated(r.seo);
+      }
+    } catch (e) {
+      setCompareError(e?.message || "Regenerate-from-comparison failed");
+    } finally {
+      setRegenFromCompareBusy(false);
+    }
+  }
 
   // Poll the existing /api/clips/{id}/seo/status during generation —
   // gives the user a live readout of each Gemini stage instead of an
@@ -2604,6 +3690,7 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
     try {
       if (clipId) {
         await api.seoGenerate(clipId, {
+          force: true,   // this IS the Regenerate button — overwrite existing SEO
           include_news: true,
           include_trends: true,
           include_yt_benchmark: true,
@@ -2615,6 +3702,7 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
         const r = await api.v4RegenSeo(jobId, {
           target,
           index: target === "short" ? (index ?? 0) : 0,
+          style_source_id: styleSourceId || null,
         });
         if (r?.seo && onRegenerated) onRegenerated(r.seo);
       }
@@ -2630,6 +3718,8 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
   const titleLen = (seo.title || "").length;
   const descLen  = (seo.description || "").length;
   const score    = seo?.seo_score ?? seo?.metadata?.viral_score ?? null;
+  const toolScore = seo?.tool_score ?? null;
+  const toolSuggestions = seo?.tool_suggestions || [];
   return (
     <details className="text-gray-300" open>
       <summary className="cursor-pointer text-gray-500 select-none flex items-center gap-2">
@@ -2642,6 +3732,16 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
             title="Independent verifier score"
           >
             {score}/100
+          </span>
+        )}
+        {toolScore != null && (
+          <span className={`text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded-full border
+            ${toolScore >= 75 ? "bg-green-900/40 text-green-300 border-green-700/40"
+            : toolScore >= 60 ? "bg-yellow-900/30 text-yellow-300 border-yellow-700/40"
+            :                   "bg-red-900/30 text-red-300 border-red-700/40"}`}
+            title="SEO checker: content match + keyword coverage + title/tags quality"
+          >
+            Match {toolScore}/100
           </span>
         )}
         {seo.edited_by_user && (
@@ -2662,12 +3762,23 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
         )}
       </summary>
 
+      {toolSuggestions.length > 0 && (
+        <div className="mt-2 p-2 rounded border border-yellow-900/40 bg-yellow-950/10">
+          <div className="text-[10px] uppercase tracking-wider text-yellow-300/90 mb-1">
+            SEO checker — how to improve
+          </div>
+          <ul className="text-[10px] text-gray-400 space-y-0.5">
+            {toolSuggestions.slice(0, 5).map((s, i) => <li key={i}>• {s}</li>)}
+          </ul>
+        </div>
+      )}
+
       {/* Style source + live progress feed. Style source teaches Gemini
           a writing voice — title formula + description rhythm — from a
           competitor channel without leaking branding. Progress feed
           surfaces "research → news → trends → yt → drafting → scoring"
           so the user sees the multi-step work and the final score. */}
-      {(clipId || regenerating || progress) && (
+      {(clipId || jobId || regenerating || progress) && (
         <div className="mt-2 mb-2 p-2 rounded border border-border bg-black/40 space-y-1.5">
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-500 flex-shrink-0">Style source</span>
@@ -2679,9 +3790,11 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
               title="Optional: write in the voice of this channel (no branding leaks)"
             >
               <option value="0">(default — write in our own voice)</option>
-              {(channels || []).map((c) => (
-                <option key={c.id} value={c.id}>{c.name || `Channel #${c.id}`}</option>
-              ))}
+              {(channels || [])
+                .filter((c) => (c.kind ? c.kind === "style" : !c.connected))
+                .map((c) => (
+                  <option key={c.id} value={c.id}>{c.name || `Channel #${c.id}`}</option>
+                ))}
             </select>
           </div>
           {styleSourceId > 0 && (
@@ -2690,6 +3803,7 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
               brand hashtags are stripped before publish — no strike risk.
             </div>
           )}
+          {styleSourceId > 0 && <CompetitorIntel channelId={styleSourceId} />}
           {progress && (
             <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-400">
               {regenerating && <Loader2 size={9} className="animate-spin text-accent2" />}
@@ -2760,6 +3874,191 @@ function SeoPanel({ seo, onSeo, target, index, jobId, onRegenerated, clipId, cha
           />
         </label>
       </div>
+
+      {/* Download the SEO as a .txt for manual upload — plain, or with a
+          specific connected account's social links injected. */}
+      {jobId && (
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <SeoDownloadMenu
+            jobId={jobId}
+            target={target}
+            index={index ?? 0}
+            accounts={(channels || []).filter((c) => c.connected || c.kind === "account")}
+          />
+          <span className="text-[10px] text-gray-600">
+            Plain text, or pick an account to inject its social links.
+          </span>
+        </div>
+      )}
+
+      {/* ── SEO head-to-head vs a paste-in YouTube video ───────────
+          Operator drops a competitor URL, we fetch its metadata and
+          run one Gemini call to score both SEOs on 5 axes. Cheap
+          (~$0.0005/comparison) so safe to retry. */}
+      {jobId && (
+        <div className="mt-4 pt-3 border-t border-border">
+          <div className="text-[10px] uppercase tracking-[0.12em] font-semibold text-gray-400 mb-1.5">
+            Compare with another YouTube video
+          </div>
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={competitorUrl}
+              onChange={(e) => setCompetitorUrl(e.target.value)}
+              placeholder="https://www.youtube.com/watch?v=…  or  youtu.be/…  or  /shorts/…"
+              className="flex-1 bg-black/60 border border-border rounded px-1.5 py-1 text-[12px] text-gray-200"
+              disabled={comparing}
+              onKeyDown={(e) => { if (e.key === "Enter" && competitorUrl.trim()) { e.preventDefault(); runComparison(); } }}
+            />
+            <button
+              type="button"
+              disabled={comparing || !competitorUrl.trim()}
+              onClick={runComparison}
+              className="px-3 py-1 rounded bg-accent2 hover:bg-accent disabled:opacity-40 text-white text-[11px] font-medium inline-flex items-center gap-1"
+              title="Fetch the competitor's SEO and score both head-to-head"
+            >
+              {comparing
+                ? <><Loader2 size={11} className="animate-spin" /> Scoring…</>
+                : "Compare"}
+            </button>
+          </div>
+          <div className="text-[10px] text-gray-500 mt-1">
+            ~1 YouTube quota unit + ~$0.0005 per comparison.
+          </div>
+
+          {compareError && (
+            <div className="mt-2 p-2 rounded border border-red-500/40 bg-red-500/10 text-red-300 text-[11px]">
+              {compareError}
+            </div>
+          )}
+
+          {comparison && (
+            <div className="mt-3 space-y-2">
+              {/* Compact summary card */}
+              <div className="p-2.5 rounded-lg border border-border bg-black/50">
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-1.5">
+                  <div className="text-[11px] text-gray-400 truncate flex-1">
+                    vs{" "}
+                    <a
+                      href={`https://www.youtube.com/watch?v=${comparison.video_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accent2 hover:text-white underline"
+                    >
+                      {comparison.theirs?.channel_title || comparison.video_id}
+                    </a>
+                    {" — "}
+                    <span title={comparison.theirs?.title}>{(comparison.theirs?.title || "").slice(0, 80)}{comparison.theirs?.title?.length > 80 ? "…" : ""}</span>
+                  </div>
+                  <div className="text-[10px] text-gray-500 tabular-nums flex gap-2">
+                    <span>{(comparison.theirs?.view_count || 0).toLocaleString()} views</span>
+                    <span>·</span>
+                    <span>{(comparison.theirs?.like_count || 0).toLocaleString()} likes</span>
+                  </div>
+                </div>
+
+                {/* Overall winner pill + totals */}
+                {comparison.comparison?.overall && (() => {
+                  const o = comparison.comparison.overall;
+                  const winnerLabel = o.winner === "ours"
+                    ? "We win"
+                    : o.winner === "theirs"
+                      ? "They win"
+                      : "Tie";
+                  const cls = o.winner === "ours"
+                    ? "bg-green-900/40 text-green-300 border-green-700/40"
+                    : o.winner === "theirs"
+                      ? "bg-red-900/30 text-red-300 border-red-700/40"
+                      : "bg-yellow-900/30 text-yellow-300 border-yellow-700/40";
+                  return (
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${cls}`}>
+                        {winnerLabel}
+                      </span>
+                      <span className="text-[11px] text-gray-400 tabular-nums">
+                        Ours <span className="text-gray-200 font-semibold">{o.ours_total}</span>
+                        {" "}vs{" "}
+                        Theirs <span className="text-gray-200 font-semibold">{o.theirs_total}</span>
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                {/* Per-axis table */}
+                {Array.isArray(comparison.comparison?.axes) && comparison.comparison.axes.length > 0 && (
+                  <div className="border border-border rounded overflow-hidden">
+                    <table className="w-full text-[11px]">
+                      <thead className="bg-black/70 text-gray-500">
+                        <tr>
+                          <th className="text-left px-2 py-1 font-medium">Axis</th>
+                          <th className="text-right px-2 py-1 font-medium w-14">Ours</th>
+                          <th className="text-right px-2 py-1 font-medium w-14">Theirs</th>
+                          <th className="text-left px-2 py-1 font-medium">Why</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {comparison.comparison.axes.map((a, i) => {
+                          const winnerOurs = a.winner === "ours";
+                          const winnerTheirs = a.winner === "theirs";
+                          return (
+                            <tr key={i} className="border-t border-border/50">
+                              <td className="px-2 py-1 text-gray-300 capitalize">
+                                {(a.name || "").replaceAll("_", " ")}
+                              </td>
+                              <td className={`px-2 py-1 text-right tabular-nums font-semibold ${
+                                winnerOurs ? "text-green-300" : "text-gray-400"
+                              }`}>
+                                {a.ours_score ?? "—"}
+                              </td>
+                              <td className={`px-2 py-1 text-right tabular-nums font-semibold ${
+                                winnerTheirs ? "text-green-300" : "text-gray-400"
+                              }`}>
+                                {a.theirs_score ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 text-gray-400 leading-snug">
+                                {a.reason || "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Coach summary */}
+                {comparison.comparison?.overall?.summary && (
+                  <div className="mt-2 p-2 rounded border border-accent2/30 bg-accent2/5 text-[11px] text-gray-200 leading-relaxed">
+                    <span className="text-accent2 font-medium">Coach: </span>
+                    {comparison.comparison.overall.summary}
+                  </div>
+                )}
+
+                {/* Regenerate-from-comparison button. Feeds the
+                    comparison verdict back into Gemini so it rewrites
+                    our SEO targeting the losing axes specifically.
+                    Costs ~$0.0005 per click. */}
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={regenerateFromComparison}
+                    disabled={regenFromCompareBusy}
+                    className="px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 disabled:opacity-40 text-white text-[11px] font-medium inline-flex items-center gap-1.5"
+                    title="Ask Gemini to rewrite our SEO to close the gap on every losing axis"
+                  >
+                    {regenFromCompareBusy
+                      ? <><Loader2 size={11} className="animate-spin" /> Rewriting to close the gap…</>
+                      : <>✦ Regenerate SEO to close the gap</>}
+                  </button>
+                  <span className="text-[10px] text-gray-500">
+                    Replaces title, description (with hashtags inlined), keywords, hashtags. Keeps your language + voice.
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </details>
   );
 }
@@ -2923,8 +4222,124 @@ function DownloadMenu({ jobId, target, index = 0, accounts = [] }) {
 }
 
 
+// ─── SEO .txt download — plain, or account-specific with socials ────
+// Mirrors DownloadMenu but pulls the SEO text (title/description/tags)
+// instead of the video. "Plain" = the raw generated SEO; picking an
+// account runs it through the publish-time composer so THAT account's
+// social links + brand footer land in the description.
+function SeoDownloadMenu({ jobId, target, index = 0, accounts = [] }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    window.addEventListener("mousedown", onClick);
+    return () => window.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  if (!jobId) return null;
+
+  async function grab(channelId) {
+    setOpen(false);
+    setErr("");
+    setBusy(true);
+    try {
+      await api.v4DownloadSeoBlob(jobId, target, index, channelId || null);
+    } catch (e) {
+      setErr(e?.message || "SEO download failed");
+      setTimeout(() => setErr(""), 6000);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const haveAccounts = accounts.length > 0;
+  return (
+    <div ref={ref} className="relative inline-flex items-center">
+      <button
+        type="button"
+        onClick={() => grab(null)}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-l-md border border-border bg-surface text-gray-300 hover:text-white hover:border-accent2/40 text-[11px] font-medium disabled:opacity-50"
+        title="Download the SEO as a .txt (plain — no socials)"
+      >
+        {busy
+          ? <><Loader2 size={12} className="animate-spin" /> Preparing…</>
+          : <><FileText size={12} /> Download SEO</>}
+      </button>
+      {haveAccounts && (
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); setOpen(!open); }}
+          disabled={busy}
+          className="px-1.5 py-1 rounded-r-md border border-l-0 border-border bg-surface text-gray-300 hover:text-white hover:border-accent2/40 text-[11px] disabled:opacity-50"
+          title="Download SEO with a specific account's social links injected"
+        >
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+      )}
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-40 min-w-[240px] bg-[#0c0c0c] border border-border rounded-lg shadow-xl py-1">
+          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-500 border-b border-border">
+            Download SEO…
+          </div>
+          <button
+            type="button"
+            onClick={() => grab(null)}
+            className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-gray-200 hover:bg-accent2/15 hover:text-white"
+          >
+            <div className="w-6 h-6 rounded-full bg-gray-700/60 flex items-center justify-center text-[10px]">✦</div>
+            <div className="flex-1 min-w-0">
+              <div className="truncate">Plain</div>
+              <div className="text-[10px] text-gray-500 truncate">No social links</div>
+            </div>
+          </button>
+          <div className="border-t border-border my-0.5" />
+          {accounts.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => grab(a.id)}
+              className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-gray-200 hover:bg-accent2/15 hover:text-white"
+              title={`Inject ${a.youtube_channel_title || a.name}'s social links`}
+            >
+              {a.youtube_channel_thumbnail_url ? (
+                <img src={a.youtube_channel_thumbnail_url} className="w-6 h-6 rounded-full object-cover bg-gray-800" alt="" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-accent2/30 to-accent/30 flex items-center justify-center text-[10px] font-bold text-white">
+                  {(a.youtube_channel_title || a.name || "?").slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="truncate">with {a.youtube_channel_title || a.name} socials</div>
+                <div className="text-[10px] text-gray-500 truncate">
+                  {(a.socials && Object.keys(a.socials).length)
+                    ? `${Object.keys(a.socials).length} link(s)`
+                    : "no socials set on this account yet"}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {err && (
+        <span className="ml-2 text-[10px] text-red-400 whitespace-nowrap" title={err}>
+          {err.length > 40 ? err.slice(0, 40) + "…" : err}
+        </span>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Bulletin viewport — rendered + live preview side by side ──────
-function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClipId, pool, onPublish, onLayoutChange, accounts = [], activeImage, onPanActiveImage }) {
+function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClipId, pool, onPublish, onLayoutChange, accounts = [], activeImage, onPanActiveImage, isCustomFull = false, onCustomRendered }) {
+  // When the inline visual builder is open, grow this preview container so the builder has
+  // room to work — it renders as an absolute overlay scoped HERE (keeping the canvas-editor
+  // header/rails/inspector visible) instead of a full-screen takeover.
+  const [customBuilderOpen, setCustomBuilderOpen] = useState(false);
   // Resolve the active image from canvas + indices so the live preview
   // can render the slot the user is currently editing (with its fit /
   // offset honoured). Falls back to first story / first image when
@@ -2943,6 +4358,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
   // they'll see on render. Edits don't touch the rendered file until
   // they hit Re-render — this is purely the editing surface.
   const [editMode, setEditMode] = useState(false);
+  const [liveMode, setLiveMode] = useState(false);   // Stage 3b: time-synced live compositor overlay
   const mainPlayerRef = useRef(null);
   // Client-side export state. Spike scope: video-only (bg + lower-third),
   // fixed 5s, just to prove the WebCodecs + mp4-muxer path. Per-story
@@ -3009,7 +4425,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
   if (!url) {
     return (
       <div className="h-64 flex items-center justify-center text-gray-500 text-xs italic">
-        Bulletin hasn't been rendered yet — run the pipeline first.
+        Full Video hasn't been rendered yet — run the pipeline first.
       </div>
     );
   }
@@ -3018,7 +4434,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
       <div className="flex items-center gap-2">
         <Play size={12} className="text-accent2" />
         <span className="text-[11px] text-gray-300">
-          {bulletinUrl ? "Final bulletin" : "Trimmed source only (Step 2 not run)"}
+          {bulletinUrl ? "Final full video" : "Trimmed source only (Step 2 not run)"}
         </span>
         <button
           onClick={() => setEditMode((v) => !v)}
@@ -3036,7 +4452,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
             onClick={runClientExport}
             disabled={exporting}
             className="text-[11px] px-2 py-0.5 rounded border border-purple-500/50 text-purple-300 hover:border-purple-300 hover:text-white disabled:opacity-40 flex items-center gap-1"
-            title="Client export — render the bulletin in-browser using WebCodecs. Audio is passthrough (-c:a copy), bit-identical to the trimmed source."
+            title="Client export — render the full video in-browser using WebCodecs. Audio is passthrough (-c:a copy), bit-identical to the trimmed source."
           >
             {exporting
               ? <><Loader2 size={11} className="animate-spin" /> {Math.round(exportPct * 100)}%</>
@@ -3059,7 +4475,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
       {/* Video player + overlay live preview. The overlay is the same
           SVG mock that used to sit below — it just lives on top now so
           one surface is editor + result. Toggle controls visibility. */}
-      <div className="relative w-full">
+      <div className={`relative w-full ${customBuilderOpen ? "min-h-[82vh]" : ""}`}>
         <video
           ref={mainPlayerRef}
           key={url}
@@ -3069,7 +4485,20 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
           className="w-full rounded border border-border bg-black block"
           style={{ maxHeight: "55vh" }}
         />
-        {editMode && (
+        {/* CUSTOM-TEMPLATE job: the bulletin canvas editor doesn't apply (the custom
+            render is driven by the template, not canvas.json). Show the dedicated
+            custom-template editor instead. */}
+        {editMode && isCustomFull && (
+          <CustomTemplateEditor
+            jobId={jobId}
+            target="bulletin"
+            index={0}
+            onClose={() => setEditMode(false)}
+            onRendered={onCustomRendered}
+            onBuilderToggle={setCustomBuilderOpen}
+          />
+        )}
+        {editMode && !isCustomFull && (
           <div className="absolute inset-0 rounded overflow-hidden">
             <BulletinLivePreview
               stories={canvas?.bulletin?.stories || []}
@@ -3083,7 +4512,29 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
             />
           </div>
         )}
-        {editMode && (
+        {/* Stage 3b — live time-synced compositor: watch the scene animate over the raw cut
+            (carousel transitions, timed text, ticker) without rendering. Opt-in overlay. */}
+        {liveMode && !isCustomFull && (
+          <div className="absolute inset-0 z-20 rounded overflow-hidden bg-black">
+            <LiveCompositor
+              stories={canvas?.bulletin?.stories || []}
+              layout={canvas?.bulletin?.layout || {}}
+              videoSrc={withAuth(trimmedUrl)}
+              imagePool={pool}
+              withAuth={withAuth}
+              headline={canvas?.bulletin?.seo?.title || canvas?.bulletin?.stories?.[0]?.title_native}
+              onTickerSpeedChange={(v) => setAllTickerBlocks({ ticker_speed: v })}
+              onTickerColorChange={(v) => setAllTickerBlocks({ ticker_color: v })}
+            />
+          </div>
+        )}
+        {!isCustomFull && (
+          <button onClick={() => setLiveMode((v) => !v)}
+            className="absolute top-2 right-2 z-30 text-[11px] px-2.5 py-1 rounded-lg bg-black/70 text-white border border-white/20 hover:border-orange-400">
+            {liveMode ? "✎ Edit view" : "▶ Live preview"}
+          </button>
+        )}
+        {editMode && !isCustomFull && (
           <div className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded bg-amber-300/90 text-black font-semibold pointer-events-none">
             Editing — Re-render to apply
           </div>
@@ -3095,8 +4546,11 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
 
 
 // ─── Short viewport — rendered video + SVG live preview ────────────
-function ShortViewport({ jobId, index, short, url, pool, clipId, onPublish, accounts = [] }) {
+function ShortViewport({ jobId, index, short, url, trimmedUrl = "", pool, clipId, onPublish, accounts = [] }) {
   const cfg = short?.short_config || {};
+  const [live, setLive] = useState(false);   // play the raw short in the layout vs static mock
+  const _poolImg = (pool || []).find((p) => p.filename === cfg.image_filename);
+  const _shortImageUrl = _poolImg ? withAuth(_poolImg.url) : "";
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -3116,17 +4570,38 @@ function ShortViewport({ jobId, index, short, url, pool, clipId, onPublish, acco
       {clipId && <UploadStatusPill clipId={clipId} />}
       <div className="grid grid-cols-2 gap-3 max-w-xl">
         <div>
-          <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Live preview</div>
-          <ShortLivePreview
-            layout={(cfg.layout || "torn_card").toLowerCase()}
-            text={cfg.text ?? ""}
-            fontFile={cfg.font_file}
-            textColor={cfg.text_color}
-            imagePool={pool}
-            imageFilename={cfg.image_filename ?? ""}
-            followParams={cfg.follow_params ?? {}}
-            sectionPct={cfg.section_pct ?? { video: 0.4619, text: 0.1691, image: 0.3690 }}
-          />
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>Live preview</span>
+            {trimmedUrl && (
+              <button onClick={() => setLive((v) => !v)} className="text-[10px] text-accent2 hover:text-white normal-case">
+                {live ? "▦ Static" : "▶ Play"}
+              </button>
+            )}
+          </div>
+          {live && trimmedUrl ? (
+            <div className="aspect-[9/16] rounded overflow-hidden bg-black">
+              <ShortCompositor
+                videoSrc={withAuth(trimmedUrl)}
+                layout={(cfg.layout || "torn_card").toLowerCase()}
+                text={cfg.text ?? (short?.stories?.[0]?.title_native ?? "")}
+                textColor={cfg.text_color}
+                imageUrl={_shortImageUrl}
+                sectionPct={cfg.section_pct ?? { video: 0.4619, text: 0.1691, image: 0.3690 }}
+                followParams={cfg.follow_params ?? {}}
+              />
+            </div>
+          ) : (
+            <ShortLivePreview
+              layout={(cfg.layout || "torn_card").toLowerCase()}
+              text={cfg.text ?? ""}
+              fontFile={cfg.font_file}
+              textColor={cfg.text_color}
+              imagePool={pool}
+              imageFilename={cfg.image_filename ?? ""}
+              followParams={cfg.follow_params ?? {}}
+              sectionPct={cfg.section_pct ?? { video: 0.4619, text: 0.1691, image: 0.3690 }}
+            />
+          )}
         </div>
         <div>
           <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Rendered output</div>
@@ -3155,7 +4630,7 @@ function ShortViewport({ jobId, index, short, url, pool, clipId, onPublish, acco
 // right-hand inspector while the viewport stays in the centre. All the
 // V1 knobs live here: layout / headline / font / colour / size / image
 // / section %s / card style / follow params.
-function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSeoRegenerated, onAutoFetchImage, onAiGenerateImage, clipId, channels }) {
+function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSeoRegenerated, onAutoFetchImage, onAiGenerateImage, clipId, channels, bulkBusy, bulkMsg, shortsCount = 0, onApplySeoToAllShorts, onApplyImageToAllShorts, targetPlatform = "youtube" }) {
   const [fetching, setFetching] = useState(false);
   const [aiGenning, setAiGenning] = useState(false);
   const cfg = canvasShort?.short_config || {};
@@ -3172,6 +4647,18 @@ function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSe
 
   return (
     <div className="space-y-3">
+      {/* Platform-specific jobs (Instagram Reel / Facebook Reel) lead with
+          THAT platform's SEO — caption + hashtags written natively — instead
+          of YouTube. YouTube SEO stays below for cross-posting. */}
+      {targetPlatform !== "youtube" && (
+        <PlatformSeoPreview
+          jobId={jobId}
+          clipId={clipId}
+          defaultPlatform={targetPlatform}
+          emphasis
+        />
+      )}
+
       {/* Layout switcher */}
       <div className="flex items-center gap-2">
         <span className="text-gray-500 w-20 flex-shrink-0">Layout</span>
@@ -3360,6 +4847,44 @@ function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSe
         </div>
       )}
 
+      {/* Bulk apply — copy THIS short's SEO or image onto every other short
+          in the job. Mirrors the legacy editor's bulk actions. */}
+      {shortsCount > 1 && (onApplySeoToAllShorts || onApplyImageToAllShorts) && (
+        <div className="mt-2 rounded border border-border bg-black/30 p-2">
+          <div className="text-xs text-gray-400 mb-2 flex items-center gap-2">
+            Apply to all shorts
+            <span className="text-[10px] text-gray-600">(copies from this short → the other {shortsCount - 1})</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {onApplySeoToAllShorts && (
+              <button
+                type="button"
+                onClick={onApplySeoToAllShorts}
+                disabled={bulkBusy}
+                title="Copy this short's SEO (title / description / tags / hashtags) to every other short"
+                className="text-[11px] font-medium text-white bg-accent/80 hover:bg-accent px-2 py-1 rounded inline-flex items-center gap-1 disabled:opacity-40"
+              >
+                {bulkBusy ? <Loader2 size={11} className="animate-spin" /> : null}
+                SEO → all shorts
+              </button>
+            )}
+            {onApplyImageToAllShorts && (
+              <button
+                type="button"
+                onClick={onApplyImageToAllShorts}
+                disabled={bulkBusy}
+                title="Apply this short's image to every other short and re-render them"
+                className="text-[11px] font-medium text-white bg-accent2/80 hover:bg-accent2 px-2 py-1 rounded inline-flex items-center gap-1 disabled:opacity-40"
+              >
+                {bulkBusy ? <Loader2 size={11} className="animate-spin" /> : null}
+                Image → all shorts
+              </button>
+            )}
+          </div>
+          {bulkMsg && <div className="text-[11px] text-emerald-300 mt-1.5">{bulkMsg}</div>}
+        </div>
+      )}
+
       {/* SEO panel — same component the bulletin uses */}
       <SeoPanel
         seo={seo}
@@ -3371,6 +4896,17 @@ function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSe
         channels={channels}
         onRegenerated={onSeoRegenerated}
       />
+      {/* For YouTube jobs the per-platform preview lives here (below the YT
+          SEO). For IG/FB jobs it's already shown as the LEAD at the top. */}
+      {targetPlatform === "youtube" && (
+        <PlatformSeoPreview jobId={jobId} clipId={clipId} />
+      )}
+      {/* Channel-wise SEO — each connected channel's tailored title/tags
+          variant (same component the bulletin uses, ~line 875). Lazy: only
+          builds when expanded. Makes the editor channel-wise for shorts too,
+          so each channel's version is distinct (anti-duplicate). */}
+      <PerChannelSeoPreview jobId={jobId} clipId={clipId} target="short" index={index} />
+      <PerChannelVideoPreview jobId={jobId} target="short" index={index} />
       <ThumbnailPanel jobId={jobId} target="short" index={index} />
     </div>
   );
@@ -3545,7 +5081,7 @@ function BulletinLivePreview({ stories, imagePool, headline, kicker = "BREAKING"
   const tickerStories = (stories || [])
     .map((s) => (s.title_native || s.title_english || "").trim())
     .filter(Boolean);
-  const tickerText = (tickerStories.join("  ★  ") || "KAIZER NEWS") + "    ";
+  const tickerText = (tickerStories.join("  ★  ") || "KAIZER X") + "    ";
 
   // ── Drag / resize state ─────────────────────────────────────────
   // dragState = { target: "video"|"picture", mode: "move"|"resize",
@@ -4017,7 +5553,7 @@ function ShortLivePreview({ layout, text, fontFile, textColor, imagePool, imageF
           <div style={{
             color: followParams?.follow_text_color || "#fff", fontFamily, fontWeight: 700,
             fontSize: 13, textAlign: "center", letterSpacing: 1,
-          }}>{followParams?.follow_text || "FOLLOW KAIZER NEWS"}</div>
+          }}>{followParams?.follow_text || "FOLLOW KAIZER X"}</div>
         </foreignObject>
       </svg>
     );
@@ -4095,229 +5631,574 @@ function ShortLivePreview({ layout, text, fontFile, textColor, imagePool, imageF
   );
 }
 
+// ── Per-channel SEO preview ───────────────────────────────────────────
+// Shows the EXACT SEO that will be sent to each connected channel + WHY.
+// "Per-channel" (paid) adapts the base SEO using each channel's winning
+// keywords; "Shared" (free) sends one SEO to all. Read-only preview.
+function PerChannelSeoPreview({ jobId, clipId, target = "bulletin", index = 0 }) {
+  const [mode, setMode] = useState("per_channel");
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState("");
+  const [err, setErr] = useState("");
 
-// ─── Publish modal — channel picker + privacy + submit ─────────────
-// Re-uses the existing /api/clips/{id}/publish endpoint with `use_seo=true`
-// so the channel-overlay composer (` | <YouTube channel name>`, mandatory
-// hashtags, etc.) runs server-side from whatever the user wrote in the
-// SEO panel above.
-function PublishModal({ target, channels, onClose, onPublished, setErr }) {
-  // Selection is a Set of {type:"yt"|"meta", id:number} encoded as
-  // "yt:42" / "meta:7" strings so we can mix both surfaces in one Set.
-  const [selected, setSelected] = useState(new Set());
-  const [privacy, setPrivacy]   = useState("public");
-  const [busy, setBusy]         = useState(false);
-  const [metaAccounts, setMetaAccounts] = useState([]);
-  const [metaLoading, setMetaLoading]   = useState(true);
-  const list = channels || [];
-
-  // Pull Meta accounts so they show up alongside YouTube channels.
-  // Quiet failure: if Meta isn't configured the API returns an error
-  // and we just skip rendering the Meta section. The /settings/meta
-  // page is where the operator actually fixes that.
-  useEffect(() => {
-    let alive = true;
-    api.metaListAccounts()
-      .then((r) => { if (alive) setMetaAccounts(Array.isArray(r) ? r : []); })
-      .catch(() => { if (alive) setMetaAccounts([]); })
-      .finally(() => { if (alive) setMetaLoading(false); });
-    return () => { alive = false; };
-  }, []);
-
-  // IG can only accept short-form (Reels). When the user is
-  // publishing a long-form bulletin, hide the IG-only rows. FB Pages
-  // accept both.
-  const metaEligible = (a) => {
-    if (target.kind === "short") {
-      // Either FB (always accepts) or IG-linked Page (Reels OK).
-      return true;
-    }
-    // Long-form: only FB Pages, not pure-IG destinations. Since every
-    // MetaAccount row IS a Page (IG is just an optional linkage), all
-    // rows are eligible for long-form too. No filter needed.
-    return true;
-  };
-
-  const ytKey   = (id) => `yt:${id}`;
-  const metaKey = (id) => `meta:${id}`;
-
-  function toggle(key) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
-  async function submit() {
-    if (selected.size === 0) {
-      setErr("Pick at least one destination.");
-      return;
-    }
-    const ytIds = [...selected]
-      .filter((k) => k.startsWith("yt:"))
-      .map((k) => parseInt(k.slice(3), 10));
-    const metaIds = [...selected]
-      .filter((k) => k.startsWith("meta:"))
-      .map((k) => parseInt(k.slice(5), 10));
-    setBusy(true);
+  async function load(m, gen = false) {
+    if (!jobId) return;
+    setBusy(true); setErr(""); setApplied("");
     try {
-      // The backend's publishClip already routes any channel_id whose
-      // upload_provider is meta_fb / meta_ig through the publisher
-      // abstraction, so we send Meta accounts using the same
-      // channel_ids field — the worker resolves them off the
-      // MetaAccount table when the provider key indicates Meta.
-      // NB: the backend expects a single homogeneous list; until the
-      // worker fan-out lands, send YT and Meta as separate requests.
-      if (ytIds.length > 0) {
-        await api.publishClip(target.clipId, {
-          channel_ids:  ytIds,
-          privacy_status: privacy,
-          publish_kind: target.kind,
-          use_seo: true,
-        });
-      }
-      // Meta uploads are routed by setting upload_provider per request
-      // when we hit the publisher endpoint — for now we lean on the
-      // per-account upload_provider knob on MetaAccount being set to
-      // "meta_fb" or "meta_ig" at OAuth time. Future improvement:
-      // accept a meta_account_ids field on publishClip so the request
-      // body is self-describing.
-      for (const id of metaIds) {
-        await api.publishClip(target.clipId, {
-          channel_ids:  [id],
-          privacy_status: privacy,
-          publish_kind: target.kind,
-          use_seo: true,
-          // The backend doesn't yet read this; logged in the request
-          // body as a forward-compat marker for when we wire it up.
-          destination_kind: "meta",
-        }).catch((e) => { throw new Error(`Meta destination #${id}: ${e?.message || e}`); });
-      }
-      onPublished();
+      const r = await api.v4PerChannelSeoPreview(jobId, m, target, index, gen);
+      setData(r);
     } catch (e) {
-      setErr(e?.message || "publish failed");
+      setErr(e?.message || "preview failed");
     } finally {
       setBusy(false);
     }
   }
 
+  async function apply() {
+    if (!jobId || !clipId) { setErr("Save the clip first, then apply."); return; }
+    setApplying(true); setErr(""); setApplied("");
+    try {
+      const r = await api.v4ApplyPerChannelSeo(jobId, { clip_id: clipId, mode, target, index });
+      if (r?.channels) setData({ mode: r.mode || mode, channels: r.channels, generated: !!r.generated });
+      setApplied(
+        r?.mode === "shared"
+          ? "Reverted to one SEO for all channels."
+          : `Applied — ${r?.applied || 0} channel(s) will publish with their own SEO.`
+      );
+    } catch (e) {
+      setErr(e?.message || "apply failed");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  // ONE click = generate distinct SEO AND save it, so what you see is exactly
+  // what publishes. (Previously "Write distinct SEO" only previewed and you had
+  // to separately click Apply — easy to miss, so nothing applied at publish.)
+  async function writeAndApply() {
+    if (!jobId || !clipId) { setErr("Save the clip first, then write distinct SEO."); return; }
+    setApplying(true); setBusy(true); setErr(""); setApplied("");
+    try {
+      const r = await api.v4ApplyPerChannelSeo(jobId, { clip_id: clipId, mode: "per_channel", target, index });
+      if (r?.channels) setData({ mode: "per_channel", channels: r.channels, generated: true });
+      setApplied(`✓ Written & saved — ${r?.applied || 0} channel(s) will publish with their own distinct SEO.`);
+    } catch (e) {
+      setErr(e?.message || "write failed");
+    } finally {
+      setApplying(false); setBusy(false);
+    }
+  }
+
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <details
+      className="text-gray-300 mt-2 rounded border border-border bg-black/30 p-2"
+      onToggle={(e) => {
+        // Auto-load the per-channel SEO the moment the panel is opened, so the
+        // channel-wise view actually SHOWS instead of sitting empty until the
+        // user discovers the hidden "Preview" button.
+        if (e.target.open && !data && !busy) load(mode);
+      }}
     >
-      <div className="card max-w-md w-full p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-sm text-white font-semibold">Publish</div>
-            <div className="text-[11px] text-gray-500 truncate max-w-[300px]">
-              {target.kind === "short" ? "Short" : "Long-form video"} · {target.title}
-            </div>
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xs">close</button>
-        </div>
+      <summary className="cursor-pointer text-gray-400 select-none text-xs flex items-center gap-2">
+        Per-channel SEO preview
+        <span className="text-[10px] text-gray-600">(what each channel receives + why)</span>
+      </summary>
 
-        <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-          <span>▶</span> YouTube Channels
-        </div>
-        {list.length === 0 ? (
-          <div className="p-3 text-[11px] text-gray-500 italic border border-dashed border-border rounded mb-3">
-            No connected channels. Open <Link to="/channels" className="text-accent2">Channels</Link> to connect one.
+      <div className="mt-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="flex rounded border border-border overflow-hidden text-[11px]">
+            <button
+              type="button"
+              onClick={() => setMode("per_channel")}
+              className={`px-2 py-1 ${mode === "per_channel" ? "bg-accent2/20 text-accent2" : "text-gray-400"}`}
+            >
+              Per-channel
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("shared")}
+              className={`px-2 py-1 ${mode === "shared" ? "bg-accent2/20 text-accent2" : "text-gray-400"}`}
+            >
+              Shared
+            </button>
           </div>
-        ) : (
-          <div className="max-h-40 overflow-auto border border-border rounded mb-3">
-            {list.map((c) => (
-              <label
-                key={c.id}
-                className="flex items-center gap-2 px-2 py-1.5 hover:bg-black/40 cursor-pointer text-[12px] text-gray-200 border-b border-border last:border-b-0"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(ytKey(c.id))}
-                  onChange={() => toggle(ytKey(c.id))}
-                />
-                <span className="flex-1 truncate">{c.name || `Channel #${c.id}`}</span>
-                {c.google_channel_title && (
-                  <span className="text-gray-500 text-[10px] truncate max-w-[140px]">
-                    {c.google_channel_title}
-                  </span>
-                )}
-              </label>
-            ))}
-          </div>
-        )}
-
-        {/* Meta destinations — Facebook Pages + linked Instagram. */}
-        <div className="text-[11px] text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-          <span>📘</span> Meta · Facebook & Instagram
-        </div>
-        {metaLoading ? (
-          <div className="p-2 text-[11px] text-gray-500 italic mb-3">
-            <Loader2 size={11} className="inline animate-spin mr-1" /> Loading…
-          </div>
-        ) : metaAccounts.length === 0 ? (
-          <div className="p-3 text-[11px] text-gray-500 italic border border-dashed border-border rounded mb-3">
-            No Facebook Pages connected. Open <Link to="/settings/meta" className="text-accent2">Meta settings</Link> to connect one.
-          </div>
-        ) : (
-          <div className="max-h-40 overflow-auto border border-border rounded mb-3">
-            {metaAccounts.filter(metaEligible).map((a) => (
-              <label
-                key={a.id}
-                className="flex items-center gap-2 px-2 py-1.5 hover:bg-black/40 cursor-pointer text-[12px] text-gray-200 border-b border-border last:border-b-0"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(metaKey(a.id))}
-                  onChange={() => toggle(metaKey(a.id))}
-                />
-                {a.fb_page_picture_url && (
-                  <img src={a.fb_page_picture_url} alt="" className="w-5 h-5 rounded-full" />
-                )}
-                <span className="flex-1 truncate">{a.fb_page_name || `Page #${a.fb_page_id}`}</span>
-                <div className="flex items-center gap-1 text-[9px] text-gray-500">
-                  <span title="Facebook Page" className="px-1 rounded bg-blue-900/40 text-blue-300">FB</span>
-                  {a.ig_user_id && (
-                    <span title={`IG: @${a.ig_username}`} className="px-1 rounded bg-pink-900/40 text-pink-300">IG</span>
-                  )}
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center gap-3 text-[11px] text-gray-300 mb-4">
-          <span className="text-gray-500">Privacy</span>
-          {["public", "unlisted", "private"].map((v) => (
-            <label key={v} className="flex items-center gap-1 capitalize cursor-pointer">
-              <input
-                type="radio"
-                name="privacy"
-                value={v}
-                checked={privacy === v}
-                onChange={() => setPrivacy(v)}
-              />
-              {v}
-            </label>
-          ))}
-        </div>
-
-        <div className="flex justify-end gap-2">
           <button
-            onClick={onClose}
-            className="btn btn-secondary text-xs px-3 py-1.5"
+            type="button"
+            onClick={() => load(mode)}
             disabled={busy}
-          >Cancel</button>
-          <button
-            onClick={submit}
-            disabled={busy || selected.size === 0}
-            className="btn btn-primary text-xs px-3 py-1.5 disabled:opacity-40 flex items-center gap-1"
+            className="text-[11px] text-accent2 hover:text-white inline-flex items-center gap-1 disabled:opacity-40"
           >
-            {busy ? (<><Loader2 size={12} className="animate-spin" /> publishing…</>) : "Publish"}
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} Preview
           </button>
+          {mode === "per_channel" ? (
+            <button
+              type="button"
+              onClick={writeAndApply}
+              disabled={busy || applying}
+              title="Generate a DISTINCT title/description/tags per channel with the full SEO engine (one AI call per channel) AND save it, so each channel publishes with its own SEO."
+              className="text-[11px] font-medium text-white bg-accent2/80 hover:bg-accent2 px-2 py-0.5 rounded inline-flex items-center gap-1 disabled:opacity-40"
+            >
+              {(busy || applying) ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} Write &amp; save distinct SEO
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={apply}
+              disabled={applying || busy}
+              title="Use one shared SEO for all channels"
+              className="text-[11px] font-medium text-white bg-accent/80 hover:bg-accent px-2 py-0.5 rounded inline-flex items-center gap-1 disabled:opacity-40"
+            >
+              {applying ? <Loader2 size={11} className="animate-spin" /> : null} Use shared
+            </button>
+          )}
         </div>
+
+        {err && <div className="text-[11px] text-red-300">{err}</div>}
+        {applied && <div className="text-[11px] text-emerald-300">{applied}</div>}
+
+        {mode === "per_channel" && data && !data.generated && (data.channels || []).length > 0 && (
+          <div className="text-[10px] text-amber-300/90 bg-amber-900/15 border border-amber-800/30 rounded px-2 py-1">
+            Not saved yet — these share one headline (only tags differ). Click <span className="font-medium">✦ Write &amp; save distinct SEO</span> to write a different title per channel and save it so it actually publishes.
+          </div>
+        )}
+        {mode === "per_channel" && data && data.generated && (data.channels || []).length > 0 && !applied && (
+          <div className="text-[10px] text-emerald-300/90 bg-emerald-900/15 border border-emerald-800/30 rounded px-2 py-1">
+            ✓ Saved — each channel will publish with its own distinct title below.
+          </div>
+        )}
+
+        {data?.channels?.length > 0 && (
+          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+            {data.channels.map((c) => (
+              <div key={c.channel_id} className="rounded border border-border/60 bg-black/40 p-2">
+                <div className="flex items-center justify-between mb-1 gap-1">
+                  <span className="text-[11px] font-medium text-gray-200 truncate">{c.channel_name || `Channel #${c.channel_id}`}</span>
+                  <span className="flex items-center gap-1 flex-shrink-0">
+                    {c.seo_score != null && (
+                      <span className={`text-[9px] px-1 py-px rounded font-medium tabular-nums ${
+                        c.seo_score >= 70 ? "bg-emerald-900/50 text-emerald-300" : "bg-amber-900/40 text-amber-300"
+                      }`} title="SEO / CTR score">{c.seo_score}/100</span>
+                    )}
+                    <span className={`text-[9px] uppercase tracking-wide px-1 py-px rounded ${
+                      c.source === "generated" ? "bg-accent2/25 text-accent2"
+                        : c.source === "adapted" ? "bg-accent2/15 text-accent2"
+                        : "bg-gray-700 text-gray-400"
+                    }`}>{c.source === "generated" ? "✦ written" : c.source === "adapted" ? "tailored" : "base"}</span>
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-300 mb-1" title={c.title}>{c.title}</div>
+                {c.tags?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {c.tags.slice(0, 10).map((t, i) => (
+                      <span key={i} className="text-[10px] px-1 py-px rounded bg-white/5 text-gray-400">{t}</span>
+                    ))}
+                  </div>
+                )}
+                {c.why?.length > 0 && (
+                  <ul className="text-[10px] text-gray-500 space-y-0.5">
+                    {c.why.map((w, i) => <li key={i}>• {w}</li>)}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {data && (data.channels || []).length === 0 && (
+          <div className="text-[11px] text-gray-500 italic">No connected channels to preview.</div>
+        )}
       </div>
+    </details>
+  );
+}
+
+// ── Per-channel VIDEO preview ──────────────────────────────────────────
+// Plays each selected channel's BRANDED variant of this clip (its logo +
+// watermark stamped on the rendered master) right in the editor, so the
+// operator can SEE the video channel-wise before publishing. Channels come
+// from the job's "Choose channels" selection (the per-channel SEO endpoint is
+// already scoped to them). The intro / zoom / audio-nudge anti-dup layer is
+// added at publish — noted inline so the preview isn't mistaken for the final.
+function PerChannelVideoPreview({ jobId, target = "bulletin", index = 0 }) {
+  const [channels, setChannels] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [prep, setPrep] = useState(null);   // batch render state from the backend
+  const pollRef = useRef(null);
+  const mountedRef = useRef(true);
+  const ticksRef = useRef(0);
+  const vertical = target === "short";
+
+  async function loadChannels() {
+    if (!jobId) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await api.v4PerChannelSeoPreview(jobId, "per_channel", target, index);
+      setChannels((r?.channels || []).map((c) => ({
+        id: c.channel_id,
+        name: c.channel_name || `Channel #${c.channel_id}`,
+      })));
+      setLoadedOnce(true);
+    } catch (e) {
+      setErr(e?.message || "failed to load channels");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function stopPoll() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } }
+  function startPoll() {
+    stopPoll();
+    ticksRef.current = 0;
+    const tick = async () => {
+      if (!mountedRef.current) { stopPoll(); return; }
+      ticksRef.current += 1;
+      try {
+        const s = await api.v4PrepareChannelVideosState(jobId);
+        if (!mountedRef.current) { stopPoll(); return; }
+        setPrep(s);
+        // Stop on a terminal state, or a ~20-min safety cap so a wedged batch
+        // never polls forever.
+        if (["done", "failed", "idle"].includes(s?.state) || ticksRef.current > 480) stopPoll();
+      } catch { /* transient — keep polling */ }
+    };
+    tick();
+    if (mountedRef.current) pollRef.current = setInterval(tick, 2500);
+  }
+  async function renderAll() {
+    setErr("");
+    try { await api.v4PrepareChannelVideos(jobId, target, index); startPoll(); }
+    catch (e) { setErr(e?.message || "failed to start"); }
+  }
+  // Auto-load on mount so the panel is populated the moment it's visible —
+  // the operator kept asking "where is the channel-wise video?" because it was
+  // collapsed + lazy. It now opens by default (see `open` below) and fills in
+  // its channels straight away.
+  useEffect(() => {
+    mountedRef.current = true;
+    loadChannels();
+    return () => { mountedRef.current = false; stopPoll(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
+  const statusByCh = {};
+  (prep?.channels || []).forEach((c) => { statusByCh[c.channel_id] = c; });
+  const running = prep?.state === "running" || prep?.state === "queued";
+
+  return (
+    <details
+      open
+      className="text-gray-300 mt-2 rounded border border-border bg-black/30 p-2"
+      onToggle={(e) => { if (e.target.open && !loadedOnce && !busy) loadChannels(); }}
+    >
+      <summary className="cursor-pointer text-gray-400 select-none text-xs flex items-center gap-2">
+        Per-channel videos
+        <span className="text-[10px] text-gray-600">(every channel's full clip — its own intro + branding)</span>
+      </summary>
+
+      <div className="mt-2 space-y-2">
+        {busy && (
+          <div className="text-[11px] text-gray-500 inline-flex items-center gap-1">
+            <Loader2 size={11} className="animate-spin" /> loading channels…
+          </div>
+        )}
+        {err && <div className="text-[11px] text-red-300">{err}</div>}
+
+        {channels.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={renderAll}
+                disabled={running}
+                className="text-[11px] font-medium text-white bg-accent/80 hover:bg-accent px-2 py-1 rounded inline-flex items-center gap-1 disabled:opacity-40"
+              >
+                {running ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                Render all {channels.length} channels
+              </button>
+              {prep && prep.total > 0 && (
+                <span className="text-[10px] text-gray-400">
+                  {prep.done}/{prep.total} {prep.state === "done" ? "✓ ready" : prep.state}
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              Each channel's FULL video — its own intro + logo + watermark + the anti-duplicate
+              zoom &amp; nudge — exactly what publishes. Renders one channel at a time (won't slow a
+              live render); cached after. You can also press ▶ on any channel to build just that one.
+            </p>
+            <div className={`grid gap-2 ${vertical ? "grid-cols-3" : "grid-cols-2"}`}>
+              {channels.map((c) => {
+                const st = statusByCh[c.id];
+                const src = withAuth(`/api/v4/jobs/${jobId}/preview/per-channel-video?channel_id=${c.id}&target=${target}&index=${index}`);
+                return (
+                  <div key={c.id} className="rounded border border-border/60 bg-black/40 p-1.5">
+                    <div className="flex items-center justify-between mb-1 gap-1">
+                      <span className="text-[10px] text-gray-300 truncate" title={c.name}>{c.name}</span>
+                      {st?.ready && <CheckCircle2 size={11} className="text-emerald-400 flex-shrink-0" />}
+                      {running && !st?.ready && !st?.error && (
+                        <Loader2 size={10} className="animate-spin text-gray-500 flex-shrink-0" />
+                      )}
+                    </div>
+                    {st?.error ? (
+                      <div className="text-[10px] text-red-300 break-words">{st.error}</div>
+                    ) : (
+                      <video
+                        src={src}
+                        controls
+                        preload="none"
+                        className={`w-full rounded bg-black ${vertical ? "aspect-[9/16]" : "aspect-video"}`}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+        {loadedOnce && channels.length === 0 && !busy && (
+          <div className="text-[11px] text-gray-500 italic">
+            No channels selected for this job (or none connected). Pick channels at job creation,
+            or connect a YouTube account.
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+// ── Per-platform SEO preview (YouTube / Instagram / Facebook) ──────────
+// YouTube keeps its title + description + tags. Instagram / Facebook each get
+// a NATIVE caption + hashtags from a dedicated AI call (separate per platform),
+// cached onto the clip so what you preview here is exactly what publishes.
+const _PLATFORMS = [
+  { key: "youtube",   label: "YouTube" },
+  { key: "instagram", label: "Instagram" },
+  { key: "facebook",  label: "Facebook" },
+];
+
+function PlatformSeoPreview({ jobId, clipId, defaultPlatform = "instagram", emphasis = false }) {
+  const _initPlat = ["youtube", "instagram", "facebook"].includes(defaultPlatform)
+    ? defaultPlatform : "instagram";
+  const [platform, setPlatform] = useState(_initPlat);
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function load(p, force = false) {
+    if (!jobId || !clipId) { setErr("Save / render the clip first."); return; }
+    setBusy(true); setErr(""); setData(null);
+    try {
+      const r = await api.v4PlatformSeoPreview(jobId, {
+        clip_id: clipId, platform: p, force,
+      });
+      setData(r);
+    } catch (e) {
+      setErr(e?.message || "preview failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // When this is the PRIMARY SEO for a platform-specific job (Instagram /
+  // Facebook), auto-load the chosen platform's caption on open. The variant
+  // is cached server-side, so re-opening shorts is cheap. This is what makes
+  // an Instagram Reel job show its Instagram SEO without a manual click.
+  useEffect(() => {
+    if (emphasis && clipId) load(_initPlat, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emphasis, clipId, _initPlat]);
+
+  const isYt = platform === "youtube";
+  const variant = data?.variant || {};
+  const generic = data?.generic || {};
+  const caption = isYt
+    ? (generic.description || "")
+    : (variant.caption || "");
+  const ytTitle = isYt ? (generic.title || "") : "";
+  const hashtags = isYt ? (generic.hashtags || []) : (variant.hashtags || []);
+  const score = variant.tool_score;
+
+  return (
+    <details open={emphasis} className={`text-gray-300 mt-2 rounded border p-2 ${
+      emphasis ? "border-accent2/50 bg-accent2/5" : "border-border bg-black/30"}`}>
+      <summary className="cursor-pointer text-gray-400 select-none text-xs flex items-center gap-2">
+        {emphasis
+          ? <span className="text-accent2 font-medium">{platform.charAt(0).toUpperCase() + platform.slice(1)} SEO — what publishes</span>
+          : "Per-platform caption preview"}
+        <span className="text-[10px] text-gray-600">(YouTube / Instagram / Facebook — each written natively)</span>
+      </summary>
+
+      <div className="mt-2 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex rounded border border-border overflow-hidden text-[11px]">
+            {_PLATFORMS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => { setPlatform(p.key); setData(null); setErr(""); }}
+                className={`px-2 py-1 ${platform === p.key ? "bg-accent2/20 text-accent2" : "text-gray-400"}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => load(platform, false)}
+            disabled={busy}
+            className="text-[11px] text-accent2 hover:text-white inline-flex items-center gap-1 disabled:opacity-40"
+          >
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            {isYt ? "Preview" : "Generate"}
+          </button>
+          {!isYt && data && (
+            <button
+              type="button"
+              onClick={() => load(platform, true)}
+              disabled={busy}
+              title="Regenerate this platform's caption"
+              className="text-[11px] text-gray-400 hover:text-white inline-flex items-center gap-1 disabled:opacity-40"
+            >
+              Regenerate
+            </button>
+          )}
+          {typeof score === "number" && (
+            <span className={`text-[10px] px-1.5 py-px rounded ${
+              score >= 75 ? "bg-emerald-500/15 text-emerald-300"
+              : score >= 60 ? "bg-amber-500/15 text-amber-300"
+              : "bg-red-500/15 text-red-300"
+            }`}>Match {Math.round(score)}/100</span>
+          )}
+        </div>
+
+        {!isYt && (
+          <div className="text-[10px] text-gray-500">
+            {platform === "instagram"
+              ? "Instagram Reel caption — hook + emoji + up to 30 hashtags."
+              : "Facebook caption — longer story-style lead + few hashtags."}
+          </div>
+        )}
+
+        {err && <div className="text-[11px] text-red-300">{err}</div>}
+
+        {data && (
+          <div className="rounded border border-border/60 bg-black/40 p-2 space-y-1.5">
+            {ytTitle && (
+              <div className="text-[11px] font-medium text-gray-200">{ytTitle}</div>
+            )}
+            <div className="text-[11px] text-gray-300 whitespace-pre-wrap max-h-56 overflow-y-auto">
+              {caption || <span className="italic text-gray-500">No caption returned.</span>}
+            </div>
+            {hashtags.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1 border-t border-border/40">
+                {hashtags.map((t, i) => (
+                  <span key={i} className="text-[10px] px-1 py-px rounded bg-white/5 text-accent2/80">{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+// ── Competitor intelligence ───────────────────────────────────────────
+// When a competitor (style-reference) channel is picked as the SEO style
+// source, show what we LEARNT from THEIR top-performing public videos (mined
+// patterns) so the operator understands the competitor — the SEO generator
+// already writes using this corpus. "Analyze" mines/refreshes it.
+function CompetitorIntel({ channelId }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [learning, setLearning] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function load() {
+    if (!channelId) return;
+    setBusy(true);
+    try {
+      const r = await api.getChannelCorpus(channelId);
+      setData(r);
+    } catch { /* non-fatal */ } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { setData(null); setMsg(""); load(); /* eslint-disable-next-line */ }, [channelId]);
+
+  async function analyze() {
+    if (!channelId) return;
+    setLearning(true); setMsg("Analyzing their top videos…");
+    try {
+      await api.learnChannel(channelId);
+      // Poll a few times — mining usually finishes under ~15s.
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const r = await api.getChannelCorpus(channelId);
+        if (r?.payload && Object.keys(r.payload).length) { setData(r); setMsg(""); break; }
+        if (i === 7) setMsg("Still analyzing — check back shortly.");
+      }
+    } catch (e) {
+      setMsg(e?.message || "Analyze failed");
+    } finally {
+      setLearning(false);
+    }
+  }
+
+  const payload = data?.payload || null;
+  const entries = payload
+    ? Object.entries(payload).filter(([, v]) => v && (Array.isArray(v) ? v.length : true))
+    : [];
+
+  return (
+    <div className="mt-2 p-2 rounded border border-amber-900/40 bg-amber-950/10">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-amber-300/90">
+          Competitor intelligence
+        </span>
+        <button
+          type="button"
+          onClick={analyze}
+          disabled={learning || busy}
+          className="text-[10px] text-amber-300 hover:text-white inline-flex items-center gap-1 disabled:opacity-40"
+          title="Mine this competitor's top-performing videos and refresh what we learn from them"
+        >
+          {learning ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+          {payload ? "Refresh" : "Analyze"}
+        </button>
+      </div>
+
+      {busy && !payload ? (
+        <div className="text-[10px] text-gray-500">Loading…</div>
+      ) : entries.length > 0 ? (
+        <div className="space-y-1.5">
+          {entries.map(([k, v]) => (
+            <div key={k}>
+              <div className="text-[9px] uppercase tracking-wide text-gray-500">{k.replace(/_/g, " ")}</div>
+              {Array.isArray(v) ? (
+                <div className="flex flex-wrap gap-1">
+                  {v.slice(0, 12).map((it, i) => (
+                    <span key={i} className="text-[10px] px-1 py-px rounded bg-amber-500/10 text-amber-200/90">{String(it)}</span>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[10px] text-gray-400">{String(v)}</div>
+              )}
+            </div>
+          ))}
+          {data?.refreshed_at && (
+            <div className="text-[9px] text-gray-600">learnt {new Date(data.refreshed_at).toLocaleDateString()}</div>
+          )}
+        </div>
+      ) : (
+        <div className="text-[10px] text-gray-500">
+          {msg || "Not analyzed yet — click Analyze to learn from this competitor's top videos. SEO will then borrow what works for them."}
+        </div>
+      )}
+      {msg && entries.length > 0 && <div className="text-[10px] text-gray-500 mt-1">{msg}</div>}
     </div>
   );
 }
