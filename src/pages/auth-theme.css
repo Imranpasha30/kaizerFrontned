@@ -1,0 +1,221 @@
+/* Sign-in and sign-up, in the landing page's clothes.
+ *
+ * The landing was rebuilt on the editorial palette -- paper, ink, flame,
+ * Archivo over Fraunces italic -- and the auth screens were left on the old
+ * near-black-and-red theme. Arriving from the landing meant the product
+ * changed appearance at the first click, which reads as two different
+ * products, or a phishing page.
+ *
+ * SCOPED, NOT GLOBAL. Everything here hangs off .kxauth. The rest of the app
+ * is still the dark control-room theme and must stay that way, and the
+ * Input/Button components these screens use are shared with every other
+ * page -- so they are re-skinned only inside this wrapper. Nothing outside
+ * it can be reached from this file.
+ *
+ * The values are copied from landing-v2.css rather than re-picked by eye,
+ * because "close to the landing" is exactly the thing nobody can unsee once
+ * the two are open side by side.
+ */
+
+.kxauth {
+  /* ── straight from the landing ─────────────────────────────────── */
+  --paper:      #faf9f6;
+  --paper-2:    #f3f1ea;
+  --card:       #fbfaf7;
+  --ink:        #16130f;
+  --ink-2:      #3f3a33;
+  --ink-3:      #6f685e;
+  --rule:       #e4e0d6;
+  --rule-2:     #d6d1c4;
+  --flame:      #e8560e;
+  --flame-soft: #fbe9de;
+  --disp:  'Archivo', system-ui, sans-serif;
+  --serif: 'Fraunces', Georgia, serif;
+  --mono:  'IBM Plex Mono', ui-monospace, monospace;
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--disp);
+  -webkit-font-smoothing: antialiased;
+}
+
+.kxauth ::selection { background: var(--flame); color: #fff; }
+
+/* ── left: the showcase ───────────────────────────────────────────── */
+.kxauth .kxauth-showcase {
+  background: var(--paper-2);
+  border-right: 1px solid var(--rule);
+  position: relative;
+  overflow: hidden;
+}
+
+/* The landing draws faint flowing lines behind the hero. A grid is the
+   quiet equivalent for a panel this size -- present at a glance, invisible
+   at reading distance. */
+.kxauth .kxauth-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(to right,  rgba(22,19,15,.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(22,19,15,.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 80% 70% at 30% 40%, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 30% 40%, #000 30%, transparent 78%);
+}
+
+/* A single flame wash, low and warm, so the panel is not flat paper. */
+.kxauth .kxauth-showcase::after {
+  content: "";
+  position: absolute; inset: auto -20% -30% -20%; height: 60%;
+  background: radial-gradient(ellipse at 50% 100%, rgba(232,86,14,.10), transparent 70%);
+  pointer-events: none;
+}
+
+.kxauth .eyebrow {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.kxauth .eyebrow::before {
+  content: ""; width: 26px; height: 2px; background: var(--flame); flex: none;
+}
+
+.kxauth .kxauth-h1 {
+  font-family: var(--disp); font-weight: 800;
+  font-size: clamp(32px, 3.4vw, 46px);
+  line-height: 1.04; letter-spacing: -.032em; color: var(--ink);
+}
+.kxauth .serif-i {
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  letter-spacing: -.015em;
+}
+.kxauth .flame { color: var(--flame); }
+
+.kxauth .kxauth-feat-icon {
+  width: 34px; height: 34px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9px;
+  background: var(--flame-soft); color: var(--flame);
+  border: 1px solid rgba(232,86,14,.18);
+}
+.kxauth .kxauth-feat-t { font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.kxauth .kxauth-feat-d { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+
+.kxauth .kxauth-wordmark {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .28em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
+/* ── right: the card ──────────────────────────────────────────────── */
+/* .glass-panel is the app-wide dark card. Inside .kxauth it becomes the
+   landing's console surface: card paper, hairline rule, soft low shadow. */
+.kxauth .glass-panel {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  box-shadow: 0 30px 60px -30px rgba(40,30,16,.22);
+  backdrop-filter: none;
+}
+
+.kxauth .kxauth-badge {
+  display: inline-block; align-self: flex-start;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  letter-spacing: .22em; text-transform: uppercase;
+  padding: 5px 10px; border-radius: 6px;
+}
+.kxauth .kxauth-title {
+  font-family: var(--disp); font-weight: 700; font-size: 26px;
+  letter-spacing: -.02em; color: var(--ink);
+}
+.kxauth .kxauth-sub  { font-size: 14px; color: var(--ink-2); line-height: 1.55; }
+.kxauth .kxauth-note { font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+.kxauth .kxauth-rule { height: 1px; background: var(--rule); flex: 1; }
+.kxauth .kxauth-or {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
+/* ── the shared field + button components, re-skinned in scope ────── */
+.kxauth .ui-field-label {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.kxauth .ui-input {
+  background: var(--paper);
+  border: 1px solid var(--rule-2);
+  color: var(--ink);
+  border-radius: 10px;
+  font-family: var(--disp); font-size: 14.5px;
+  transition: border-color .18s, box-shadow .18s, background .18s;
+}
+.kxauth .ui-input::placeholder { color: #a79f92; }
+.kxauth .ui-input:hover:not(:disabled) { border-color: var(--rule-2); background: #fff; }
+.kxauth .ui-input:focus,
+.kxauth .ui-input:focus-visible {
+  outline: none;
+  background: #fff;
+  border-color: var(--flame);
+  box-shadow: 0 0 0 3px rgba(232,86,14,.14);
+}
+.kxauth .ui-input:disabled { background: var(--paper-2); color: var(--ink-3); cursor: not-allowed; }
+.kxauth .ui-field-hint  { font-size: 11.5px; color: var(--ink-3); }
+.kxauth .ui-field-error { font-size: 11.5px; color: #b3300b; }
+
+/* The landing's primary action is an ink pill that lifts on hover. */
+.kxauth .ui-btn-primary {
+  background: var(--ink); color: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 100px;
+  font-family: var(--disp); font-weight: 600; letter-spacing: -.005em;
+  transition: transform .18s, background .25s, box-shadow .25s;
+  box-shadow: 0 10px 24px -14px rgba(22,19,15,.6);
+}
+.kxauth .ui-btn-primary:hover:not(:disabled) {
+  background: #000; transform: translateY(-2px);
+  box-shadow: 0 16px 30px -16px rgba(22,19,15,.65);
+}
+.kxauth .ui-btn-primary:disabled { opacity: .45; transform: none; cursor: not-allowed; }
+
+.kxauth .ui-btn-ghost {
+  background: transparent; color: var(--ink);
+  border: 1px solid var(--rule-2); border-radius: 100px;
+  font-family: var(--disp); font-weight: 600;
+}
+.kxauth .ui-btn-ghost:hover:not(:disabled) { background: var(--paper-2); }
+
+/* ── links + the inline error ─────────────────────────────────────── */
+.kxauth .kxauth-link {
+  color: var(--flame); font-weight: 600;
+  text-underline-offset: 3px; transition: color .15s;
+}
+.kxauth .kxauth-link:hover { color: #c2430a; text-decoration: underline; }
+
+.kxauth .kxauth-alert {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: #fdf1ec; border: 1px solid #f3c9b6; color: #8f2708;
+  font-size: 12.5px; border-radius: 10px; padding: 9px 12px; line-height: 1.5;
+}
+
+/* Google Identity Services renders its own button; it only needs room. */
+.kxauth .kxauth-gbtn { display: flex; justify-content: center; min-height: 40px; }
+
+@media (max-width: 767px) {
+  .kxauth .kxauth-title { font-size: 23px; }
+}
+
+/* A muted control that warms on hover: "Forgot password?", "Use a password
+   instead". Distinct from .kxauth-link, which is flame at rest and used for
+   the action we actually want taken. */
+.kxauth a.kxauth-note:hover { color: var(--flame); }
+.kxauth .kxauth-subtle {
+  font-size: 11.5px; color: var(--ink-3); transition: color .15s;
+}
+.kxauth .kxauth-subtle:hover { color: var(--ink); }
+
+/* The showcase clip. object-cover so any aspect ratio fills the frame. */
+.kxauth .kxauth-clip {
+  width: 78%; aspect-ratio: 16/9; border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--rule); background: var(--paper-2);
+  box-shadow: 0 26px 50px -26px rgba(40,30,16,.35);
+}
+.kxauth .kxauth-clip video { width: 100%; height: 100%; object-fit: cover; display: block; }

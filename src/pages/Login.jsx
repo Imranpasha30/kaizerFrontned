@@ -10,6 +10,7 @@ import {
   Shield,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
+import "./auth-theme.css";
 import { Button, Input, PasswordInput } from "../components/ui";
 import { HOME_PATH } from "../lib/previewGate";
 
@@ -135,73 +136,75 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen grid grid-cols-1 md:grid-cols-2 bg-[#060606]">
+    <div className="kxauth min-h-screen grid grid-cols-1 md:grid-cols-2">
       {/* ── Left: product showcase (md+) ───────────────────────── */}
-      <aside className="relative hidden md:flex items-center justify-center overflow-hidden bg-gradient-to-br from-[#0a0a0a] via-[#0a0a0a] to-[#140b1a] border-r border-white/5">
-        <div className="hero-grid-bg" aria-hidden="true" />
+      <aside className="kxauth-showcase relative hidden md:flex items-center justify-center">
+        <div className="kxauth-grid" aria-hidden="true" />
         <div className="relative z-10 w-full max-w-lg px-10 py-16 flex flex-col gap-8">
-          <span className="eyebrow">Autonomous Media Engine</span>
-          <h2 className="heading-hero text-[44px] leading-[1.05]">
-            Ship a live show while you&rsquo;re making coffee.
+          <span className="eyebrow">Autonomous media engine</span>
+          <h2 className="kxauth-h1">
+            Ship a live show
+            <br />
+            <span className="serif-i flame">while you&rsquo;re making coffee.</span>
           </h2>
 
           {/* Optional looping demo thumbnail */}
-          <div className="w-3/4 aspect-video rounded-xl overflow-hidden border border-white/10 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)] bg-black">
+          <div className="kxauth-clip">
             <video
-              src="/demo/kaizer-demo.mp4"
+              src="/landing-assets/howto-demo.mp4"
+              poster="/landing-assets/howto-poster.jpg"
               autoPlay
               muted
               loop
               playsInline
               preload="metadata"
-              className="w-full h-full object-cover"
               onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
           </div>
 
           <ul className="flex flex-col gap-4 mt-2">
             <li className="flex items-start gap-3">
-              <span className="mt-0.5 inline-flex w-8 h-8 items-center justify-center rounded-lg bg-white/[0.04] border border-white/10 text-white">
+              <span className="kxauth-feat-icon mt-0.5">
                 <Radio size={15} />
               </span>
               <div>
-                <div className="text-[14px] font-semibold text-white leading-tight">
+                <div className="kxauth-feat-t">
                   Zero-operator live direction
                 </div>
-                <div className="text-[12px] text-gray-500 leading-snug">
+                <div className="kxauth-feat-d">
                   Kaizer cuts, captions and calls the show for you.
                 </div>
               </div>
             </li>
             <li className="flex items-start gap-3">
-              <span className="mt-0.5 inline-flex w-8 h-8 items-center justify-center rounded-lg bg-accent/15 border border-accent/30 text-accent">
+              <span className="kxauth-feat-icon mt-0.5">
                 <Zap size={15} />
               </span>
               <div>
-                <div className="text-[14px] font-semibold text-white leading-tight">
+                <div className="kxauth-feat-t">
                   One recording &rarr; 8 clips
                 </div>
-                <div className="text-[12px] text-gray-500 leading-snug">
+                <div className="kxauth-feat-d">
                   Auto-chopped for Shorts, Reels, TikTok and long-form.
                 </div>
               </div>
             </li>
             <li className="flex items-start gap-3">
-              <span className="mt-0.5 inline-flex w-8 h-8 items-center justify-center rounded-lg bg-white/[0.04] border border-white/10 text-white">
+              <span className="kxauth-feat-icon mt-0.5">
                 <Shield size={15} />
               </span>
               <div>
-                <div className="text-[14px] font-semibold text-white leading-tight">
+                <div className="kxauth-feat-t">
                   Your footage, your storage
                 </div>
-                <div className="text-[12px] text-gray-500 leading-snug">
+                <div className="kxauth-feat-d">
                   Nothing leaves your account without explicit publish.
                 </div>
               </div>
             </li>
           </ul>
 
-          <div className="mt-auto pt-10 text-[10px] tracking-[0.28em] uppercase font-bold text-gray-600">
+          <div className="kxauth-wordmark mt-auto pt-10">
             &mdash; Kaizer X
           </div>
         </div>
@@ -212,24 +215,22 @@ export default function Login() {
         <div className="w-full max-w-md">
           <div className="glass-panel p-8 mx-auto space-y-5">
             <div className="flex flex-col gap-2">
-              <span className="inline-block bg-accent rounded px-2.5 py-1 text-white font-black text-sm tracking-widest self-start">
+              <span className="kxauth-badge">
                 KAIZER
               </span>
-              <h1 className="text-2xl font-bold text-white">Welcome back</h1>
-              <p className="text-sm text-gray-500">
+              <h1 className="kxauth-title">Welcome back</h1>
+              <p className="kxauth-sub">
                 Sign in to manage your shows and publish to every platform.
               </p>
             </div>
 
             {config.google_enabled && (
               <>
-                <div ref={gbtnRef} className="flex justify-center" />
+                <div ref={gbtnRef} className="kxauth-gbtn" />
                 <div className="relative flex items-center gap-3">
-                  <div className="flex-1 h-px bg-white/10" />
-                  <span className="text-[10px] uppercase tracking-[0.22em] text-gray-600">
-                    or
-                  </span>
-                  <div className="flex-1 h-px bg-white/10" />
+                  <div className="kxauth-rule" />
+                  <span className="kxauth-or">or</span>
+                  <div className="kxauth-rule" />
                 </div>
               </>
             )}
@@ -251,7 +252,7 @@ export default function Login() {
                 />
 
                 {codeStep === "ask" && (
-                  <p className="text-[11px] text-gray-500 -mt-1">
+                  <p className="kxauth-note -mt-1">
                     No password needed. If you have not signed up yet, the
                     first correct code creates your account.
                   </p>
@@ -271,12 +272,12 @@ export default function Login() {
                       onChange={(e) => setCode(e.target.value)}
                       placeholder="123456"
                     />
-                    <p className="text-[11px] text-gray-500 -mt-1">
+                    <p className="kxauth-note -mt-1">
                       Sent to {sentTo}. It works once and expires in 10 minutes.
                       {" "}
                       <button type="button"
                         onClick={() => { setCodeStep("ask"); setCode(""); setError(""); }}
-                        className="text-accent2 hover:underline">
+                        className="kxauth-link">
                         Use a different address
                       </button>
                     </p>
@@ -285,14 +286,14 @@ export default function Login() {
 
                 {error && (
                   <div role="alert"
-                    className="flex items-start gap-2 bg-red-950/50 border border-red-900/70 text-red-300 text-xs rounded-lg px-3 py-2">
+                    className="kxauth-alert">
                     <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
                     <span>{error}</span>
                   </div>
                 )}
 
                 <button type="submit" disabled={busy}
-                  className="w-full rounded-lg bg-accent2 text-black font-semibold text-sm py-2.5 disabled:opacity-50">
+                  className="ui-btn-primary w-full flex items-center justify-center py-2.5 text-sm">
                   {busy
                     ? (codeStep === "ask" ? "Sending..." : "Checking...")
                     : (codeStep === "ask" ? "Email me a code" : "Sign in")}
@@ -300,7 +301,7 @@ export default function Login() {
 
                 <button type="button"
                   onClick={() => { setCodeMode(false); setCodeStep("ask"); setError(""); }}
-                  className="w-full text-[11px] text-gray-500 hover:text-gray-300">
+                  className="kxauth-subtle w-full">
                   Use a password instead
                 </button>
               </form>
@@ -335,14 +336,14 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => { setCodeMode(true); setCodeStep("ask"); setError(""); }}
-                    className="text-[11px] text-accent2 hover:underline"
+                    className="kxauth-link text-[11px]"
                   >
                     Email me a code instead
                   </button>
                 ) : <span />}
                 <Link
                   to="/forgot-password"
-                  className="text-[11px] text-gray-500 hover:text-accent2 transition-colors"
+                  className="kxauth-note text-[11px]"
                 >
                   Forgot password?
                 </Link>
@@ -351,7 +352,7 @@ export default function Login() {
               {error && (
                 <div
                   role="alert"
-                  className="flex items-start gap-2 bg-red-950/50 border border-red-900/70 text-red-300 text-xs rounded-lg px-3 py-2"
+                  className="kxauth-alert"
                 >
                   <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
                   <span>{error}</span>
@@ -371,9 +372,9 @@ export default function Login() {
                 Sign in
               </Button>
 
-              <div className="text-center text-xs text-gray-500 pt-1">
+              <div className="kxauth-note text-center pt-1">
                 Don&rsquo;t have an account?{" "}
-                <Link to="/register" className="text-accent2 hover:text-white">
+                <Link to="/register" className="kxauth-link">
                   Create one
                 </Link>
               </div>
@@ -381,7 +382,7 @@ export default function Login() {
             )}
           </div>
 
-          <p className="text-center text-[10px] text-gray-700 mt-4">
+          <p className="kxauth-note text-center mt-4">
             By signing in you agree that this app will store your session locally.
           </p>
         </div>
