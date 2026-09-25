@@ -147,6 +147,9 @@ export function AiCoachPanel({ ytChannels = [], initialGcid = "", hasData }) {
   const [ranScope, setRanScope] = useState(null); // what the visible report covers
   const [busy, setBusy]       = useState(false);
   const [err, setErr]         = useState("");
+  // Which brain writes the report — "" = Auto (Gemini first, then the
+  // Claude/ChatGPT fallback ladder). A choice puts that provider first.
+  const [brain, setBrain]     = useState("");
 
   React.useEffect(() => { setScope(initialGcid || ""); }, [initialGcid]);
 
@@ -157,6 +160,7 @@ export function AiCoachPanel({ ytChannels = [], initialGcid = "", hasData }) {
         gcid: scope || null,
         force,
         question: question.trim() || null,
+        provider: brain || null,
       });
       setReport(res.report || null);
       setMeta(res);
@@ -216,6 +220,18 @@ export function AiCoachPanel({ ytChannels = [], initialGcid = "", hasData }) {
             placeholder='Ask anything (optional) — e.g. "why are my views low?", "focus on my titles"'
             className="flex-1 bg-black border border-purple-800/40 rounded px-3 py-2 text-sm text-white placeholder-gray-600 disabled:opacity-50"
           />
+          <select
+            value={brain}
+            onChange={(e) => setBrain(e.target.value)}
+            disabled={busy}
+            className="lg:w-40 bg-black border border-purple-800/40 rounded px-2.5 py-2 text-sm text-white disabled:opacity-50 flex-shrink-0"
+            title="Which AI writes the report — Auto tries Gemini first, then Claude, then ChatGPT"
+          >
+            <option value="">Brain: Auto</option>
+            <option value="gemini">Gemini</option>
+            <option value="claude">Claude</option>
+            <option value="openai">ChatGPT</option>
+          </select>
           <button
             type="button"
             onClick={() => run(false)}
@@ -405,6 +421,8 @@ export function CompareChannelsPanel({ ytChannels }) {
   const [busy, setBusy]     = useState(false);
   const [err, setErr]       = useState("");
   const [result, setResult] = useState(null);
+  // "" = Auto ladder (Gemini → Claude → ChatGPT); a choice goes first.
+  const [brain, setBrain]   = useState("");
 
   const canRun = aGcid && (bKind === "own" ? (bGcid && bGcid !== aGcid) : bQuery.trim().length >= 2);
 
@@ -418,6 +436,7 @@ export function CompareChannelsPanel({ ytChannels }) {
         b_gcid: bKind === "own" ? bGcid : null,
         b_query: bKind === "external" ? bQuery.trim() : null,
         ai: true,
+        provider: brain || null,
       });
       setResult(res);
     } catch (e) {
@@ -495,6 +514,18 @@ export function CompareChannelsPanel({ ytChannels }) {
               </div>
             )}
           </div>
+
+          <select
+            value={brain}
+            onChange={(e) => setBrain(e.target.value)}
+            className="bg-black border border-border rounded px-2 py-2 text-sm text-white flex-shrink-0"
+            title="Which AI writes the verdict — Auto tries Gemini first, then Claude, then ChatGPT"
+          >
+            <option value="">Brain: Auto</option>
+            <option value="gemini">Gemini</option>
+            <option value="claude">Claude</option>
+            <option value="openai">ChatGPT</option>
+          </select>
 
           <button
             type="button"

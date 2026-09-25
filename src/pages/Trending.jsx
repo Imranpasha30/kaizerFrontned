@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Radar, Plus, Trash2, Loader2, AlertCircle, RefreshCw, ExternalLink,
   Flame, Clock, CheckCircle2, X, Zap, CheckSquare, Square, Film,
-  UserCircle2, Star,
+  UserCircle2, Star, Play,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
@@ -36,6 +36,13 @@ export default function Trending() {
   const [customRange, setCustomRange] = useState({ since: "", until: "" });
   const [showCustom, setShowCustom] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Which AI summarizes swept topics (Claude/ChatGPT fall back to Gemini).
+  const [sweepBrain, setSweepBrain] = useState("gemini");
+  // Live sweep progress {startedAt, elapsed} — drives the animated banner
+  // + progressive topic population while the radar runs.
+  const [sweep, setSweep] = useState(null);
+  // Inline player — topic id currently playing (one at a time).
+  const [playingId, setPlayingId] = useState(null);
   const [showCompForm, setShowCompForm] = useState(false);
   const [selTopics, setSelTopics] = useState(() => new Set());
   const [selComps,  setSelComps]  = useState(() => new Set());
@@ -242,15 +249,44 @@ export default function Trending() {
       setRefreshing(true);
       // Send the current timeline window so the sweep only fetches + summarizes
       // videos inside it — no more pull-then-filter.  0 = "All time" → no cap.
-      await api.refreshTrending(sinceHours > 0 ? sinceHours : undefined);
-      const label = sinceHours > 0
-        ? (TIMELINE_OPTIONS.find((o) => o.hours === sinceHours)?.label || `${sinceHours}h`)
-        : "all time";
-      setNotice(`Radar sweeping for topics from the last ${label} — new topics will appear shortly.`);
-      setTimeout(load, 8000);
+      await api.refreshTrending(sinceHours > 0 ? sinceHours : undefined,
+                                sweepBrain !== "gemini" ? sweepBrain : undefined);
+      setNotice(""); setError("");
+      const startedAt = Date.now();
+      setSweep({ startedAt, elapsed: 0 });
+      // Poll the sweep every 2s: live elapsed counter, PROGRESSIVE topic
+      // population while it runs (topics commit per-competitor), then a
+      // result summary + final reload the moment the radar lands — no
+      // more blind one-shot reload 8s after the click.
+      let ticks = 0;
+      while (ticks < 240) {              // 8-min hard ceiling
+        await new Promise((r) => setTimeout(r, 2000));
+        ticks += 1;
+        setSweep({ startedAt, elapsed: Math.round((Date.now() - startedAt) / 1000) });
+        let st = null;
+        try { st = await api.trendingSweepStatus(); } catch { continue; }
+        if (ticks % 3 === 0) load();     // surface topics as they land
+        if (st && !st.running && st.finished_at) {
+          const res = st.result || {};
+          const secs = Math.round((Date.now() - startedAt) / 1000);
+          if (res.error) {
+            setError(`Sweep failed: ${res.error}`);
+          } else if ((res.competitors || 0) === 0) {
+            setNotice("Sweep finished — no competitors tracked yet. Add one and sweep again.");
+          } else {
+            setNotice(`Sweep done in ${secs}s — ${res.new_topics || 0} new `
+              + `topic${res.new_topics === 1 ? "" : "s"} from ${res.competitors} `
+              + `competitor${res.competitors === 1 ? "" : "s"}`
+              + `${res.skipped_stale ? ` (${res.skipped_stale} outside the window)` : ""}.`);
+          }
+          break;
+        }
+      }
+      load();
     } catch (e) {
       setError(e.message);
     } finally {
+      setSweep(null);
       setRefreshing(false);
     }
   }
@@ -279,6 +315,16 @@ export default function Trending() {
           >
             <Plus size={14} /> Competitor
           </button>
+          <select
+            value={sweepBrain}
+            onChange={(e) => setSweepBrain(e.target.value)}
+            className="bg-black border border-border rounded px-2 py-1.5 text-sm text-white"
+            title="Which AI summarizes swept topics — Claude/ChatGPT fall back to Gemini on failure"
+          >
+            <option value="gemini">Gemini</option>
+            <option value="claude">Claude</option>
+            <option value="openai">ChatGPT</option>
+          </select>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -308,6 +354,29 @@ export default function Trending() {
           <button onClick={() => setError("")} className="ml-auto"><X size={14} /></button>
         </div>
       )}
+      {/* Animated sweep progress — replaces the old static "will appear
+          shortly" notice with real state: elapsed time, what's happening,
+          and progressive population (topics stream in below as each
+          competitor's videos get summarized). */}
+      {sweep && (
+        <div className="mb-3 p-3 bg-accent2/10 border border-accent2/30 rounded flex items-center gap-3">
+          <Radar size={18} className="text-accent2 animate-spin flex-shrink-0" style={{ animationDuration: "3s" }} />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-accent2">
+              Radar sweeping… {sweep.elapsed}s
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              Pulling each competitor's latest uploads, then AI-summarizing new ones
+              ({sweepBrain === "openai" ? "ChatGPT" : sweepBrain === "claude" ? "Claude" : "Gemini"}) —
+              typically 15–60 seconds. Topics appear below as they land.
+            </div>
+          </div>
+          <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden flex-shrink-0">
+            <div className="h-full w-2/3 bg-accent2/80 rounded-full animate-pulse" />
+          </div>
+        </div>
+      )}
+
       {notice && (
         <div className="mb-3 p-2 bg-green-500/10 border border-green-500/30 text-green-300 text-sm rounded flex items-center gap-2">
           <CheckCircle2 size={14} /> {notice}
@@ -487,6 +556,8 @@ export default function Trending() {
               onToggleSelect={() => toggleTopic(t.id)}
               onHeygen={() => startOrPickHeygen(t)}
               heygenStatus={heygenStatusByTopic[t.id]}
+              playing={playingId === t.id}
+              onTogglePlay={() => setPlayingId(playingId === t.id ? null : t.id)}
             />
           ))}
         </div>
@@ -717,7 +788,7 @@ function HeyGenModal({ topic, assets, loading, error, onRetryLoad, onCancel, onG
   );
 }
 
-function TopicRow({ topic, selected, onToggleSelect, onHeygen, heygenStatus }) {
+function TopicRow({ topic, selected, onToggleSelect, onHeygen, heygenStatus, playing, onTogglePlay }) {
   const ago = topic.published_at ? timeAgo(topic.published_at) : "—";
   const color = URGENCY_COLORS[topic.urgency] || URGENCY_COLORS.normal;
 
@@ -785,6 +856,17 @@ function TopicRow({ topic, selected, onToggleSelect, onHeygen, heygenStatus }) {
           )}
         </div>
         <div className="flex flex-col gap-1">
+          {topic.video_id && (
+            <button
+              onClick={onTogglePlay}
+              className={`p-1.5 rounded ${playing
+                ? "text-white bg-accent2/30"
+                : "text-gray-400 hover:text-white hover:bg-white/5"}`}
+              title={playing ? "Close player" : "Play right here"}
+            >
+              {playing ? <X size={14} /> : <Play size={14} />}
+            </button>
+          )}
           {topic.video_url && (
             <a
               href={topic.video_url}
@@ -814,6 +896,21 @@ function TopicRow({ topic, selected, onToggleSelect, onHeygen, heygenStatus }) {
       {hgErr && (
         <div className="mt-2 ml-6 text-[10px] text-red-400 break-words">
           HeyGen error: {hgErr}
+        </div>
+      )}
+      {/* Inline player — watch the competitor's video without leaving the
+          app (same embed pattern as Live Studio's live preview). */}
+      {playing && topic.video_id && (
+        <div className="mt-2 ml-6">
+          <div className="aspect-video w-full max-w-xl rounded border border-border bg-black overflow-hidden">
+            <iframe
+              title={`preview ${topic.video_id}`}
+              src={`https://www.youtube.com/embed/${topic.video_id}?autoplay=1`}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
         </div>
       )}
     </div>
@@ -885,6 +982,9 @@ function CompetitorForm({ onSave, onCancel }) {
       const r = await api.suggestChannels({ region, category, limit: 20 });
       setSuggestions(r.results || []);
       setPickedIds(new Set());
+      // Friendly server note (e.g. "no trending chart for this category in
+      // this region") — shown where a raw API error used to appear.
+      if (r.note && !(r.results || []).length) setErr(r.note);
     } catch (e) {
       setErr(e.message || "Failed to load suggestions");
     } finally {

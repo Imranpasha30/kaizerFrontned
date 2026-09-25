@@ -12,7 +12,7 @@ import TemplateBuilder from "../pages/TemplateBuilder";
  *
  * Props: jobId, target ("bulletin"|"short"), index, onClose, onRendered (refresh callback).
  */
-export default function CustomTemplateEditor({ jobId, target = "bulletin", index = 0, onClose, onRendered, onBuilderToggle }) {
+export default function CustomTemplateEditor({ jobId, target = "bulletin", index = 0, onClose, onRendered, onBuilderToggle, engine = "" }) {
   const [ctx, setCtx] = useState(null);
   const [err, setErr] = useState("");
   const [overrides, setOverrides] = useState({});   // {slot: text} the user set
@@ -20,6 +20,7 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
   const [layout, setLayout] = useState("");          // chosen template key (custom:<id>)
   const [busy, setBusy] = useState(false);
   const [genBusy, setGenBusy] = useState("");        // slotKey currently AI-generating
+  const [notes, setNotes] = useState({});            // {slot: user guidance for AI image gen}
   const [status, setStatus] = useState("");
   const fileRefs = useRef({});
   // Inline visual builder (per-job design override)
@@ -126,8 +127,11 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
   }
 
   // Generate story-relevant image(s) for a slot. asCarousel=true → a story-driven sequence
-  // appended to the slideshow; else a single image.
+  // appended to the slideshow; else a single image. The per-slot note (typed in the panel)
+  // also guides builder-triggered generation via onSlotGenerate — the builder overlay has
+  // no note field of its own, so whatever is in the panel applies.
   async function genStoryImage(slotKey, asCarousel, count) {
+    const note = (notes[slotKey] || "").trim() || undefined;   // omit when blank
     const story = jobStory();
     if (!story) {
       setStatus("No story text on this job yet — edit a headline first, then generate.");
@@ -139,7 +143,7 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
       let next = { ...media };
       let added = 0;
       if (asCarousel) {
-        const res = await api.aiGenerateBatch({ story, count: count || null });
+        const res = await api.aiGenerateBatch({ story, count: count || null, note, engine });
         const fresh = (res.assets || []).map((a) => ({ id: a.id, duration_s: 3, effect: "fade", effect_duration: 0.4 }));
         if (!fresh.length) { setStatus("No images generated — try again."); return { ok: false, error: "No images generated — try again." }; }
         const v = next[slotKey];
@@ -147,7 +151,7 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
         next = { ...next, [slotKey]: { carousel: frames, fit: (isCarousel(v) && v.fit) || "cover" } };
         added = fresh.length;
       } else {
-        const a = await api.aiGenerateAsset({ story });
+        const a = await api.aiGenerateAsset({ story, note, engine });
         if (!a || !a.id) { setStatus("No image generated — try again."); return { ok: false, error: "No image generated — try again." }; }
         next = { ...next, [slotKey]: a.id };
         added = 1;
@@ -259,13 +263,33 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
           <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-wide">
             {ctx.kind === "full" ? "Full-form 16:9" : "Short 9:16"}
           </div>
-          {String(layout || ctx.layout || "").startsWith("custom:") && (
+          {String(layout || ctx.layout || "").startsWith("custom:") && (() => {
+            // Builder editing is HTML-only. Check the PENDING dropdown pick
+            // (options carry format), falling back to the saved template —
+            // otherwise picking an SVG in the dropdown would still offer the
+            // builder against the not-yet-saved selection.
+            const selKey = layout || ctx.layout || "";
+            const selOpt = (ctx.options || []).find((o) => o.key === selKey);
+            const selFormat = selOpt?.format
+              || (selKey === ctx.layout ? ctx.template?.format : "") || "html";
+            return (
             <>
+              {selFormat !== "svg" && (
+              <>
               <button type="button" onClick={openBuilder} disabled={builderBusy}
                 className="mt-3 w-full text-[11px] px-2 py-2 rounded-lg border border-teal-600/60 text-teal-300
                            hover:border-teal-400 hover:bg-teal-500/10 font-medium disabled:opacity-50">
                 {builderBusy ? "Opening…" : "✎ Edit design for this job"}
               </button>
+              <p className="text-[9.5px] text-gray-600 mt-1 leading-snug">
+                Move · resize · recolor · add elements · layers — opens the visual builder right here,
+                loaded with THIS job’s text. Edits apply to <b className="text-gray-400">this job only</b>;
+                the template stays unchanged. Save &amp; re-render to apply.
+              </p>
+              </>
+              )}
+              {/* the override indicator + reset live OUTSIDE the svg gate:
+                  a stale override must always be visible and resettable */}
               {hasOverride && (
                 <div className="mt-2 flex items-center gap-2 text-[10px] text-emerald-300">
                   <span>✓ Custom design active</span>
@@ -273,13 +297,9 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
                     className="text-gray-400 hover:text-white underline disabled:opacity-40">reset to template</button>
                 </div>
               )}
-              <p className="text-[9.5px] text-gray-600 mt-1 leading-snug">
-                Move · resize · recolor · add elements · layers — opens the visual builder right here,
-                loaded with THIS job’s text. Edits apply to <b className="text-gray-400">this job only</b>;
-                the template stays unchanged. Save &amp; re-render to apply.
-              </p>
             </>
-          )}
+            );
+          })()}
         </div>
 
         {/* right: controls */}
@@ -337,10 +357,16 @@ export default function CustomTemplateEditor({ jobId, target = "bulletin", index
                           <input type="checkbox" checked={car} onChange={() => toggleCarousel(s.key)} /> slideshow
                         </label>
                       </div>
+                      <input
+                        value={notes[s.key] || ""}
+                        onChange={(e) => setNotes((n) => ({ ...n, [s.key]: e.target.value }))}
+                        placeholder="✦ Describe this image (optional) — blank = AI decides from the video"
+                        className="w-full bg-[#0d1119] border border-fuchsia-500/25 rounded px-2 py-1 text-white text-[10px] placeholder-gray-600"
+                      />
                       {!car ? (
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] text-gray-500 flex-1 truncate">
-                            {val ? `asset #${val}` : "auto (story image)"}
+                            {val ? `asset #${val}` : <span className="italic">auto — AI picks from the video after transcription</span>}
                           </span>
                           <input type="file" accept="image/*" className="hidden"
                             ref={(el) => (fileRefs.current[s.key] = el)}

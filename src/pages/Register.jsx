@@ -11,6 +11,7 @@ import {
   Shield,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
+import { HOME_PATH } from "../lib/previewGate";
 import { Button, Input, PasswordInput } from "../components/ui";
 
 /**
@@ -20,10 +21,14 @@ import { Button, Input, PasswordInput } from "../components/ui";
  * error on the confirm field via PasswordInput's `error` prop.
  */
 export default function Register() {
-  const { registerEmail, loginGoogle, config, isAuthenticated, loading } = useAuth();
+  const { registerEmail, loginWithCode, requestCode, loginGoogle, config,
+          isAuthenticated, loading } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
-  const to  = loc.state?.from || "/app";
+  // HOME_PATH, not "/app": while the preview gate is on, /app is blocked,
+  // so a brand-new account landed on the refusal page the instant it was
+  // created. Sign-in was moved off "/app" already; this was missed.
+  const to  = loc.state?.from || HOME_PATH;
 
   const [name,  setName]  = useState("");
   const [email, setEmail] = useState("");
@@ -32,6 +37,13 @@ export default function Register() {
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState("");
   const [pw2Error, setPw2Error] = useState("");
+  /* Signing up with no password at all. The first correct code creates the
+   * account, so this screen and the sign-in screen run the same two steps --
+   * address, then digits -- on purpose: one habit, not two. */
+  const [codeMode, setCodeMode] = useState(false);   // false = password form
+  const [codeStep, setCodeStep] = useState("ask");   // "ask" | "enter"
+  const [code,     setCode]     = useState("");
+  const [sentTo,   setSentTo]   = useState("");
   const gbtnRef = useRef(null);
 
   useEffect(() => {
@@ -98,6 +110,37 @@ export default function Register() {
       nav(to, { replace: true });
     } catch (err) {
       setError(err.message || "Registration failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function askForCode(e) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await requestCode(email.trim());
+      setSentTo(email.trim());
+      setCodeStep("enter");
+    } catch (err) {
+      setError(err.message || "Could not send a code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCode(e) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      // Creates the account if the address is new, signs in if it is not --
+      // the caller does not have to know which, and neither does the person.
+      await loginWithCode(sentTo || email.trim(), code.trim());
+      nav(to, { replace: true });
+    } catch (err) {
+      setError(err.message || "That code did not work");
     } finally {
       setBusy(false);
     }
@@ -203,6 +246,98 @@ export default function Register() {
               </>
             )}
 
+            {codeMode ? (
+            <form onSubmit={codeStep === "ask" ? askForCode : submitCode}
+                  className="space-y-4">
+              <Input
+                label="Email"
+                icon={<Mail size={12} />}
+                type="email"
+                required
+                autoFocus
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                disabled={codeStep === "enter"}
+              />
+
+              {codeStep === "ask" && (
+                <p className="text-[11px] text-gray-500 -mt-1">
+                  No password to choose. We email you a six-digit code, and the
+                  first correct code creates your account.
+                </p>
+              )}
+
+              {codeStep === "enter" && (
+                <>
+                  <Input
+                    label="Six-digit code"
+                    icon={<Mail size={12} />}
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    required
+                    maxLength={7}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="123456"
+                  />
+                  <p className="text-[11px] text-gray-500 -mt-1">
+                    Sent to {sentTo}. It works once and expires in 10 minutes.
+                    {" "}
+                    <button
+                      type="button"
+                      onClick={() => { setCodeStep("ask"); setCode(""); setError(""); }}
+                      className="text-accent2 hover:underline"
+                    >
+                      Use a different address
+                    </button>
+                  </p>
+                </>
+              )}
+
+              {error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 bg-red-950/50 border border-red-900/70 text-red-300 text-xs rounded-lg px-3 py-2"
+                >
+                  <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <Button
+                variant="primary"
+                size="lg"
+                type="submit"
+                disabled={busy}
+                className="w-full justify-center"
+                leftIcon={
+                  busy ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />
+                }
+              >
+                {busy
+                  ? (codeStep === "ask" ? "Sending..." : "Checking...")
+                  : (codeStep === "ask" ? "Email me a code" : "Create my account")}
+              </Button>
+
+              <button
+                type="button"
+                onClick={() => { setCodeMode(false); setCodeStep("ask"); setError(""); }}
+                className="w-full text-[11px] text-gray-500 hover:text-gray-300"
+              >
+                Use a password instead
+              </button>
+
+              <div className="text-center text-xs text-gray-500 pt-1">
+                Already have an account?{" "}
+                <Link to="/login" className="text-accent2 hover:text-white">
+                  Sign in
+                </Link>
+              </div>
+            </form>
+            ) : (
             <form onSubmit={submit} className="space-y-4">
               <Input
                 label="Your name"
@@ -271,6 +406,18 @@ export default function Register() {
                 Create account
               </Button>
 
+              {/* The way INTO the code path -- shown only where the backend
+                  says it can serve it (see /auth/config). */}
+              {config.code_login && (
+                <button
+                  type="button"
+                  onClick={() => { setCodeMode(true); setCodeStep("ask"); setError(""); }}
+                  className="w-full text-[11px] text-accent2 hover:underline"
+                >
+                  Sign up without a password &mdash; email me a code
+                </button>
+              )}
+
               <div className="text-center text-xs text-gray-500 pt-1">
                 Already have an account?{" "}
                 <Link to="/login" className="text-accent2 hover:text-white">
@@ -278,6 +425,7 @@ export default function Register() {
                 </Link>
               </div>
             </form>
+            )}
           </div>
 
           <p className="text-center text-[10px] text-gray-700 mt-4">

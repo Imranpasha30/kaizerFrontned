@@ -9,6 +9,9 @@ import Modal from "./Modal";
 import PostizCrossPostSection, { matchChannelForIntegration } from "./PostizCrossPostSection";
 import { buildSeoCaption } from "./PublishModal";
 import { useAuth } from "../auth/AuthProvider";
+import { friendlyPublishError } from "../utils/uploadErrors";
+import ChannelPublishSettings, { buildPublishSettingsByChannel } from "./ChannelPublishSettings";
+import BestTimeHint from "./BestTimeHint";
 
 /**
  * BulkPublishModal — publishes a set of clips to YouTube in ORDER, optionally
@@ -50,6 +53,26 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
   // (Per-clip and whole-batch overrides were removed: the channel
   // owns how its content is posted, not each clip or the whole batch.)
   const [providerByChannel, setProviderByChannel] = useState({});
+  // Per-channel "✦ Write distinct SEO" for the whole batch — generates a
+  // distinct title/description/tags for each selected channel, for EVERY
+  // publishable clip. Persisted to each clip's seo_variants, so publish uses
+  // them via the backend's per-channel direct match (no payload change).
+  const [genSeoBusy, setGenSeoBusy] = useState(false);
+  const [genSeoMsg, setGenSeoMsg]   = useState("");
+  // Thumbnail for the batch (videos only; backend ignores it for shorts).
+  //   scope "all"         → one thumbnail (rendered/custom) for every video
+  //   scope "per_video"   → each clip its own thumbnail (across its channels)
+  //   scope "per_channel" → each channel its own thumbnail (across all clips)
+  //   scope "per_video_channel" → each clip × each channel its own thumbnail
+  const [thumbScope, setThumbScope]         = useState("all");
+  const [thumbAll, setThumbAll]             = useState({ mode: "rendered", key: "", url: "" });
+  const [thumbByClip, setThumbByClip]       = useState({});   // clipId           -> {mode,key,url}
+  const [thumbByChannel, setThumbByChannel] = useState({});   // channelId        -> {mode,key,url}
+  const [thumbByVC, setThumbByVC]           = useState({});   // "clipId:chId"    -> {mode,key,url}
+  const [thumbBusy, setThumbBusy]           = useState("");   // slot id currently uploading
+  // Per-channel YouTube publish-setting overrides (applies to every clip in the
+  // batch for that channel): { "<channelId>": {category_id, language, ...} }.
+  const [settingsByChannel, setSettingsByChannel] = useState({});
 
   // Branding mode for the whole batch — matches the single-clip panel:
   //   per_channel → overlay each channel's logo+watermark at upload (default)
@@ -119,6 +142,15 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
     setError("");
     setSubmitting(false);
     setProgress({ done: 0, total: 0, failed: [] });
+    setGenSeoBusy(false);
+    setGenSeoMsg("");
+    setThumbScope("all");
+    setThumbAll({ mode: "rendered", key: "", url: "" });
+    setThumbByClip({});
+    setThumbByChannel({});
+    setThumbByVC({});
+    setThumbBusy("");
+    setSettingsByChannel({});
     setPostizState({ selectedIds: new Set(), text: "", integrations: [] });
     setScheduleMode("immediate");
     setGapMinutes(30);
@@ -245,6 +277,21 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
     [publishableClips, seoDonor]
   );
 
+  // Per-clip "already uploaded" map: clipId -> [channel display names] it has
+  // already been published to (from publishedByChannel.clip_ids). Drives the
+  // "✓ Uploaded → <channel>" label in the clip-order list.
+  const uploadedClipChannels = useMemo(() => {
+    const map = {};
+    for (const [cidKey, info] of Object.entries(publishedByChannel || {})) {
+      const ch = channels.find((c) => String(c.id) === String(cidKey));
+      const name = ch?.youtube_channel_title || ch?.name || `#${cidKey}`;
+      for (const clipId of (info?.clip_ids || [])) {
+        (map[String(clipId)] ||= []).push(name);
+      }
+    }
+    return map;
+  }, [publishedByChannel, channels]);
+
   // Estimated last publish time for the summary line
   const estimatedLast = useMemo(() => {
     if (scheduleMode !== "staggered" || !firstPublishAt) return null;
@@ -254,6 +301,67 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
       return last;
     } catch { return null; }
   }, [scheduleMode, firstPublishAt, gapMinutes, publishableClips.length]);
+
+  // ── Per-channel "✦ Write distinct SEO" for the whole batch ─────────────
+  // For every publishable clip, generate a distinct title/description/tags for
+  // each selected channel. One quick-seo/per-channel call per clip (it loops
+  // the channels internally). Persisted to each clip's seo_variants so the
+  // per-clip publish below uses them via the backend's direct channel match.
+  async function generatePerChannelSeoBulk() {
+    const ids = Array.from(new Set(channelIdsForSubmit.map(Number)));
+    if (ids.length === 0) { setGenSeoMsg("Select at least one destination first."); return; }
+    const targets = publishableClips.filter((c) => c?.id);
+    if (targets.length === 0) { setGenSeoMsg("No publishable clips with SEO yet."); return; }
+    setGenSeoBusy(true);
+    setGenSeoMsg("");
+    let done = 0, failed = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const clip = targets[i];
+      setGenSeoMsg(`Writing distinct SEO… clip ${i + 1} of ${targets.length}`);
+      try {
+        await api.quickSeoPerChannel(clip.id, { mode: "per_channel", channel_ids: ids });
+        done += 1;
+      } catch (e) {
+        failed += 1;
+        console.warn(`per-channel SEO failed for clip ${clip.id}:`, e);
+      }
+    }
+    setGenSeoBusy(false);
+    setGenSeoMsg(
+      `Wrote distinct SEO for ${ids.length} channel${ids.length === 1 ? "" : "s"} across ` +
+      `${done} clip${done === 1 ? "" : "s"}${failed ? ` (${failed} failed)` : ""}. ` +
+      `Each clip will publish to each channel with its own title, description and tags. ` +
+      `Open a single clip's Publish dialog to preview the exact per-channel text.`
+    );
+  }
+
+  // Stage a custom thumbnail (no clip mutation) for a bulk slot. The returned
+  // key works for any clip's publish, so for "all"/"per_channel" we stage
+  // against the first clip; for "per_video" we stage against that clip.
+  async function uploadBulkThumb(file, scope, slotId) {
+    if (!file) return;
+    let stageClipId;
+    if (scope === "per_video") stageClipId = slotId;
+    else if (scope === "per_video_channel") stageClipId = Number(String(slotId).split(":")[0]);
+    else stageClipId = ((publishableClips || []).find((c) => c?.id) || {}).id;
+    if (!stageClipId) return;
+    const busyId = scope === "all" ? "all" : `${scope}:${slotId}`;
+    setThumbBusy(busyId);
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await api.stageThumbnail(stageClipId, fd);
+      const val = { mode: "custom", key: res.key, url: res.url };
+      if (scope === "all") setThumbAll(val);
+      else if (scope === "per_video") setThumbByClip((p) => ({ ...p, [String(slotId)]: val }));
+      else if (scope === "per_channel") setThumbByChannel((p) => ({ ...p, [String(slotId)]: val }));
+      else setThumbByVC((p) => ({ ...p, [String(slotId)]: val }));
+    } catch (e) {
+      setError(e?.message || "Thumbnail upload failed");
+    } finally {
+      setThumbBusy("");
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -352,6 +460,45 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
           // per_channel → overlay logo+watermark | as_is → upload verbatim
           brand_mode:     brandMode || "per_channel",
         };
+        // Thumbnail (videos only; the backend ignores it for Shorts).
+        if (thumbScope === "per_video_channel") {
+          const tbc = {};
+          for (const cid of channelIdsForSubmit.map(Number)) {
+            const sel = thumbByVC[`${clip.id}:${cid}`];
+            tbc[String(cid)] = (sel && sel.mode === "custom" && sel.key)
+              ? `custom:${sel.key}` : "rendered";
+          }
+          payload.thumbnail_by_channel = tbc;
+        } else if (thumbScope === "per_channel") {
+          const tbc = {};
+          for (const cid of channelIdsForSubmit.map(Number)) {
+            const sel = thumbByChannel[String(cid)];
+            tbc[String(cid)] = (sel && sel.mode === "custom" && sel.key)
+              ? `custom:${sel.key}` : "rendered";
+          }
+          payload.thumbnail_by_channel = tbc;
+        } else if (thumbScope === "per_video") {
+          const sel = thumbByClip[String(clip.id)];
+          if (sel && sel.mode === "custom" && sel.key) {
+            payload.thumbnail_mode = "custom";
+            payload.custom_thumbnail_r2_key = sel.key;
+          } else {
+            payload.thumbnail_mode = "rendered";
+          }
+        } else {
+          if (thumbAll.mode === "custom" && thumbAll.key) {
+            payload.thumbnail_mode = "custom";
+            payload.custom_thumbnail_r2_key = thumbAll.key;
+          } else {
+            payload.thumbnail_mode = "rendered";
+          }
+        }
+        // Per-channel YouTube publish settings (category/language/playlist/
+        // license/made-for-kids) — same for every clip in the batch.
+        const _psbc = buildPublishSettingsByChannel(settingsByChannel, channels, channelIdsForSubmit.map(Number));
+        if (Object.keys(_psbc).length > 0) {
+          payload.publish_settings_by_channel = _psbc;
+        }
         // Inheritors read SEO from the donor sibling; own SEO still wins server-side.
         if (!ownsSeo && seoDonor && seoDonor.id !== clip.id) {
           payload.seo_source_clip_id = seoDonor.id;
@@ -369,7 +516,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
           if (res?.already_published) results.duplicate.push({ clipId: clip.id, res });
           else results.ok.push({ clipId: clip.id, res });
         } catch (err) {
-          results.failed.push({ clipId: clip.id, reason: err.message || String(err) });
+          results.failed.push({ clipId: clip.id, reason: friendlyPublishError(err) });
         }
       }
 
@@ -429,7 +576,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
     : -1;
 
   return (
-    <Modal open={open} onClose={onClose} title={`Publish ${publishableClips.length} clips to YouTube`} size="md">
+    <Modal open={open} onClose={onClose} title={`Bulk Publish — ${publishableClips.length} clips to YouTube`} size="md">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
 
         {/* Clip ordering */}
@@ -447,7 +594,7 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
               return (
                 <li
                   key={c.id}
-                  className={`flex items-baseline gap-2 ${isPublishing ? "text-gray-200" : "text-gray-600 italic"}`}
+                  className={`flex flex-wrap items-baseline gap-2 ${isPublishing ? "text-gray-200" : "text-gray-600 italic"}`}
                 >
                   <span className="font-mono text-[10px] w-5 text-right">{i + 1}.</span>
                   <span className="flex-1 truncate" title={c?.seo?.title || c.filename}>
@@ -484,6 +631,16 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
                   )}
                   {!hasSeo && !seoDonor && (
                     <span className="text-[10px] text-amber-400 flex-shrink-0">skipped — no SEO</span>
+                  )}
+                  {/* Already-uploaded label: which channel(s) already have this clip. */}
+                  {uploadedClipChannels[String(c.id)]?.length > 0 && (
+                    <span
+                      className="w-full pl-7 text-[10px] text-green-400/90 flex items-center gap-1"
+                      title={`Already uploaded to: ${uploadedClipChannels[String(c.id)].join(", ")}`}
+                    >
+                      <CheckCircle2 size={10} className="flex-shrink-0" />
+                      Uploaded → {uploadedClipChannels[String(c.id)].join(", ")}
+                    </span>
                   )}
                   {/* Upload route is NOT chosen per clip — it's decided
                       per channel in the "Publish to" list below. */}
@@ -644,6 +801,15 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
                         <option value="native_rtmp">rtmp-live</option>
                       </select>
                     )}
+                    {/* Per-channel YouTube publish settings (applies to every
+                        video clip in this batch for this channel). */}
+                    {selected && chId != null && (
+                      <ChannelPublishSettings
+                        channel={profs.find((p) => p.id === chId) || profs[0]}
+                        value={settingsByChannel[String(chId)]}
+                        onChange={(obj) => setSettingsByChannel((prev) => ({ ...prev, [String(chId)]: obj }))}
+                      />
+                    )}
                   </div>
                 );
               })}
@@ -702,6 +868,143 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
           />
           Use AI-generated SEO (title / description / tags) for each clip
         </label>
+
+        {/* Per-channel distinct SEO — writes a unique title/description/tags
+            for each selected channel, across every clip in this batch. */}
+        {useSeo && (
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={generatePerChannelSeoBulk}
+              disabled={genSeoBusy || channelIdsForSubmit.length === 0}
+              className="self-start flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded border border-accent2/40 bg-accent2/10 text-accent2 hover:bg-accent2/20 disabled:opacity-50"
+              title="Generate a distinct title, description and tags for each selected channel, for every clip in this batch"
+            >
+              {genSeoBusy
+                ? (<><Loader2 size={13} className="animate-spin" /> Writing distinct SEO…</>)
+                : (<>✦ Write distinct SEO per channel</>)}
+            </button>
+            {genSeoMsg && (
+              <p className="text-[10px] text-gray-400 leading-relaxed">{genSeoMsg}</p>
+            )}
+          </div>
+        )}
+
+        {/* Thumbnail (videos only — Shorts use no thumbnail).
+            Scope: Same for all / Per video / Per channel. */}
+        <section className="bg-black/30 border border-border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-wider text-gray-500">Thumbnail (videos)</div>
+            <div className="flex gap-1 text-[10px]">
+              {[["all", "Same for all"], ["per_video", "Per video"], ["per_channel", "Per channel"], ["per_video_channel", "Per video & channel"]].map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setThumbScope(v)}
+                  className={`px-2 py-0.5 rounded ${thumbScope === v ? "bg-accent/20 text-accent" : "text-gray-500 hover:text-gray-300"}`}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {thumbScope === "all" && (
+            <div className="flex items-center gap-3">
+              <ThumbCell sel={thumbAll} busy={thumbBusy === "all"}
+                onRendered={() => setThumbAll({ mode: "rendered", key: "", url: "" })}
+                onUpload={(f) => uploadBulkThumb(f, "all")} />
+              <span className="text-[10px] text-gray-500 leading-relaxed">
+                {thumbAll.mode === "custom"
+                  ? "Custom thumbnail applied to every video clip + channel."
+                  : "Each video uses its own rendered thumbnail (default)."}
+              </span>
+            </div>
+          )}
+
+          {thumbScope === "per_video" && (
+            <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">
+              {publishableClips.map((c) => {
+                const isVideo = effectiveKind(c) === "video";
+                return (
+                  <div key={c.id} className="flex items-center gap-2">
+                    {isVideo ? (
+                      <ThumbCell small sel={thumbByClip[String(c.id)]} busy={thumbBusy === `per_video:${c.id}`}
+                        onRendered={() => setThumbByClip((p) => ({ ...p, [String(c.id)]: { mode: "rendered" } }))}
+                        onUpload={(f) => uploadBulkThumb(f, "per_video", c.id)} />
+                    ) : (
+                      <span className="text-[9px] text-gray-600 px-1.5 py-0.5 rounded border border-border/50 flex-shrink-0"
+                        title="YouTube Shorts publish from the video frame — no custom thumbnail. Flip its Short/Video badge above to add one.">
+                        Short · n/a
+                      </span>
+                    )}
+                    <span className={`text-[11px] flex-1 truncate ${isVideo ? "text-gray-300" : "text-gray-500"}`}>
+                      {c?.seo?.title || c.filename || `clip #${c.id}`}{!isVideo ? "  (Short)" : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {thumbScope === "per_channel" && (
+            <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">
+              {channelIdsForSubmit.map((cid) => {
+                const ch = channels.find((c) => c.id === cid);
+                return (
+                  <div key={cid} className="flex items-center gap-2">
+                    <ThumbCell small sel={thumbByChannel[String(cid)]} busy={thumbBusy === `per_channel:${cid}`}
+                      onRendered={() => setThumbByChannel((p) => ({ ...p, [String(cid)]: { mode: "rendered" } }))}
+                      onUpload={(f) => uploadBulkThumb(f, "per_channel", cid)} />
+                    <span className="text-[11px] text-gray-300 flex-1 truncate">{ch?.youtube_channel_title || ch?.name || `#${cid}`}</span>
+                  </div>
+                );
+              })}
+              {channelIdsForSubmit.length === 0 && (
+                <p className="text-[10px] text-gray-500">Select destination channels first.</p>
+              )}
+            </div>
+          )}
+
+          {thumbScope === "per_video_channel" && (
+            <div className="flex flex-col gap-3 max-h-72 overflow-y-auto pr-1">
+              {publishableClips.map((c) => {
+                const isVideo = effectiveKind(c) === "video";
+                return (
+                  <div key={c.id} className="border border-border/60 rounded p-2">
+                    <div className={`text-[11px] font-medium truncate mb-1.5 ${isVideo ? "text-gray-300" : "text-gray-500"}`}>
+                      {c?.seo?.title || c.filename || `clip #${c.id}`}{!isVideo ? "  ·  Short" : ""}
+                    </div>
+                    {isVideo ? (
+                      <div className="flex flex-col gap-1.5">
+                        {channelIdsForSubmit.map((cid) => {
+                          const ch = channels.find((x) => x.id === cid);
+                          const slot = `${c.id}:${cid}`;
+                          return (
+                            <div key={cid} className="flex items-center gap-2">
+                              <ThumbCell small sel={thumbByVC[slot]} busy={thumbBusy === `per_video_channel:${slot}`}
+                                onRendered={() => setThumbByVC((p) => ({ ...p, [slot]: { mode: "rendered" } }))}
+                                onUpload={(f) => uploadBulkThumb(f, "per_video_channel", slot)} />
+                              <span className="text-[10px] text-gray-400 flex-1 truncate">{ch?.youtube_channel_title || ch?.name || `#${cid}`}</span>
+                            </div>
+                          );
+                        })}
+                        {channelIdsForSubmit.length === 0 && (
+                          <p className="text-[10px] text-gray-500">Select destination channels first.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-500">
+                        Short — YouTube publishes from the video frame; no custom thumbnail.
+                        Flip its <span className="text-gray-400">Short/Video</span> badge above to add one.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="text-[10px] text-gray-500 leading-relaxed">
+            Default is each video's rendered thumbnail. <strong>Per video</strong> = one per clip ·
+            <strong> Per channel</strong> = one per channel · <strong>Per video &amp; channel</strong> =
+            a distinct thumbnail for every clip × channel combination.
+          </p>
+        </section>
 
         {/* Branding — same choice as the single-clip panel, applied to the
             whole batch. */}
@@ -802,6 +1105,9 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
                   <span className="text-[11px] text-gray-500">min</span>
                 </div>
               </div>
+              <div className="col-span-2">
+                <BestTimeHint onApply={(v) => setFirstPublishAt(v)} />
+              </div>
               {estimatedLast && (
                 <p className="col-span-2 text-[11px] text-gray-500">
                   Last clip publishes at <span className="text-accent2">{estimatedLast.toLocaleString()}</span>
@@ -897,5 +1203,30 @@ export default function BulkPublishModal({ open, onClose, clips, jobId, onDone }
         </div>
       </form>
     </Modal>
+  );
+}
+
+// Compact thumbnail control: a small preview + "rendered"/"upload" buttons.
+// `sel` = { mode, key, url } | undefined (undefined → rendered default).
+function ThumbCell({ sel, busy, onRendered, onUpload, small }) {
+  const isCustom = sel?.mode === "custom";
+  const dim = small ? "w-14 h-8" : "w-20 h-11";
+  return (
+    <>
+      <div className={`${dim} rounded border border-border bg-black/40 overflow-hidden flex items-center justify-center text-[8px] text-gray-500 flex-shrink-0`}>
+        {isCustom && sel.url
+          ? <img src={sel.url} alt="" className="w-full h-full object-cover" />
+          : "rendered"}
+      </div>
+      <div className="flex gap-1 text-[9px] flex-shrink-0">
+        <button type="button" onClick={onRendered}
+          className={`px-1.5 py-0.5 rounded border ${!isCustom ? "border-accent/60 text-accent bg-accent/10" : "border-border text-gray-400"}`}>rendered</button>
+        <label className={`px-1.5 py-0.5 rounded border cursor-pointer ${isCustom ? "border-accent/60 text-accent bg-accent/10" : "border-border text-gray-400"}`}>
+          {busy ? "…" : "upload"}
+          <input type="file" accept="image/jpeg,image/png" className="hidden"
+            onChange={(e) => { onUpload(e.target.files?.[0]); e.target.value = ""; }} />
+        </label>
+      </div>
+    </>
   );
 }

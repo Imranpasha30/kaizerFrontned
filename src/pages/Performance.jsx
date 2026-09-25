@@ -3,15 +3,20 @@ import {
   LineChart, Loader2, AlertCircle, RefreshCw, ExternalLink,
   TrendingUp, Eye, ThumbsUp, MessageSquare, Youtube, Award, Activity,
   Search, Download, ArrowUpDown, Calendar, X, Layers, Zap, Trophy,
-  Flame, BarChart3, ChevronRight, SlidersHorizontal,
+  Flame, BarChart3, ChevronRight, SlidersHorizontal, Clock, Swords, Stethoscope,
 } from "lucide-react";
 import { api } from "../api/client";
+import {
+  LineChart as RLineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip as RTooltip, ResponsiveContainer, Legend,
+} from "recharts";
 import {
   AiCoachPanel, CompareChannelsPanel, MetricHelp, METRIC_HELP, cadenceLabel,
   RadialGauge, KpiRing, fmtN as fmtNAI,
 } from "../components/AnalyticsAI";
 import ComplianceNote, { NoteLink } from "../components/ComplianceNote";
 import TrendFinderTab from "../components/TrendFinderTab";
+import StyleReferencesPanel from "../components/StyleReferencesPanel";
 
 export default function Performance() {
   const [leaderboard, setLeaderboard] = useState([]);
@@ -375,20 +380,19 @@ export default function Performance() {
       {/* Insights sub-tabs */}
       <div className="flex items-center gap-1 mb-4 border-b border-border">
         {[
-          { k: "performance", label: "Performance" },
-          { k: "trend", label: "Channel Doctor" },
-          { k: "learning", label: "SEO Learning" },
+          { k: "performance", label: "Performance", Icon: BarChart3 },
+          { k: "learning", label: "SEO Settings", Icon: SlidersHorizontal },
         ].map((t) => (
           <button
             key={t.k}
             onClick={() => setTab(t.k)}
-            className={`px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
+            className={`px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors flex items-center gap-1.5 ${
               tab === t.k
                 ? "border-accent2 text-white"
                 : "border-transparent text-gray-500 hover:text-gray-300"
             }`}
           >
-            {t.label}
+            <t.Icon size={14} /> {t.label}
           </button>
         ))}
       </div>
@@ -413,10 +417,8 @@ export default function Performance() {
 
       {loading ? (
         <div className="text-gray-400 flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Loading…</div>
-      ) : tab === "trend" ? (
-        <TrendFinderTab ytChannels={ytChannels} initialGcid={selectedGcid || ""} />
       ) : tab === "learning" ? (
-        <SeoLearningTab />
+        <SeoLearningTab ytChannels={ytChannels} initialGcid={selectedGcid || ""} />
       ) : (
         <>
           {/* ── Overview hero: circular KPI gauges ─────────────────── */}
@@ -1391,16 +1393,765 @@ function ScoreBadge({ score }) {
 // Reads /api/performance/seo-learning. Each card shows the channel's status
 // (learning vs collecting data), the signal in use (CTR once re-approved, else
 // views), how many videos it has learnt from, and its "winning keywords".
-function SeoLearningTab() {
+const HOOK_LABELS = {
+  question: "Question hooks", number: "Number-led", quote: "Quote-led",
+  power: "Power-word", plain: "Plain factual",
+};
+const SCRIPT_LABELS = {
+  mixed: "English + Telugu mixed", english: "English", native: "Native script",
+};
+const LEN_LABELS = { short: "<50 chars", sweet: "50–80 chars", long: "80–95 chars" };
+
+/** Enterprise "AI is learning" emblem — a live comms hub: a pulsing
+ * learning core, orbiting satellite nodes, and signal packets traveling
+ * the orbit rings (stroke-dash offset), all driven by the REAL server
+ * step text (syncing history → polling stats → ingesting CTR →
+ * recomputing policy). Pure SVG/CSS, no deps; honours reduced-motion. */
+function SeoLearningAura({ msg }) {
+  const steps = ["Syncing history", "Polling stats", "Ingesting CTR", "Recomputing policy"];
+  const lower = (msg || "").toLowerCase();
+  // Best-effort: light up the step whose keyword the live message mentions.
+  const kw = [["sync", 0], ["histor", 0], ["poll", 1], ["stat", 1],
+              ["ctr", 2], ["impress", 2], ["report", 2],
+              ["polic", 3], ["comput", 3], ["learn", 3]];
+  let activeIdx = -1;
+  for (const [k, i] of kw) { if (lower.includes(k)) { activeIdx = i; break; } }
+
+  return (
+    <div className="mb-3 overflow-hidden rounded-xl border border-accent2/30 bg-gradient-to-br from-accent2/10 via-transparent to-sky-500/5 px-3 py-3">
+      <div className="flex items-center gap-3">
+        <div className="relative h-14 w-14 flex-shrink-0">
+          <svg viewBox="0 0 120 120" className="h-full w-full">
+            <defs>
+              <radialGradient id="seoAuraCoreG" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#c4b5fd" />
+                <stop offset="55%" stopColor="#7c6cff" />
+                <stop offset="100%" stopColor="#4c3fd6" />
+              </radialGradient>
+              <filter id="seoAuraGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.2" result="b" />
+                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+            {/* Outer orbit ring + traveling signal packet */}
+            <circle cx="60" cy="60" r="46" fill="none" stroke="#7c6cff" strokeOpacity="0.18" strokeWidth="1.5" />
+            <circle cx="60" cy="60" r="46" fill="none" stroke="#a78bfa" strokeWidth="2.6" strokeLinecap="round"
+                    strokeDasharray="7 82" className="seoAuraSig" />
+            {/* Inner orbit ring + counter-traveling packet */}
+            <circle cx="60" cy="60" r="30" fill="none" stroke="#2dd4bf" strokeOpacity="0.16" strokeWidth="1.5" />
+            <circle cx="60" cy="60" r="30" fill="none" stroke="#2dd4bf" strokeWidth="2.6" strokeLinecap="round"
+                    strokeDasharray="5 52" className="seoAuraSig2" />
+            {/* Orbiting satellite nodes (data being pulled in) */}
+            <g className="seoAuraOrbit">
+              <line x1="60" y1="60" x2="60" y2="14" stroke="#a78bfa" strokeOpacity="0.25" strokeWidth="1" />
+              <circle cx="60" cy="14" r="3.6" fill="#a78bfa" filter="url(#seoAuraGlow)" />
+            </g>
+            <g className="seoAuraOrbitRev">
+              <line x1="60" y1="60" x2="60" y2="30" stroke="#2dd4bf" strokeOpacity="0.25" strokeWidth="1" />
+              <circle cx="60" cy="30" r="2.7" fill="#2dd4bf" filter="url(#seoAuraGlow)" />
+            </g>
+            {/* Pulsing learning core */}
+            <circle cx="60" cy="60" r="12" fill="none" stroke="#c4b5fd" strokeWidth="1.5" className="seoAuraHalo" />
+            <circle cx="60" cy="60" r="11" fill="url(#seoAuraCoreG)" filter="url(#seoAuraGlow)" className="seoAuraCore" />
+          </svg>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-semibold text-white flex items-center gap-1.5">
+            <span className="seoAuraDot" /> Learning from this channel's real YouTube data
+          </div>
+          <div className="text-[11px] text-accent2 mt-0.5 truncate">{msg || "working…"}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {steps.map((s, i) => (
+              <span key={s}
+                className={`text-[9px] px-1.5 py-0.5 rounded-full border transition-colors duration-300 ${
+                  i === activeIdx
+                    ? "border-accent2 text-white bg-accent2/20"
+                    : i < activeIdx
+                      ? "border-emerald-500/30 text-emerald-300/70"
+                      : "border-border text-gray-600"}`}>
+                {i < activeIdx ? "✓ " : ""}{s}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <style>{`
+        .seoAuraCore { transform-box: view-box; transform-origin: 60px 60px; animation: seoAuraPulse 1.6s ease-in-out infinite; }
+        .seoAuraHalo { transform-box: view-box; transform-origin: 60px 60px; animation: seoAuraHalo 1.8s ease-out infinite; }
+        .seoAuraOrbit { transform-box: view-box; transform-origin: 60px 60px; animation: seoAuraSpin 3.6s linear infinite; }
+        .seoAuraOrbitRev { transform-box: view-box; transform-origin: 60px 60px; animation: seoAuraSpinRev 2.6s linear infinite; }
+        .seoAuraSig { animation: seoAuraDash 1.5s linear infinite; }
+        .seoAuraSig2 { animation: seoAuraDash2 1.15s linear infinite; }
+        .seoAuraDot { display:inline-block; width:6px; height:6px; border-radius:9999px; background:#7c6cff; animation: seoAuraDotPulse 1.6s ease-out infinite; }
+        @keyframes seoAuraPulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.16);opacity:.9} }
+        @keyframes seoAuraHalo { 0%{transform:scale(1);opacity:.7} 100%{transform:scale(2.3);opacity:0} }
+        @keyframes seoAuraSpin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes seoAuraSpinRev { from{transform:rotate(0deg)} to{transform:rotate(-360deg)} }
+        @keyframes seoAuraDash { to { stroke-dashoffset: -89; } }
+        @keyframes seoAuraDash2 { to { stroke-dashoffset: 57; } }
+        @keyframes seoAuraDotPulse { 0%{box-shadow:0 0 0 0 rgba(124,108,255,.55)} 70%{box-shadow:0 0 0 6px rgba(124,108,255,0)} 100%{box-shadow:0 0 0 0 rgba(124,108,255,0)} }
+        @media (prefers-reduced-motion: reduce) {
+          .seoAuraCore,.seoAuraHalo,.seoAuraOrbit,.seoAuraOrbitRev,.seoAuraSig,.seoAuraSig2,.seoAuraDot { animation: none; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/** Learning-curve panel: REAL per-day performance + snapshot timeline for
+ * one channel. Every number comes from measured TrainingSample rows — an
+ * empty window says so honestly instead of drawing a fake curve. */
+function LearningCurve({ channelId, channelName }) {
+  const [days, setDays] = useState(30);
+  const [curve, setCurve] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [relearning, setRelearning] = useState(false);
+  const [learnMsg, setLearnMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  const load = () => {
+    if (!channelId) return;
+    setBusy(true); setErr("");
+    api.seoLearningCurves(channelId, days)
+      .then(setCurve)
+      .catch((e) => setErr(e?.message || "Failed to load curves"))
+      .finally(() => setBusy(false));
+  };
+  useEffect(load, [channelId, days]);
+
+  // The relearn runs SERVER-SIDE — poll its state so the learning
+  // animation survives navigating to another section and back, and the
+  // button can never reset while the server is still working.
+  useEffect(() => {
+    if (!channelId) return undefined;
+    let alive = true;
+    let timer = null;
+    const tick = async () => {
+      try {
+        const st = await api.seoLearningRelearnStatus(channelId);
+        if (!alive) return;
+        const running = st?.state === "running";
+        setRelearning((was) => {
+          if (was && !running) load();      // finished while we watched → refresh
+          return running;
+        });
+        setLearnMsg(running ? (st?.msg || "learning…") : "");
+        timer = setTimeout(tick, running ? 2500 : 15000);
+      } catch {
+        if (alive) timer = setTimeout(tick, 15000);
+      }
+    };
+    tick();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId]);
+
+  const relearn = async () => {
+    try {
+      setRelearning(true);
+      setLearnMsg("starting…");
+      await api.seoLearningRelearn(channelId);
+    } catch (e) {
+      setErr(e?.message || "Relearn failed");
+      setRelearning(false);
+    }
+  };
+
+  const series = curve?.series || [];
+  const hasCtr = series.some((p) => p.avg_ctr != null);
+  const latest = curve?.latest;
+
+  return (
+    <div className="rounded-xl border border-border bg-panel p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <TrendingUp size={15} className="text-accent2" />
+          Learning curve — {channelName || `Channel #${channelId}`}
+        </div>
+        <div className="flex items-center gap-2">
+          {[7, 30, 90].map((d) => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`px-2 py-1 rounded text-[11px] font-medium border ${
+                days === d ? "border-accent2 text-accent2 bg-accent2/10"
+                           : "border-border text-gray-500 hover:text-gray-300"}`}>
+              {d === 7 ? "Week" : d === 30 ? "Month" : "90 days"}
+            </button>
+          ))}
+          <button onClick={relearn} disabled={relearning}
+            className="flex items-center gap-1.5 bg-accent2 hover:bg-accent2/80 text-white px-2.5 py-1 rounded text-[11px] disabled:opacity-50">
+            <RefreshCw size={11} className={relearning ? "animate-spin" : ""} />
+            {relearning ? "Learning…" : "Learn now"}
+          </button>
+        </div>
+      </div>
+
+      {relearning && <SeoLearningAura msg={learnMsg} />}
+
+      {err && <div className="text-[12px] text-red-300 mb-2">{err}</div>}
+      {busy ? (
+        <div className="text-gray-500 text-sm flex items-center gap-2 h-48 justify-center">
+          <Loader2 className="animate-spin" size={14} /> Loading measured data…
+        </div>
+      ) : series.length === 0 ? (
+        <div className="h-40 flex items-center justify-center text-center text-[12px] text-gray-500">
+          No videos published on this channel in the last {days} days —<br />
+          nothing measured yet, so there is no curve to show. Publish and press “Learn now”.
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={220}>
+          <RLineChart data={series} margin={{ top: 6, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke="#1e2530" strokeDasharray="3 3" />
+            <XAxis dataKey="date" stroke="#5b6472" fontSize={10}
+                   tickFormatter={(d) => d.slice(5)} />
+            <YAxis yAxisId="vph" stroke="#5b6472" fontSize={10}
+                   label={{ value: "views/hr", angle: -90, position: "insideLeft", fill: "#5b6472", fontSize: 10 }} />
+            {hasCtr && <YAxis yAxisId="ctr" orientation="right" stroke="#5b6472" fontSize={10}
+                   tickFormatter={(v) => `${(v * 100).toFixed(1)}%`} />}
+            <RTooltip
+              contentStyle={{ background: "#0e1218", border: "1px solid #2a3240", borderRadius: 8, fontSize: 12 }}
+              formatter={(v, name) => name === "CTR" ? [`${(v * 100).toFixed(2)}%`, name] : [v, name]} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Line yAxisId="vph" dataKey="avg_vph" name="Views/hour" stroke="#7c6cff"
+                  strokeWidth={2} dot={{ r: 2 }} connectNulls />
+            {hasCtr && <Line yAxisId="ctr" dataKey="avg_ctr" name="CTR" stroke="#2dd4bf"
+                  strokeWidth={2} dot={{ r: 2 }} connectNulls />}
+          </RLineChart>
+        </ResponsiveContainer>
+      )}
+
+      {latest?.policy ? (
+        <div className="mt-3 pt-3 border-t border-border/60">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">
+            What this channel has LEARNED (steering its SEO now — from {latest.policy.based_on} measured videos)
+          </div>
+          <div className="flex flex-wrap gap-1.5 text-[11px]">
+            {(latest.policy.best_hooks || []).map((h) => (
+              <span key={h} className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                ✓ {HOOK_LABELS[h] || h} win here
+              </span>
+            ))}
+            {latest.policy.best_script && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                ✓ Titles: {SCRIPT_LABELS[latest.policy.best_script]}
+              </span>
+            )}
+            {latest.policy.best_len_band && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                ✓ Length: {LEN_LABELS[latest.policy.best_len_band]}
+              </span>
+            )}
+            {(latest.policy.top_keywords || []).slice(0, 6).map((k) => (
+              <span key={k} className="px-1.5 py-0.5 rounded bg-accent2/10 text-accent2 border border-accent2/20">{k}</span>
+            ))}
+            {(latest.policy.top_topics || []).slice(0, 4).map((t) => (
+              <span key={t} className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                    title="Topic angles measured to win on this channel">◈ {t}</span>
+            ))}
+            {(latest.policy.best_hours || []).length > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20"
+                    title="Upload hours (IST) whose videos historically earn the most views/hour">
+                ⏰ best upload: {(latest.policy.best_hours || []).map((h) => `${h}:00`).join(", ")} IST
+              </span>
+            )}
+          </div>
+          <div className="text-[10px] text-gray-600 mt-1.5">
+            Real CTR on {latest.ctr_coverage || 0} of {latest.samples} videos
+            {(latest.ctr_coverage || 0) === 0 && (
+              <span> — CTR reports were requested from YouTube when you first pressed
+              "Learn now"; YouTube generates them within ~1–2 days, then CTR flows in daily</span>
+            )} · these learned rules are injected into every new SEO generation for this channel.
+          </div>
+          {/* Honesty instruments — measured, never decorative */}
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {curve?.uplift?.vph_uplift_pct != null && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                curve.uplift.vph_uplift_pct >= 0
+                  ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                  : "bg-red-500/10 text-red-300 border-red-500/20"}`}
+                title="Average views/hour of the last 7 days' videos vs the prior 30 days — the measured before/after">
+                {curve.uplift.vph_uplift_pct >= 0 ? "▲" : "▼"} {Math.abs(curve.uplift.vph_uplift_pct)}% vs prior 30d
+              </span>
+            )}
+            {curve?.score_audit?.verdict && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                curve.score_audit.verdict === "score_predicts"
+                  ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                  : "bg-red-500/10 text-red-300 border-red-500/20"}`}
+                title="Do 90+ scored SEOs actually earn more views/hour than lower-scored ones? Computed from published results.">
+                score audit: {curve.score_audit.verdict === "score_predicts" ? "score predicts reality ✓" : "score does NOT predict — rubric needs revision"}
+              </span>
+            )}
+            {(latest?.explorations?.n || 0) > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20"
+                title={Object.entries(latest.explorations.by_hook || {})
+                  .map(([h, s]) => `${h}: ${s.avg_vph} v/hr (n=${s.n})`).join(" · ")
+                  + ` — baseline ${latest.explorations.baseline_avg_vph} v/hr`}>
+                🧪 {latest.explorations.n} A/B experiment{latest.explorations.n === 1 ? "" : "s"} measured
+              </span>
+            )}
+          </div>
+        </div>
+      ) : !busy && series.length > 0 ? (
+        <div className="mt-3 pt-3 border-t border-border/60 text-[11px] text-gray-500">
+          Collecting honestly: {curve?.latest?.samples ?? 0} measured videos in this window —
+          a steering policy forms at 5+ (no fake learning shown before that).
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Best-time-to-post report — measured upload-hour + weekday performance
+ * (avg views/hour + real CTR + sample counts) from the channel's REAL
+ * history, IST. Recommends the top hours/days. Every number is measured;
+ * an honest empty-state when the history is too thin to trust a time. */
+function BestTimesReport({ channelId, channelName }) {
+  const [days, setDays] = useState(3650);
+  const [rep, setRep] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [selDow, setSelDow] = useState(null);   // drill-down weekday
+
+  useEffect(() => {
+    if (!channelId) return;
+    setBusy(true); setErr("");
+    api.seoLearningBestTimes(channelId, days)
+      .then((r) => { setRep(r); setSelDow(r?.peak?.dow || "Mon"); })
+      .catch((e) => setErr(e?.message || "Failed to load best times"))
+      .finally(() => setBusy(false));
+  }, [channelId, days]);
+
+  const fmtHour = (h) => `${String(h).padStart(2, "0")}:00`;
+  const tz = rep?.timezone || "IST";                 // "IST" or "local time"
+  const fromDoctor = rep?.source === "channel_doctor";
+  const grid = rep?.grid || [];
+  // Peak cell vph across the whole 7×24 grid — drives the heatmap intensity.
+  const maxCell = Math.max(1, ...grid.flatMap((d) => d.hours.map((c) => c.avg_vph || 0)));
+  const selRow = grid.find((d) => d.dow === selDow) || null;
+  const selHours = selRow?.hours || [];
+  const maxSel = Math.max(1, ...selHours.map((c) => c.avg_vph || 0));
+  // Priority ranking for the drilled-down day — qualifying hours (>=3
+  // videos, real signal) sorted best→worst.
+  const selRanked = selHours.filter((c) => c.n >= 3 && c.avg_vph > 0)
+    .sort((a, b) => (b.avg_vph - a.avg_vph) || ((b.avg_ctr || 0) - (a.avg_ctr || 0)));
+  const selBest = selRanked[0] || null;
+  const selTopVph = selBest?.avg_vph || 0;
+  // Weekly priority — the strongest day×hour slots across the whole week.
+  const weekTop = grid
+    .flatMap((d) => d.hours.filter((c) => c.n >= 3 && c.avg_vph > 0)
+      .map((c) => ({ ...c, dow: d.dow, label: d.label })))
+    .sort((a, b) => (b.avg_vph - a.avg_vph) || ((b.avg_ctr || 0) - (a.avg_ctr || 0)))
+    .slice(0, 5);
+  const weekTopVph = weekTop[0]?.avg_vph || 0;
+  // Tier a slot by its strength RELATIVE to the best in its list — honest
+  // "best / good / fair" rather than absolute thresholds.
+  const tierOf = (vph, top) => {
+    const r = top > 0 ? vph / top : 0;
+    if (r >= 0.85) return { label: "Best", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" };
+    if (r >= 0.60) return { label: "Good", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" };
+    return { label: "Fair", cls: "bg-white/5 text-gray-400 border-border" };
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-panel p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <Clock size={15} className="text-sky-400" />
+          Best time to post — {channelName || `Channel #${channelId}`}
+        </div>
+        <div className="flex items-center gap-2">
+          {[{ v: 30, l: "Month" }, { v: 90, l: "90 days" }, { v: 3650, l: "All-time" }].map((o) => (
+            <button key={o.v} onClick={() => setDays(o.v)}
+              className={`px-2 py-1 rounded text-[11px] font-medium border ${
+                days === o.v ? "border-sky-400 text-sky-300 bg-sky-500/10"
+                             : "border-border text-gray-500 hover:text-gray-300"}`}>
+              {o.l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {err && <div className="text-[12px] text-red-300 mb-2">{err}</div>}
+      {busy ? (
+        <div className="text-gray-500 text-sm flex items-center gap-2 h-40 justify-center">
+          <Loader2 className="animate-spin" size={14} /> Loading measured upload times…
+        </div>
+      ) : !rep ? null : (
+        <>
+          {/* PEAK — post your best video here */}
+          {rep.peak ? (
+            <div className="mb-3 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">
+              <div className="text-[13px] text-white flex items-center gap-1.5 flex-wrap">
+                <Trophy size={14} className="text-amber-300" />
+                Post your <span className="font-semibold text-amber-200">best video</span> around
+                <span className="font-bold text-amber-200">{fmtHour(rep.peak.hour)} {tz}</span>
+                on <span className="font-bold text-amber-200">{rep.peak.label}</span>
+              </div>
+              <div className="text-[10px] text-gray-400 mt-0.5">
+                Its uploads averaged {rep.peak.avg_vph} views/hour across {rep.peak.n} videos
+                {rep.peak.avg_ctr != null && <> · CTR {(rep.peak.avg_ctr * 100).toFixed(1)}%</>}
+                {" "}— the single strongest slot measured.
+              </div>
+            </div>
+          ) : (
+            <div className="mb-3 rounded-lg border border-border bg-black/20 px-3 py-3 text-[12px] text-gray-400">
+              {rep.recommendation?.reason || "Not enough measured history yet to recommend a time — keep publishing and press “Learn now”."}
+            </div>
+          )}
+
+          {/* WEEKLY PRIORITY — the strongest day+time slots, ranked */}
+          {weekTop.length > 0 && (
+            <div className="mb-3">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">
+                This week's top slots (by priority)
+              </div>
+              <div className="space-y-1">
+                {weekTop.map((c, i) => {
+                  const t = tierOf(c.avg_vph, weekTopVph);
+                  return (
+                    <div key={`${c.dow}-${c.hour}`} className="flex items-center gap-2 text-[11px]">
+                      <span className="w-4 text-gray-600 text-right">{i + 1}</span>
+                      <span className={`px-1.5 py-0.5 rounded border text-[9px] font-semibold w-10 text-center ${t.cls}`}>{t.label}</span>
+                      <span className="text-gray-200 font-medium w-24">{c.label} {fmtHour(c.hour)}</span>
+                      <span className="text-gray-500">{c.avg_vph} views/hr · {c.n} video{c.n === 1 ? "" : "s"}
+                        {c.avg_ctr != null && <> · CTR {(c.avg_ctr * 100).toFixed(1)}%</>}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 7×24 HEATMAP — day × hour (IST) */}
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">
+            Views / hour heatmap — day × upload hour ({tz}) · brighter = faster start
+          </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[520px]">
+              <div className="grid gap-[2px] mb-[2px]" style={{ gridTemplateColumns: "30px repeat(24, 1fr)" }}>
+                <div />
+                {Array.from({ length: 24 }, (_, h) => (
+                  <div key={h} className="text-[8px] text-gray-500 text-center tabular-nums leading-none">{h % 3 === 0 ? String(h).padStart(2, "0") : ""}</div>
+                ))}
+              </div>
+              {grid.map((d) => (
+                <div key={d.dow} className="grid gap-[2px] mb-[2px] items-center" style={{ gridTemplateColumns: "30px repeat(24, 1fr)" }}>
+                  <button onClick={() => setSelDow(d.dow)}
+                    className={`text-[10px] text-left ${d.dow === selDow ? "text-sky-300 font-semibold" : "text-gray-500 hover:text-gray-300"}`}>
+                    {d.dow}
+                  </button>
+                  {d.hours.map((c) => {
+                    const isPeak = rep.peak && rep.peak.dow === d.dow && rep.peak.hour === c.hour;
+                    const thin = c.n > 0 && c.n < 3;
+                    const a = 0.10 + (c.avg_vph / maxCell) * 0.85;
+                    return (
+                      <div key={c.hour}
+                        title={`${d.label} ${fmtHour(c.hour)} ${tz} · ${c.avg_vph} views/hr · ${c.n} video${c.n === 1 ? "" : "s"}${c.avg_ctr != null ? ` · CTR ${(c.avg_ctr * 100).toFixed(1)}%` : ""}${thin ? " · low confidence" : ""}`}
+                        className="aspect-square rounded-[2px]"
+                        style={{
+                          background: c.n === 0 ? "rgba(255,255,255,0.03)"
+                            : `rgba(56,189,248,${(thin ? Math.min(a, 0.3) : a).toFixed(3)})`,
+                          outline: isPeak ? "1.5px solid #fbbf24" : undefined,
+                          outlineOffset: isPeak ? "-1px" : undefined,
+                        }} />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="text-[10px] text-gray-600 mt-1">
+            Columns = upload hour in {tz} (<span className="text-gray-400">00–23, so 18 = 6&nbsp;PM</span>); rows = weekday.
+            Hover any square for its exact time + views/hr. The amber-ringed square is your peak slot.
+          </div>
+
+          {/* DAY DRILL-DOWN — pick a weekday → its hour-by-hour detail */}
+          <div className="mt-4 flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] uppercase tracking-wider text-gray-500 mr-1">Day detail:</span>
+            {grid.map((d) => (
+              <button key={d.dow} onClick={() => setSelDow(d.dow)}
+                className={`px-1.5 py-0.5 rounded text-[10px] border ${
+                  d.dow === selDow ? "border-sky-400 text-sky-300 bg-sky-500/10"
+                                   : "border-border text-gray-500 hover:text-gray-300"}`}>
+                {d.dow}
+              </button>
+            ))}
+          </div>
+          {selRow && (
+            <div className="mt-2">
+              <div className="text-[11px] text-gray-400 mb-1">
+                {selRow.label}:{" "}
+                {selBest
+                  ? <>best hour <span className="text-sky-300 font-semibold">{fmtHour(selBest.hour)} {tz}</span> ({selBest.avg_vph} views/hr, {selBest.n} videos)</>
+                  : <span className="text-gray-500">not enough videos posted on {selRow.label} yet to pick an hour.</span>}
+              </div>
+              <div className="flex items-end gap-[2px] h-20">
+                {selHours.map((c) => {
+                  const pct = Math.round(((c.avg_vph || 0) / maxSel) * 100);
+                  const best = selBest && selBest.hour === c.hour;
+                  const thin = c.n > 0 && c.n < 3;
+                  return (
+                    <div key={c.hour} className="flex-1 flex flex-col justify-end h-full group"
+                      title={`${selRow.label} ${fmtHour(c.hour)} ${tz} · ${c.avg_vph} views/hr · ${c.n} video${c.n === 1 ? "" : "s"}${thin ? " · low confidence" : ""}`}>
+                      <div className={`w-full rounded-t ${
+                        best ? "bg-amber-400"
+                        : c.n === 0 ? "bg-white/5"
+                        : thin ? "bg-sky-500/25" : "bg-sky-500/50 group-hover:bg-sky-500/70"}`}
+                        style={{ height: `${c.n === 0 ? 2 : Math.max(3, pct)}%` }} />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between text-[9px] text-gray-600 mt-1">
+                {[0, 3, 6, 9, 12, 15, 18, 21].map((h) => <span key={h}>{fmtHour(h)}</span>)}
+              </div>
+
+              {/* PER-DAY PRIORITY — this day's times ranked best→fair */}
+              {selRanked.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1.5">
+                    {selRow.label} — times by priority
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selRanked.slice(0, 6).map((c, i) => {
+                      const t = tierOf(c.avg_vph, selTopVph);
+                      return (
+                        <div key={c.hour}
+                          title={`${c.avg_vph} views/hr across ${c.n} video${c.n === 1 ? "" : "s"}${c.avg_ctr != null ? ` · CTR ${(c.avg_ctr * 100).toFixed(1)}%` : ""}`}
+                          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[11px] ${t.cls}`}>
+                          <span className="text-[9px] opacity-70">#{i + 1}</span>
+                          <span className="font-semibold">{fmtHour(c.hour)} {tz}</span>
+                          <span className="text-[9px] opacity-80">{t.label}</span>
+                          <span className="text-[9px] opacity-60">{c.avg_vph}/hr</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="text-[10px] text-gray-600 mt-3">
+            Based on {rep.samples} measured video{rep.samples === 1 ? "" : "s"}
+            {rep.ctr_coverage > 0 && <> · {rep.ctr_coverage} with real thumbnail CTR</>}
+            {" "}· ranked by {rep.signal === "ctr" ? "real click-through rate" : "views/hour"} · times in {tz}.
+            {" "}Faint cells = too few videos to trust yet; they fill in as you publish.
+            {fromDoctor
+              ? <span className="text-gray-500"> · Source: <strong className="text-gray-400">Channel Doctor</strong> (your full YouTube catalogue) — matches the Channel Doctor tab.</span>
+              : <span className="text-gray-500"> · Run <strong className="text-gray-400">Channel Doctor</strong> for the full-catalogue timing.</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Weekly uplift rollup — the multi-week view behind the single 7-vs-30
+ * uplift chip. Per-week measured avg views/hour + week-over-week %, empty
+ * weeks shown as gaps. Honest "need 2 measured weeks" state. */
+function WeeklyUpliftPanel({ channelId, channelName }) {
+  const [rep, setRep] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!channelId) return;
+    setBusy(true); setErr("");
+    api.seoLearningWeeklyUplift(channelId, 8)
+      .then(setRep)
+      .catch((e) => setErr(e?.message || "Failed to load weekly uplift"))
+      .finally(() => setBusy(false));
+  }, [channelId]);
+
+  const series = rep?.series || [];
+  const maxVph = Math.max(1, ...series.map((w) => w.avg_vph || 0));
+  const fmtWk = (iso) => {
+    const d = new Date(`${iso}T00:00:00`);
+    return `${d.getDate()}/${d.getMonth() + 1}`;
+  };
+  const wow = rep?.latest_wow_pct;
+
+  return (
+    <div className="rounded-xl border border-border bg-panel p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <BarChart3 size={15} className="text-emerald-400" />
+          Weekly uplift — {channelName || `Channel #${channelId}`}
+        </div>
+        {rep?.enough_data && wow != null && (
+          <span className={`text-[11px] px-2 py-0.5 rounded border ${
+            wow >= 0 ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                     : "bg-red-500/10 text-red-300 border-red-500/20"}`}
+            title="Latest week's avg views/hour vs the previous measured week">
+            {wow >= 0 ? "▲" : "▼"} {Math.abs(wow)}% this week
+          </span>
+        )}
+      </div>
+
+      {err && <div className="text-[12px] text-red-300 mb-2">{err}</div>}
+      {busy ? (
+        <div className="text-gray-500 text-sm flex items-center gap-2 h-24 justify-center">
+          <Loader2 className="animate-spin" size={14} /> Loading weekly rollup…
+        </div>
+      ) : !rep ? null : !rep.enough_data ? (
+        <div className="rounded-lg border border-border bg-black/20 px-3 py-3 text-[12px] text-gray-400">
+          Collecting honestly — a weekly trend needs at least 2 weeks with published
+          videos. Keep publishing and it fills in.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-end gap-1.5 h-28">
+            {series.map((w) => {
+              const pct = Math.round(((w.avg_vph || 0) / maxVph) * 100);
+              const up = w.wow_pct != null && w.wow_pct >= 0;
+              return (
+                <div key={w.week_start} className="flex-1 flex flex-col items-center justify-end h-full group"
+                  title={`Week of ${w.week_start} · ${w.published} video${w.published === 1 ? "" : "s"} · ${w.avg_vph} views/hr${w.avg_ctr != null ? ` · CTR ${(w.avg_ctr * 100).toFixed(1)}%` : ""}${w.wow_pct != null ? ` · ${w.wow_pct >= 0 ? "+" : ""}${w.wow_pct}% WoW` : ""}`}>
+                  <div className={`w-full rounded-t transition-colors ${
+                    w.published === 0 ? "bg-white/5"
+                    : up ? "bg-emerald-500/50 group-hover:bg-emerald-500/70"
+                         : "bg-red-500/40 group-hover:bg-red-500/60"}`}
+                    style={{ height: `${w.published === 0 ? 2 : Math.max(3, pct)}%` }} />
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-1.5 mt-1">
+            {series.map((w) => (
+              <div key={w.week_start} className="flex-1 text-center text-[9px] text-gray-600">{fmtWk(w.week_start)}</div>
+            ))}
+          </div>
+          <div className="text-[10px] text-gray-600 mt-2">
+            Avg views/hour per week (green = up vs the previous measured week, red = down);
+            empty bars are weeks with no publishes. All measured.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Tracked rivals: their learned formula from PUBLIC data + Learn button.
+ * Honest by construction: rival CTR is private and never shown. */
+function CompetitorsPanel() {
+  const [data, setData] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [err, setErr] = useState("");
+
+  const load = () => api.competitorsList().then(setData)
+    .catch((e) => setErr(e?.message || "Failed to load competitors"));
+  useEffect(() => { load(); }, []);
+
+  const learn = async (id) => {
+    setBusyId(id);
+    try { await api.competitorLearn(id); await load(); }
+    catch (e) { setErr(e?.message || "Learn failed"); }
+    finally { setBusyId(null); }
+  };
+
+  const comps = data?.competitors || [];
+  const [newName, setNewName] = useState("");
+  const [newRef, setNewRef] = useState("");
+  const [adding, setAdding] = useState(false);
+  const add = async () => {
+    if (!newName.trim() || !newRef.trim()) return;
+    setAdding(true);
+    try {
+      await api.createCompetitor({
+        name: newName.trim(),
+        youtube_channel_id: newRef.trim(),
+        handle: newRef.trim().startsWith("@") ? newRef.trim() : "",
+      });
+      setNewName(""); setNewRef("");
+      await load();
+    } catch (e) { setErr(e?.message || "Add failed"); }
+    finally { setAdding(false); }
+  };
+  return (
+    <div className="rounded-xl border border-border bg-panel p-4">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div className="text-sm font-semibold text-white flex items-center gap-2">
+          <Search size={14} className="text-amber-300" /> Competitors (public data)
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)}
+            placeholder="Name (e.g. TV9 Telugu)"
+            className="bg-[#0e1218] border border-border rounded px-2 py-1 text-[11px] text-gray-200 w-36" />
+          <input value={newRef} onChange={(e) => setNewRef(e.target.value)}
+            placeholder="@handle / channel URL / UC id"
+            className="bg-[#0e1218] border border-border rounded px-2 py-1 text-[11px] text-gray-200 w-48" />
+          <button onClick={add} disabled={adding || !newName.trim() || !newRef.trim()}
+            className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2.5 py-1 rounded text-[11px] disabled:opacity-40">
+            {adding ? "Adding…" : "+ Track"}
+          </button>
+        </div>
+      </div>
+      {err && <div className="text-[12px] text-red-300 mb-2">{err}</div>}
+      {comps.length === 0 ? (
+        <div className="text-[12px] text-gray-500">
+          No competitors tracked yet — add a rival above (name + @handle or channel URL), then press Learn.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {comps.map((c) => (
+            <div key={c.id} className="rounded-lg border border-border bg-[#0e1218] p-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[13px] font-semibold text-white truncate">{c.name}</span>
+                <button onClick={() => learn(c.id)} disabled={busyId === c.id}
+                  className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded text-[10px] disabled:opacity-50">
+                  <RefreshCw size={10} className={busyId === c.id ? "animate-spin" : ""} />
+                  {busyId === c.id ? "Learning…" : "Learn"}
+                </button>
+              </div>
+              <div className="text-[10px] text-gray-500 mb-1.5">{c.samples || 0} videos analyzed</div>
+              {c.policy && (
+                <div className="flex flex-wrap gap-1 mb-1.5">
+                  {(c.policy.best_hooks || []).map((h) => (
+                    <span key={h} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">{h} hooks</span>
+                  ))}
+                  {c.policy.best_script && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">{c.policy.best_script} titles</span>
+                  )}
+                </div>
+              )}
+              {(c.top_topics || []).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {c.top_topics.slice(0, 4).map((t) => (
+                    <span key={t.term} className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-border" title={`${t.avg_vph} views/hr across ${t.n} videos`}>{t.term}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SeoLearningTab({ ytChannels = [], initialGcid = "" }) {
   const [data, setData]   = useState(null);
   const [busy, setBusy]   = useState(true);
   const [err, setErr]     = useState("");
+  const [selected, setSelected] = useState(null);
+  // SEO Settings sub-tabs: "owned" (this account's channels — learning
+  // curve, best-time report, weekly uplift, per-channel cards) |
+  // "competitors" (writing-voice study channels + tracked rivals) |
+  // "doctor" (the Channel Doctor holistic AI diagnosis, merged in here so
+  // all of Insights' analysis lives in one hub).
+  const [subTab, setSubTab] = useState("owned");
 
   useEffect(() => {
     let alive = true;
     setBusy(true); setErr("");
     api.seoLearning()
-      .then((d) => { if (alive) setData(d); })
+      .then((d) => {
+        if (!alive) return;
+        setData(d);
+        const first = (d?.channels || [])[0];
+        if (first) setSelected((s) => s ?? first.channel_id);
+      })
       .catch((e) => { if (alive) setErr(e?.message || "Failed to load SEO learning"); })
       .finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
@@ -1414,16 +2165,87 @@ function SeoLearningTab() {
   }
   const channels = data?.channels || [];
   const learning = channels.filter((c) => c.ready).length;
+  const steering = channels.filter((c) => c.policy).length;
+  const selectedChannel = channels.find((c) => c.channel_id === selected);
 
   return (
     <div className="space-y-4">
+      {/* SEO Settings sub-tabs — Owned Channels | Competitors | Channel Doctor */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {[
+          { k: "owned", label: "Owned Channels", Icon: Youtube },
+          { k: "competitors", label: "Competitors", Icon: Swords },
+          { k: "doctor", label: "Channel Doctor", Icon: Stethoscope },
+        ].map((t) => (
+          <button
+            key={t.k}
+            onClick={() => setSubTab(t.k)}
+            className={`px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors flex items-center gap-1.5 ${
+              subTab === t.k
+                ? "border-accent2 text-white"
+                : "border-transparent text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            <t.Icon size={14} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === "competitors" ? (
+        <div className="space-y-4">
+          {/* Writing-voice study channels (moved here from the Channels page) */}
+          <StyleReferencesPanel />
+          {/* Topic radar — tracked rivals' winning topics/keywords from public data */}
+          <CompetitorsPanel />
+        </div>
+      ) : subTab === "doctor" ? (
+        /* Channel Doctor — holistic AI diagnosis (merged into this hub) */
+        <TrendFinderTab ytChannels={ytChannels} initialGcid={initialGcid} />
+      ) : (
+      <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2 text-sm text-gray-300">
           <Zap size={15} className="text-accent2" />
-          <span><strong className="text-white">{learning}</strong> of {channels.length} channel{channels.length === 1 ? "" : "s"} actively learning</span>
+          <span>
+            <strong className="text-white">{steering}</strong> steering SEO ·{" "}
+            <strong className="text-white">{learning}</strong> of {channels.length} channel{channels.length === 1 ? "" : "s"} learning
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-500">SEO writer:</span>
+          {["gemini", "claude", "openai"].map((e) => (
+            <button key={e}
+              onClick={async () => {
+                try { await api.seoEngineSet(e); setData((d) => ({ ...d, seo_engine: e })); }
+                catch { /* keep old */ }
+              }}
+              title={e === "claude"
+                ? "Claude writes the SEO (auto-falls back to Gemini on failure)"
+                : e === "openai"
+                  ? "ChatGPT writes the SEO — BYO OpenAI key (auto-falls back to Gemini on failure)"
+                  : "Gemini writes the SEO (default)"}
+              className={`px-2 py-1 rounded text-[11px] font-medium border capitalize ${
+                (data?.seo_engine || "gemini") === e
+                  ? "border-accent2 text-accent2 bg-accent2/10"
+                  : "border-border text-gray-500 hover:text-gray-300"}`}>
+              {e}
+            </button>
+          ))}
         </div>
         {data?.note && <p className="text-[11px] text-gray-500 max-w-xl">{data.note}</p>}
       </div>
+
+      {channels.length > 0 && selected && (
+        <LearningCurve channelId={selected} channelName={selectedChannel?.channel_name} />
+      )}
+
+      {channels.length > 0 && selected && (
+        <BestTimesReport channelId={selected} channelName={selectedChannel?.channel_name} />
+      )}
+
+      {channels.length > 0 && selected && (
+        <WeeklyUpliftPanel channelId={selected} channelName={selectedChannel?.channel_name} />
+      )}
 
       {channels.length === 0 ? (
         <div className="bg-[#111] border border-border rounded p-6 text-center text-sm text-gray-500">
@@ -1434,8 +2256,11 @@ function SeoLearningTab() {
           {channels.map((c) => (
             <div
               key={c.channel_id}
-              className={`rounded-xl border p-4 bg-panel transition-colors ${
-                c.ready ? "border-accent2/40" : "border-border"
+              onClick={() => setSelected(c.channel_id)}
+              className={`rounded-xl border p-4 bg-panel transition-colors cursor-pointer ${
+                selected === c.channel_id ? "border-accent2 ring-1 ring-accent2/40"
+                : c.policy ? "border-emerald-500/40"
+                : c.ready ? "border-accent2/40" : "border-border"
               }`}
             >
               <div className="flex items-center justify-between mb-2">
@@ -1444,9 +2269,10 @@ function SeoLearningTab() {
                   <span className="text-sm font-semibold text-white truncate">{c.channel_name || `Channel #${c.channel_id}`}</span>
                 </div>
                 <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-                  c.ready ? "bg-emerald-500/20 text-emerald-300" : "bg-gray-700 text-gray-400"
+                  c.policy ? "bg-emerald-500/20 text-emerald-300"
+                  : c.ready ? "bg-accent2/20 text-accent2" : "bg-gray-700 text-gray-400"
                 }`}>
-                  {c.ready ? "learning" : "collecting"}
+                  {c.status || (c.ready ? "learning" : "collecting")}
                 </span>
               </div>
 
@@ -1457,10 +2283,26 @@ function SeoLearningTab() {
                 </span>
                 <span>·</span>
                 <span>{c.videos_sampled} video{c.videos_sampled === 1 ? "" : "s"} learnt from</span>
+                {c.ctr_rows > 0 && (
+                  <span title="Videos with REAL thumbnail CTR from YouTube">· {c.ctr_rows} with real CTR</span>
+                )}
                 {!c.ctr_unlocked && (
                   <span className="ml-auto text-[10px] text-gray-600" title="Re-approve this channel for analytics to unlock CTR">CTR locked</span>
                 )}
               </div>
+
+              <label className="flex items-center gap-1.5 text-[10px] text-gray-500 mb-2 cursor-pointer"
+                     onClick={(e) => e.stopPropagation()}
+                     title="Opt-in: SEO for this channel also uses tracked competitors' topic-matched public data (their winning queries + tags, differentiated titles)">
+                <input type="checkbox"
+                  defaultChecked={!!c.use_competitor_intel}
+                  onChange={async (e) => {
+                    try { await api.competitorToggle(c.channel_id, e.target.checked); }
+                    catch { e.target.checked = !e.target.checked; }
+                  }}
+                  className="accent-amber-400" />
+                use competitor intelligence in SEO
+              </label>
 
               {c.winning_keywords?.length > 0 ? (
                 <div>
@@ -1490,6 +2332,8 @@ function SeoLearningTab() {
             </div>
           ))}
         </div>
+      )}
+      </div>
       )}
     </div>
   );

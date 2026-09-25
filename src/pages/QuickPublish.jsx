@@ -127,7 +127,8 @@ export default function QuickPublish() {
   //  "per"  = a distinct SEO per channel (base is just a light seed, no improve loop),
   //  "both" = both (improved base + per-channel).
   const [seoScope, setSeoScope] = useState("all");
-  // Optional competitor style reference (SEO Settings). 0 = our own voice.
+  // Optional writing-voice study channel (Insights → SEO Settings →
+  // Competitors). 0 = our own voice.
   const [styleSourceId, setStyleSourceId] = useState(0);
   const [styleRefs, setStyleRefs] = useState([]);
 
@@ -236,7 +237,7 @@ export default function QuickPublish() {
 
   useEffect(() => {
     api.listLanguages().then((list) => setLanguages(list || [])).catch(() => {});
-    // Competitor style references (SEO Settings) the user can write in.
+    // Writing-voice study channels (Insights → SEO Settings → Competitors).
     api.listChannels({ kind: "styles" })
       .then((list) => setStyleRefs(Array.isArray(list) ? list : []))
       .catch(() => {});
@@ -754,9 +755,9 @@ export default function QuickPublish() {
                 <div className="text-[11px] text-gray-400 mb-1">This SEO is for…</div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                   {[
-                    { k: "all",  t: "All channels",   d: "One SEO for everyone" },
-                    { k: "per",  t: "Each channel",   d: "A distinct SEO per channel" },
-                    { k: "both", t: "Both",           d: "One shared + per-channel" },
+                    { k: "all",  t: "All channels",   d: "One SEO used on every channel" },
+                    { k: "per",  t: "Each channel",   d: "A tuned SEO per channel — uses each channel's learning + competitors" },
+                    { k: "both", t: "Both",           d: "A shared SEO + a tuned one per channel" },
                   ].map((o) => (
                     <button key={o.k} type="button" onClick={() => setSeoScope(o.k)} disabled={anySeoBusy}
                       className={`text-left rounded border px-2.5 py-1.5 disabled:opacity-50 ${seoScope === o.k ? "border-accent2 bg-accent2/10" : "border-border hover:border-gray-500"}`}>
@@ -766,9 +767,16 @@ export default function QuickPublish() {
                   ))}
                 </div>
                 {seoScope === "per" && (
-                  <p className="text-[9.5px] text-gray-500 mt-1">
-                    The base SEO below is written once as a quick seed (not improved) — each channel's
-                    own SEO is what's tuned to 85+ and published.
+                  <p className="text-[10px] text-accent2/90 mt-1 leading-snug">
+                    ▼ The SEO below is just a quick seed. Scroll down to <strong>“Channel-wise SEO”</strong>,
+                    pick your channels and press Generate — <strong>that</strong> is what actually publishes
+                    (each channel tuned to its own learning + competitors).
+                  </p>
+                )}
+                {seoScope === "both" && (
+                  <p className="text-[9.5px] text-gray-500 mt-1 leading-snug">
+                    You’ll set one shared SEO (below) AND a tuned one per channel (in “Channel-wise SEO”).
+                    On channels you generate for, the per-channel version wins at publish.
                   </p>
                 )}
               </div>
@@ -793,11 +801,11 @@ export default function QuickPublish() {
                 ))}
               </div>
 
-              {/* Writing voice — default, or emulate a competitor channel
-                  saved under SEO Settings. Voice-only: title rhythm +
-                  description style; the channel's name/handle/brand tags
-                  are stripped before publish, so there's no strike risk.
-                  Only relevant for the AI modes. */}
+              {/* Writing voice — default, or emulate a study channel saved
+                  under Insights → SEO Settings → Competitors. Voice-only:
+                  title rhythm + description style; the channel's
+                  name/handle/brand tags are stripped before publish, so
+                  there's no strike risk. Only relevant for the AI modes. */}
               {seoMode !== "manual" && styleRefs.length > 0 && (
                 <div className="bg-surface border border-border rounded p-3 flex flex-col gap-1.5">
                   <label className="text-xs font-medium text-gray-300">
@@ -959,12 +967,15 @@ export default function QuickPublish() {
                   own keyword-tuned title/tags (same engine as the V4 editor).
                   Applied automatically per destination at publish. */}
               {seoScope !== "all" && (
-                <div className="bg-surface border border-border rounded p-3 flex flex-col gap-2">
+                <div className={`bg-surface border rounded p-3 flex flex-col gap-2 ${
+                  seoScope === "per" ? "border-accent2/60 ring-1 ring-accent2/20" : "border-border"}`}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <Sparkles size={13} className="text-accent2" />
                       <span className="text-xs font-medium text-gray-200">Channel-wise SEO</span>
-                      <span className="text-[10px] text-gray-500">(optional)</span>
+                      <span className={`text-[10px] ${seoScope === "per" ? "text-accent2 font-semibold" : "text-gray-500"}`}>
+                        {seoScope === "per" ? "— this is what publishes" : "— per-channel, wins at publish"}
+                      </span>
                     </div>
                     <button
                       type="button"
@@ -977,10 +988,13 @@ export default function QuickPublish() {
                         : <><Sparkles size={13} /> Generate for {selChannels.size || "selected"} channel{selChannels.size === 1 ? "" : "s"}</>}
                     </button>
                   </div>
-                  <p className="text-[10px] text-gray-500 leading-snug">
-                    Pick the channels below, then generate — each selected channel gets its OWN
-                    distinct title &amp; tags (tuned to its winning keywords), applied per channel at
-                    publish. Only the channels you select are generated for.
+                  <p className="text-[10px] text-gray-400 leading-snug">
+                    <strong className="text-gray-200">How it works:</strong> pick your channels below → press
+                    <strong className="text-gray-200"> Generate</strong>. Each channel gets its OWN distinct
+                    title &amp; tags, written by the advanced engine tuned to <strong className="text-gray-200">that
+                    channel's own learning</strong> (its winning hooks/keywords) <strong className="text-gray-200">+
+                    its tracked competitors</strong>. This per-channel SEO is what publishes to those channels.
+                    {seoScope === "per" && " (You chose “Each channel”, so this step is required — the SEO above is only a seed.)"}
                   </p>
 
                   {/* Channel picker — generate SEO ONLY for the chosen channels (not all). */}
@@ -1041,7 +1055,14 @@ export default function QuickPublish() {
                           : dlStatus[cid] === "error" ? <AlertCircle size={11} className="text-red-400" />
                           : <Download size={11} />}
                         <span className="truncate">{v.channel_name}</span>
-                        {v.seo_score ? <span className="text-[9.5px] text-green-400/80 shrink-0">{v.seo_score}</span> : null}
+                        {v.seo_score ? (
+                          <span
+                            className={`text-[9px] px-1 py-px rounded font-medium tabular-nums shrink-0 ${
+                              v.seo_score >= 70 ? "bg-emerald-900/50 text-emerald-300" : "bg-amber-900/40 text-amber-300"
+                            }`}
+                            title="SEO / CTR score"
+                          >{v.seo_score}/100</span>
+                        ) : null}
                       </button>
                     ))}
                   </div>

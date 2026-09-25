@@ -1,4 +1,88 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import CustomTemplatePicker from "./CustomTemplatePicker";
+import { api, getToken } from "../api/client";
+
+/** Built-in DESIGNED layouts (the layout library's renderable subset) —
+ *  real full-form choices the composer honours via tile percentages.
+ *  Cards look like the custom-template cards: preview image + name. */
+function DesignedLayoutsPicker({ selectedKey, onSelect }) {
+  const [rows, setRows] = useState(null);
+  const [forking, setForking] = useState("");
+  const navigate = useNavigate();
+  useEffect(() => {
+    api.layoutLibrary().then(setRows).catch(() => setRows([]));
+  }, []);
+  const withAuth = (u) => {
+    const t = getToken();
+    return t ? u + (u.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(t) : u;
+  };
+  // Fork the design into the user's OWN custom template and open the
+  // visual builder — complete editing (colors, fonts, move, everything).
+  const customize = async (e, key) => {
+    e.stopPropagation();
+    setForking(key);
+    try {
+      const tpl = await api.forkLibraryLayout(key);
+      navigate(`/builder/${tpl.id}`);
+    } catch (err) {
+      alert(err?.message || "Could not open this layout in the builder.");
+    } finally {
+      setForking("");
+    }
+  };
+  if (!rows || !rows.length) return null;
+  return (
+    <div className="mt-5">
+      <div className="text-xs font-semibold text-gray-300 mb-2">
+        Designed layouts <span className="text-gray-500 font-normal">— built-in broadcast screen designs</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        {rows.map((r) => {
+          const key = `lib:${r.key}`;
+          const sel = selectedKey === key;
+          return (
+            <button
+              key={r.key}
+              type="button"
+              onClick={() => onSelect(key)}
+              className={`text-left rounded-xl border-2 overflow-hidden transition
+                ${sel ? "border-accent ring-2 ring-accent/40"
+                      : "border-border hover:border-accent/60"}`}
+            >
+              <img src={withAuth(r.preview_url)} alt={r.name}
+                   className="w-full aspect-video object-cover bg-black" />
+              <div className="p-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded
+                                   bg-indigo-500/15 text-indigo-300 border border-indigo-500/40">
+                    Full
+                  </span>
+                  <span className="text-xs font-semibold text-white truncate">{r.name}</span>
+                </div>
+                <div className="text-[10px] text-gray-500 mt-1 line-clamp-2">{r.description}</div>
+                <div className="flex items-center justify-between mt-1.5">
+                  {sel ? (
+                    <div className="text-[11px] text-accent2 font-medium">✓ Selected</div>
+                  ) : <span />}
+                  <span
+                    role="button"
+                    onClick={(e) => customize(e, r.key)}
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-teal-500/40
+                               text-teal-300 hover:bg-teal-500/10"
+                    title="Fork into YOUR template and open the visual builder — change colors, fonts, positions, everything."
+                  >
+                    {forking === r.key ? "Opening…" : "🎨 Customize"}
+                  </span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /**
  * TemplateStep — the New Job wizard's "Choose Template" step, FILTERED by the output
@@ -153,6 +237,8 @@ export default function TemplateStep({
               <div className="text-[11px] text-accent2 mt-1.5 font-medium">✓ Selected</div>
             )}
           </button>
+          {/* Built-in designed layouts (layout library, renderable subset). */}
+          <DesignedLayoutsPicker selectedKey={fullformLayout} onSelect={chooseFull} />
           {/* Developer-uploaded full-form templates. */}
           <CustomTemplatePicker kind="full" selectedKey={fullformLayout} onSelect={chooseFull} />
         </div>

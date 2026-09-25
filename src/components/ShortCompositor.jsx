@@ -61,7 +61,26 @@ export default function ShortCompositor({ videoSrc, layout = "torn_card", text =
 
   // Compose the stage by layout family.
   let body;
-  if (layout === "split_frame") {
+  if (String(layout || "").toLowerCase().startsWith("custom:")) {
+    // CUSTOM TEMPLATE: the real design is author-supplied HTML rendered by
+    // the backend — this mockup can't reproduce it, and falling through to
+    // the torn-card drawing (the old behaviour) misled the operator into
+    // thinking the wrong template was applied. Play the raw clip with an
+    // honest label; the Rendered-output pane shows the true design.
+    body = (<>
+      {Video({ left: 0, top: 0, width: "100%", height: "100%" })}
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: "4%",
+        textAlign: "center", padding: "0 6%" }}>
+        <span style={{ display: "inline-block", background: "rgba(10,14,22,.82)",
+          border: "1px solid rgba(255,255,255,.25)", borderRadius: 10,
+          color: "#dbe4f5", fontWeight: 700, fontSize: 0.024 * H,
+          padding: "1.2% 3%" }}>
+          Custom template ({layout}) — live preview shows the raw clip only.
+          See “Rendered output” for the real design.
+        </span>
+      </div>
+    </>);
+  } else if (layout === "split_frame") {
     body = (<>
       {Video({ left: 0, top: 0, width: "50%", height: "100%" })}
       {Img({ left: "50%", top: 0, width: "50%", height: "100%" })}

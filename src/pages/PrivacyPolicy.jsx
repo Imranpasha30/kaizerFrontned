@@ -109,12 +109,51 @@ export default function PrivacyPolicy() {
             .
           </p>
           <p>
+            <strong>
+              Kaizer X&rsquo;s use and transfer of information received from
+              Google APIs to any other app will adhere to the{" "}
+              <a
+                href="https://developers.google.com/terms/api-services-user-data-policy"
+                target="_blank"
+                rel="noreferrer"
+                className="text-red-600 underline"
+              >
+                Google API Services User Data Policy
+              </a>
+              , including the Limited Use requirements.
+            </strong>
+          </p>
+          <p>
+            In plain terms: the data we receive from your Google account is
+            used only to provide the features you asked for. We do not sell
+            it, we do not transfer it to anyone except as needed to provide
+            those features or where the law requires it, we do not use it for
+            advertising, and no human reads it except with your explicit
+            permission, to resolve a fault you have reported, or where the
+            law requires it.
+          </p>
+          <p>
             We use the following YouTube Data API v3 scopes only:
           </p>
           <ul className="list-disc pl-6 space-y-1">
-            <li><code>https://www.googleapis.com/auth/youtube.upload</code> — to upload your processed clips.</li>
-            <li><code>https://www.googleapis.com/auth/youtube.readonly</code> — to read your channel&rsquo;s name and ID after you connect.</li>
-            <li><code>https://www.googleapis.com/auth/youtube</code> — to update video metadata and set custom thumbnails.</li>
+            <li>
+              <code>https://www.googleapis.com/auth/youtube.upload</code>
+              {" "}&mdash; to upload the finished video to the channel you
+              connected, and to set the thumbnail on it.
+            </li>
+            <li>
+              <code>https://www.googleapis.com/auth/youtube.readonly</code>
+              {" "}&mdash; to read the connected channel&rsquo;s own name, ID
+              and past uploads, so we can show you which channel is linked and
+              write titles and descriptions in that channel&rsquo;s style.
+            </li>
+            <li>
+              <code>https://www.googleapis.com/auth/youtube</code>
+              {" "}&mdash; to add an uploaded video to a playlist you chose.
+              The YouTube Data API offers no narrower scope for
+              <code>playlistItems.insert</code>; this is the only operation we
+              use it for.
+            </li>
           </ul>
           <p>
             We do not request access to your subscribers, your viewers&rsquo;

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="Kaizer X Desktop studio preview placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B0D10"/>
+      <stop offset="0.55" stop-color="#15181D"/>
+      <stop offset="1" stop-color="#1E222A"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#E0312B" stop-opacity="0"/>
+      <stop offset="1" stop-color="#E0312B" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="tile1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7b955"/><stop offset="1" stop-color="#e0312b"/>
+    </linearGradient>
+    <linearGradient id="tile2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34a0e0"/><stop offset="1" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <linearGradient id="tile3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22c55e"/><stop offset="1" stop-color="#15803d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <circle cx="1180" cy="640" r="520" fill="url(#glow)"/>
+
+  <!-- editor window chrome -->
+  <rect x="120" y="90" width="1040" height="540" rx="18" fill="#101317" stroke="#2A2F38" stroke-width="2"/>
+  <circle cx="158" cy="122" r="6" fill="#FF6B66"/>
+  <circle cx="180" cy="122" r="6" fill="#F5C518"/>
+  <circle cx="202" cy="122" r="6" fill="#22C55E"/>
+
+  <!-- video stage -->
+  <rect x="150" y="150" width="640" height="360" rx="10" fill="#0B0D10" stroke="#2A2F38"/>
+  <polygon points="452,306 452,354 494,330" fill="#F4F5F7"/>
+  <circle cx="470" cy="330" r="44" fill="none" stroke="#E0312B" stroke-width="4"/>
+
+  <!-- sidebar image tiles -->
+  <rect x="810" y="150" width="320" height="110" rx="8" fill="url(#tile1)"/>
+  <rect x="810" y="275" width="320" height="110" rx="8" fill="url(#tile2)"/>
+  <rect x="810" y="400" width="320" height="110" rx="8" fill="url(#tile3)"/>
+
+  <!-- lower-third strap + ticker -->
+  <rect x="150" y="528" width="330" height="34" rx="6" fill="#E0312B"/>
+  <text x="168" y="551" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700" fill="#FFFFFF" letter-spacing="1">RENDERED ON YOUR GPU</text>
+  <rect x="150" y="570" width="980" height="30" rx="6" fill="#15181D" stroke="#2A2F38"/>
+  <text x="168" y="591" font-family="Consolas, monospace" font-size="14" fill="#F5C518" letter-spacing="2">LOCAL RENDER · YOUR KEYS · YOUR MACHINE · KAIZER X DESKTOP</text>
+
+  <!-- wordmark -->
+  <rect x="120" y="34" width="118" height="34" rx="6" fill="#E0312B"/>
+  <text x="136" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="800" fill="#FFFFFF" letter-spacing="3">KAIZER</text>
+  <text x="248" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="800" fill="#FF6B66">X</text>
+  <text x="278" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" fill="#9BA1AC" letter-spacing="4">DESKTOP</text>
+</svg>

@@ -69,6 +69,10 @@ export default function TemplatePreview({ template: t, onClose, onUse }) {
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent2/15 text-accent2 border border-accent2/40">
                   {cv[0] > cv[1] ? "Full form" : "Shorts"}
                 </span>
+                {t.format === "svg" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/80 text-white"
+                    title="SVG layout template (not builder-editable)">SVG</span>
+                )}
               </div>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none px-1">✕</button>

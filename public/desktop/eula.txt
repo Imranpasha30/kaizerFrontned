@@ -1,0 +1,231 @@
+KAIZER X DESKTOP
+END-USER LICENSE AGREEMENT
+
+Sharkify Private Limited
+Last updated: 22 August 2026
+
+PLEASE READ THIS AGREEMENT CAREFULLY BEFORE INSTALLING OR USING THE
+SOFTWARE. BY CLICKING "I AGREE", OR BY INSTALLING OR USING THE SOFTWARE,
+YOU ACCEPT THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT INSTALL OR USE
+THE SOFTWARE.
+
+This End-User License Agreement (the "Agreement") is a legal agreement
+between you (the person or organisation accepting it, "you") and
+Sharkify Private Limited, a company incorporated under the laws of India
+("Sharkify", "we", "us", "our"), for the Kaizer X Desktop application,
+including its installer, bundled components, updates, and documentation
+(together, the "Software").
+
+Kaizer X Desktop is video-production software: it helps you edit,
+assemble, and produce video content on your own computer.
+
+
+1. LICENSE GRANT
+
+1.1 Subject to this Agreement and to payment of the applicable fees,
+Sharkify grants you a personal, limited, non-exclusive,
+non-transferable, revocable license to install and use the Software for
+your own video-production work.
+
+1.2 Your license is per user. You may activate the Software on up to
+three (3) devices that you personally use. This device limit is
+enforced by our license server. If you want to use a new device, you
+can deactivate an old one first (see Section 4).
+
+1.3 You may not: (a) share your account or license with anyone else;
+(b) sell, rent, lease, sublicense, or transfer the Software or your
+license; (c) copy the Software except as needed to install and run it;
+(d) modify, decompile, disassemble, or reverse engineer the Software,
+or attempt to bypass its license checks, except to the extent such a
+restriction is not permitted by applicable law; or (e) use the Software
+to build a competing product.
+
+1.4 The Software is licensed, not sold. Sharkify and its licensors
+retain all rights in the Software that are not expressly granted to you
+in this Agreement. Third-party components distributed with the Software
+are governed by their own license terms.
+
+
+2. ACTIVATION AND TELEMETRY
+
+2.1 The Software must be activated with your Kaizer X account. During
+activation, the Software creates a machine fingerprint: an identifier
+derived from hardware and operating-system characteristics of your
+device. The fingerprint identifies the device only; it does not include
+your files, your projects, or the content you work on.
+
+2.2 After activation, the Software periodically contacts our license
+server to confirm that your license is still valid (a "heartbeat").
+
+2.3 The only information sent to Sharkify by activation and heartbeat
+checks is: (a) the machine fingerprint; (b) the timestamps of the
+checks; and (c) the account and license the checks belong to. The
+Software does not send your videos, images, audio, transcripts, project
+files, or AI provider keys to Sharkify.
+
+2.4 We use this information only to enforce license limits, prevent
+fraud, and keep your account secure, and we retain it only as long as
+needed for those purposes.
+
+
+3. OFFLINE USE
+
+3.1 You do not need a permanent internet connection. If the Software
+cannot reach the license server, it keeps working for up to 72 hours
+from the last successful license verification.
+
+3.2 If verification still cannot be completed after 72 hours, the
+Software will pause its editing features until it can verify your
+license again. Your projects and files stay on your computer and are
+never locked, altered, or deleted by the Software.
+
+
+4. REVOCATION AND DEVICE MANAGEMENT
+
+4.1 You can view your activated devices and deactivate any of them from
+the device-management screen inside the app. Deactivating a device
+frees a slot for another device.
+
+4.2 We may suspend or revoke your license, and deactivate your devices,
+if: (a) you materially breach this Agreement (for example, by sharing
+your license or tampering with license checks); or (b) a payment for
+the Software is charged back, reversed, or otherwise fails.
+
+4.3 Where reasonably possible, we will notify you and give you an
+opportunity to resolve the issue before revoking your license.
+
+
+5. YOUR OWN AI PROVIDER KEYS
+
+5.1 Some features of the Software use third-party artificial
+intelligence services (for example, language models, transcription, or
+image generation). These features run on YOUR OWN accounts and API keys
+with those providers. Sharkify does not resell those services and is
+not a party to your agreement with any AI provider.
+
+5.2 You are responsible for: (a) obtaining and safeguarding your own
+provider accounts and keys; (b) all fees your providers charge for your
+usage; and (c) complying with each provider's terms of service, usage
+policies, and applicable laws when using those services through the
+Software.
+
+5.3 Your provider keys are stored on your device and are used to call
+the providers directly from your device. They are not sent to Sharkify.
+
+5.4 AI providers may change, limit, or discontinue their services at
+any time. Sharkify is not responsible for the availability, quality,
+cost, or output of any third-party AI service.
+
+
+6. AI-GENERATED CONTENT
+
+6.1 As between you and Sharkify, you own the videos and other outputs
+you create with the Software, including outputs produced with AI
+features, to the extent permitted by applicable law and by the terms of
+the AI providers you use.
+
+6.2 You are solely responsible for the content you create and publish
+with the Software. In particular, you are responsible for: (a) making
+sure your use of the outputs is lawful; (b) obtaining any consents
+needed for content that depicts, imitates, or synthesises a real person
+- such as avatar or synthetic-voice content - including publicity and
+likeness rights; (c) complying with the rules and policies of any
+platform where you publish your content, including any requirement to
+label AI-generated or synthetic media; and (d) making sure you have the
+necessary rights to any source material (footage, images, music,
+scripts) that you bring into the Software.
+
+6.3 AI outputs can be inaccurate, and similar outputs may be generated
+for other users. Sharkify does not guarantee that outputs are unique,
+accurate, or free of third-party rights. Review your outputs before you
+publish them.
+
+
+7. LOCAL PROCESSING
+
+7.1 The Software processes your videos on your own machine. Your media
+files, projects, and rendered videos are not uploaded to Sharkify's
+servers. The only communication between the Software and Sharkify's
+servers is the license activation, verification, and update checking
+described in this Agreement.
+
+7.2 When you use AI features, the relevant content (for example, a
+prompt, a transcript, or an image) is sent from your device directly to
+the AI provider you configured - not to Sharkify. If you choose to
+export or share your content to a third-party platform, it is sent from
+your device directly to that platform.
+
+
+8. UPDATES
+
+8.1 The Software may check for, download, and install updates. Updates
+may add, change, or remove features. Some updates may be required for
+the Software to keep verifying your license or to keep working with
+third-party services.
+
+8.2 This Agreement applies to updates unless an update is accompanied
+by its own license terms, in which case those terms govern that update.
+
+
+9. WARRANTY DISCLAIMER AND LIMITATION OF LIABILITY
+
+9.1 The Software is provided "AS IS" and "AS AVAILABLE". To the maximum
+extent permitted by applicable law, Sharkify disclaims all warranties,
+whether express, implied, or statutory, including implied warranties of
+merchantability, fitness for a particular purpose, and
+non-infringement. Sharkify does not warrant that the Software will be
+error-free or uninterrupted, or that it will meet your requirements.
+
+9.2 To the maximum extent permitted by applicable law: (a) Sharkify
+will not be liable for any indirect, incidental, special,
+consequential, or punitive damages, or for lost profits, lost data, or
+lost content, even if advised of the possibility of such damages; and
+(b) Sharkify's total liability arising out of or relating to the
+Software or this Agreement will not exceed the total fees you actually
+paid to Sharkify for the Software in the twelve (12) months before the
+event giving rise to the claim.
+
+9.3 Nothing in this Agreement limits any liability that cannot be
+limited under applicable law, including any rights you may have under
+Indian consumer-protection law.
+
+
+10. TERM AND TERMINATION
+
+10.1 This Agreement takes effect when you accept it and continues until
+it is terminated as described in this Section.
+
+10.2 You may terminate this Agreement at any time by deactivating your
+devices and uninstalling the Software. Fees already paid are
+non-refundable except where required by law or by the terms of your
+purchase.
+
+10.3 We may terminate this Agreement if you materially breach it and,
+where the breach can be remedied, you do not remedy it within a
+reasonable time after we notify you. We may also terminate or revoke as
+described in Section 4.
+
+10.4 On termination, your license ends and you must stop using the
+Software and uninstall it. Your own projects, media, and outputs remain
+yours. Sections 5, 6, 9, 11, and any other terms that by their nature
+should survive, survive termination.
+
+
+11. GOVERNING LAW AND JURISDICTION
+
+11.1 This Agreement is governed by the laws of India, without regard to
+its conflict-of-laws rules.
+
+11.2 The courts at Hyderabad, Telangana, India have exclusive
+jurisdiction over any dispute arising out of or relating to this
+Agreement or the Software, and each party submits to that jurisdiction.
+
+
+12. CONTACT
+
+Sharkify Private Limited
+Hyderabad, Telangana, India
+Email: support@kaizerx.com
+
+If you have questions about this Agreement, your license, or your
+activated devices, please contact us at the address above.

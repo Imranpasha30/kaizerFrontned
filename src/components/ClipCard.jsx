@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Edit2, Film, Download, Youtube, Sparkles } from "lucide-react";
-import { api } from "../api/client";
+import { api, isDesktop } from "../api/client";
 import PublishModal from "./PublishModal";
 import DownloadModal from "./DownloadModal";
 
@@ -105,7 +105,8 @@ export default function ClipCard({ clip, jobId, index }) {
             <span className="truncate">Edit</span>
             {hasSeo && <Sparkles size={10} className="text-accent2 shrink-0" />}
           </Link>
-          {videoUrl && (
+          {/* Desktop app renders locally — no publishing in v1. */}
+          {videoUrl && !isDesktop() && (
             <button
               type="button"
               onClick={() => setShowPublish(true)}

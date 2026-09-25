@@ -1,7 +1,14 @@
 // In production VITE_API_URL = https://your-backend.railway.app
 // In dev, empty string → Vite proxy handles /api → localhost:8000
-const ORIGIN = import.meta.env.VITE_API_URL || "";
+// The desktop shell injects window.__KAIZER_API__ (the local backend's
+// origin) — prefer it when set; web builds behave exactly as before.
+const ORIGIN = (typeof window !== "undefined" && window.__KAIZER_API__) || import.meta.env.VITE_API_URL || "";
 const BASE   = `${ORIGIN}/api`;
+
+// True when the SPA is running inside the Kaizer X Desktop shell (the shell
+// injects window.kaizerDesktop). Used to hide publish/channel features —
+// desktop v1 renders locally and does not publish.
+export const isDesktop = () => typeof window !== "undefined" && !!window.kaizerDesktop;
 
 // JWT storage — kept in localStorage so refreshes persist the session.
 const TOKEN_KEY = "kaizer_jwt";
@@ -46,8 +53,24 @@ async function req(method, path, body, isForm = false) {
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     }
     const err = await res.json().catch(() => ({}));
-    // FastAPI puts the message in `detail`; fall back to `error` / statusText
-    throw new Error(err.detail || err.error || res.statusText);
+    // FastAPI puts the message in `detail`. It can be a plain string OR a
+    // structured object (e.g. {code, message, balance, needed}); extract a
+    // readable string either way so the UI never shows "[object Object]".
+    let detail = err.detail ?? err.error;
+    if (detail && typeof detail === "object") {
+      detail = detail.message || detail.msg || detail.detail
+        || (detail.code ? String(detail.code) : "")
+        || JSON.stringify(detail);
+    }
+    // res.statusText is ALWAYS "" over HTTP/2, which is how this site is
+    // served, and `detail` is undefined whenever the response is not JSON --
+    // an edge timeout page, a 502 from a proxy, a dropped connection. Without
+    // the status code the Error carries an empty message and every caller
+    // shows its own generic fallback instead of the actual problem.
+    const e = new Error(detail || res.statusText || `HTTP ${res.status}`);
+    e.status = res.status;
+    e.detail = err.detail;   // keep the raw detail so callers can read code/balance
+    throw e;
   }
   if (res.status === 204) return null;
   return res.json();
@@ -58,6 +81,12 @@ export const api = {
   authConfig:   ()              => req("GET",  "/auth/config"),
   register:     (payload)       => req("POST", "/auth/register", payload),
   login:        (payload)       => req("POST", "/auth/login",    payload),
+
+  // Sign in with a code emailed to you. No password. The request call
+  // answers the same way whatever the address is, so nothing here can be
+  // used to find out who has an account.
+  requestLoginCode: (email)        => req("POST", "/auth/login-code/request", { email }),
+  verifyLoginCode:  (email, code)  => req("POST", "/auth/login-code/verify",  { email, code }),
   googleLogin:  (credential)    => req("POST", "/auth/google",   { credential }),
   me:           ()              => req("GET",  "/auth/me"),
   logout:       ()              => req("POST", "/auth/logout"),
@@ -79,6 +108,10 @@ export const api = {
 
   // ── Custom (developer-uploaded) HTML/CSS templates ──
   listTemplates:      (opts)     => req("GET",    `/templates/${opts && opts.kind ? `?kind=${encodeURIComponent(opts.kind)}` : ""}`),
+  // Built-in DESIGNED layouts (layout library, renderable subset).
+  layoutLibrary:      ()         => req("GET",    "/templates/library"),
+  // Fork a designed layout into the user's own editable custom template.
+  forkLibraryLayout:  (key)      => req("POST",   `/templates/library/${encodeURIComponent(key)}/fork`),
   patchTemplate:      (id, body) => req("PATCH",  `/templates/${id}`, body),
   rateTemplate:       (id, stars)=> req("POST",   `/templates/${id}/rate`, { stars }),
   deleteTemplate:     (id)       => req("DELETE", `/templates/${id}`),
@@ -231,9 +264,21 @@ export const api = {
   // Idempotent — calling on an already-terminal job returns the
   // current status with {already_final: true}.
   cancelJob:     (id)         => req("POST",   `/jobs/${id}/cancel/`),
+  // Queue controls (single-GPU box → one render at a time). Pause HOLDS a
+  // queued job so it won't run when its turn comes; resume re-queues it.
+  // Retry re-runs a finished/failed/cancelled job from its saved settings
+  // WITHOUT re-uploading. All POST, no body.
+  pauseJob:      (id)         => req("POST",   `/jobs/${id}/pause/`),
+  resumeJob:     (id)         => req("POST",   `/jobs/${id}/resume/`),
+  retryJob:      (id)         => req("POST",   `/jobs/${id}/retry/`),
 
   // Phase 14 / V2 Beta (D-13.14 + D-13.13 + D-13.12).
   renameJob:     (id, name)             => req("PATCH", `/jobs/${id}/rename/`,   { name }),
+  // What the render decided for you, and what it will do if you ignore it.
+  // Nothing here blocks a job: every question already shipped its default.
+  getJobQuestions: (id)          => req("GET",  `/v4/jobs/${id}/questions`),
+  saveJobAnswers:  (id, answers) => req("POST", `/v4/jobs/${id}/answers`, { answers }),
+
   submitJobFeedback: (id, rating, comment = "") =>
                                             req("POST",  `/jobs/${id}/feedback/`, { rating, comment }),
   getV2UserStats: ()                    => req("GET",   "/v2/stats/"),
@@ -293,11 +338,12 @@ export const api = {
   // re-render (skips Gemini analysis + OpenAI gen via on-disk caches).
   listBulletinImages: (jobId) =>
     req("GET", `/jobs/${jobId}/bulletin-images`),
-  replaceBulletinImage: (jobId, storyIndex, slotIndex, imageFile) => {
+  replaceBulletinImage: (jobId, storyIndex, slotIndex, imageFile, label = "") => {
     const fd = new FormData();
     fd.append("story_index", String(storyIndex));
     fd.append("slot_index",  String(slotIndex));
     fd.append("image",       imageFile);
+    if (label && label.trim()) fd.append("label", label.trim());  // name-tag contract
     return req("POST", `/jobs/${jobId}/bulletin-images/replace`, fd, true);
   },
   recomposeBulletin: (jobId, { scope = "auto", verify = false } = {}) => {
@@ -430,6 +476,10 @@ export const api = {
 
   // Publish / Uploads (phase 5)
   publishClip:    (clipId, payload) => req("POST",   `/clips/${clipId}/publish`, payload),
+  // Stage a custom thumbnail for a clip → returns { key, url } without mutating
+  // the clip. Used by the publish panel for shared OR per-channel thumbnails.
+  // form = FormData with field "image" (jpg/png ≤4MB).
+  stageThumbnail: (clipId, form)    => req("POST",   `/clips/${clipId}/thumbnail/stage`, form, true),
   // Which of these clips are already published, per channel — lets the
   // bulk modal badge + auto-deselect channels that already have them.
   clipsPublishedStatus: (clipIds)  => req("POST",   `/clips/published-status`, { clip_ids: clipIds }),
@@ -565,10 +615,14 @@ export const api = {
     const s = q.toString();
     return req("GET", `/trending/topics${s ? "?" + s : ""}`);
   },
-  refreshTrending:  (sinceHours)         => req(
-    "POST",
-    sinceHours ? `/trending/refresh?since_hours=${sinceHours}` : "/trending/refresh",
-  ),
+  refreshTrending:  (sinceHours, provider) => {
+    const q = new URLSearchParams();
+    if (sinceHours) q.set("since_hours", sinceHours);
+    if (provider)   q.set("provider", provider);
+    const s = q.toString();
+    return req("POST", `/trending/refresh${s ? "?" + s : ""}`);
+  },
+  trendingSweepStatus: () => req("GET", "/trending/refresh-status"),
   markTopicUsed:    (topicId, jobId)     => req("POST",   `/trending/topics/${topicId}/use?job_id=${jobId}`),
   deleteTopic:      (id)                 => req("DELETE", `/trending/topics/${id}`),
   // ── HeyGen avatar generation from a trending topic ─────────────
@@ -580,6 +634,61 @@ export const api = {
   heygenGenerateFromTopic:
     (topicId, payload)          => req("POST", `/heygen/generate-from-topic/${topicId}`, payload),
   heygenStatus:         (topicId) => req("GET", `/heygen/status/${topicId}`),
+
+  // ── News-Anchor studio (provider-agnostic /api/avatar) ─────────────
+  // Backend contract = routers/avatar.py (ported from kaizer-platform).
+  // provider null/"" -> the backend's default engine. Generate returns
+  // {key}; poll avatarStatus(key) every ~3s until state done|error.
+  avatarProviders:  ()          => req("GET", "/avatar/providers"),
+  avatarAvatars:    (provider)  =>
+    req("GET", `/avatar/avatars${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`),
+  avatarVoices:     (provider, language) => {
+    const q = new URLSearchParams();
+    if (provider) q.set("provider", provider);
+    if (language) q.set("language", language);
+    const s = q.toString();
+    return req("GET", `/avatar/voices${s ? "?" + s : ""}`);
+  },
+  // URL of one voice's reference audio (WAV; 404 when the provider has no
+  // sample). The endpoint is header-authenticated, so callers fetch it with
+  // the JWT and play the resulting blob (see AnchorStudio) instead of
+  // pointing a bare <audio src> at it.
+  avatarVoiceSampleUrl: (voiceId, provider) =>
+    `${BASE}/avatar/voices/${encodeURIComponent(voiceId)}/sample${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
+  // Presenter thumbnail (header-authenticated like the voice sample —
+  // fetch with the JWT and render the blob, not a bare <img src>).
+  avatarPreviewUrl: (avatarId, provider) =>
+    `${BASE}/avatar/avatars/${encodeURIComponent(avatarId)}/preview${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
+  // body: {script, avatar_id, voice_id, language, platform, provider?}
+  avatarGenerate:   (body)      => req("POST", "/avatar/generate", body),
+  avatarStatus:     (key)       => req("GET", `/avatar/status/${encodeURIComponent(key)}`),
+  avatarActive:     ()          => req("GET", "/avatar/active"),
+
+  // ── Podcast editor (AI multi-cam, /api/podcast) ────────────────────
+  // Backend contract = routers/podcast.py. Create is multipart (podcast
+  // sources are multi-GB, so XHR + upload progress like uploadTemplate):
+  // fields = video file OR asset_id, plus transcript_json? / stt_provider? /
+  // language? / silence_threshold_ms / renderer?. Returns {status, key,
+  // renderer}; poll podcastStatus(key) every ~3s until state done|error,
+  // then podcastResults(key) for the edit + promos + telemetry payload.
+  podcastCreate: (form, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/podcast/jobs`);
+    const _tok = getToken();
+    if (_tok) xhr.setRequestHeader("Authorization", `Bearer ${_tok}`);
+    if (onProgress) xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText || "{}"));
+      else { try { reject(new Error(JSON.parse(xhr.responseText).detail || xhr.statusText)); }
+             catch { reject(new Error(xhr.statusText || "Upload failed")); } }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.send(form);
+  }),
+  podcastStatus:  (key) => req("GET", `/podcast/jobs/${encodeURIComponent(key)}`),
+  podcastResults: (key) => req("GET", `/podcast/jobs/${encodeURIComponent(key)}/results`),
 
   // ── Live Studio (bulk RTMP-live publishing) ───────────────────
   // Multi-video × multi-channel batches. Each LiveStream row tracks
@@ -603,6 +712,9 @@ export const api = {
   v4DeletePoolImage:   (jobId, fn)    => req("DELETE", `/v4/jobs/${jobId}/pool/${encodeURIComponent(fn)}`),
   v4TriggerRender:     (jobId, body)  => req("POST", `/v4/jobs/${jobId}/render`, body),
   v4RenderState:       (jobId)        => req("GET",  `/v4/jobs/${jobId}/render/state`),
+  // Catalog of broadcast graphics (overlays / HUD) + their editable text
+  // fields — for the per-story "News graphics" editor (change text / which one).
+  v4OverlayCatalog:    ()            => req("GET",  `/v4/overlay-catalog`),
   // Custom-template editor: get edit context (per-slot text/media + switchable templates)
   // and save edits (text overrides / media / switch template). Re-render after saving.
   v4GetCustomTemplate: (jobId, target = "bulletin", index = 0) =>
@@ -616,7 +728,36 @@ export const api = {
   v4SaveJobCustomHtml: (jobId, body)  => req("POST", `/v4/jobs/${jobId}/custom-html`, body),
   v4FetchPoolImage:    (jobId, body)  => req("POST", `/v4/jobs/${jobId}/pool/fetch`, body),
   v4AiGenImage:        (jobId, body)  => req("POST", `/v4/jobs/${jobId}/pool/ai-generate`, body),
+  // The AI Director's decision trail (sensors, per-story choices + WHY,
+  // self-review) — powers the job page's Director-decisions debug view.
+  v4DirectorTrace:     (jobId)        => req("GET", `/v4/jobs/${jobId}/director-trace`),
   v4AutoDistribute:    (jobId, body)  => req("POST", `/v4/jobs/${jobId}/bulletin/auto-distribute`, body),
+  // Image↔speech sync: re-run the timing engine over the bulletin's images
+  // (labels + word timestamps). story_index null = every story.
+  v4ResyncImageTimings:(jobId, storyIndex = null) =>
+    req("POST", `/v4/jobs/${jobId}/bulletin/resync-timings`, { story_index: storyIndex }),
+  // Movie-style trailer of the job (dramatic moments + cards + SFX).
+  // aspect: "16:9" | "9:16"; style: "auto" or a pack key (news/crime/
+  // horror/… — see v4TrailerStyles). Background render; poll state.
+  v4CreateTrailer:     (jobId, aspect = "16:9", style = "auto", structure = "classic") =>
+    req("POST", `/v4/jobs/${jobId}/trailer`, { aspect, style, structure }),
+  v4TrailerState:      (jobId) => req("GET", `/v4/jobs/${jobId}/trailer/state`),
+  v4TrailerStyles:     () => req("GET", `/v4/trailer/styles`),
+  // User-composed style packs (private per user; admin sees all).
+  listStylePacks:      ()     => req("GET",    "/style-packs"),
+  createStylePack:     (body) => req("POST",   "/style-packs", body),
+  deleteStylePack:     (id)   => req("DELETE", `/style-packs/${id}`),
+  adminUserCreations:  ()     => req("GET",    "/style-packs/admin/user-creations"),
+  // Admin: full editing-engine catalog + on-demand dummy previews.
+  adminEditingFeatures:        () => req("GET", `/admin/editing-features`),
+  adminEditingFeaturePreview:  (kind, id) =>
+    req("GET", `/admin/editing-features/preview?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`),
+  // User: the style-picker catalog + on-demand previews. Lets a user DIRECT
+  // the AI Director per category ("edit using THESE") at job creation.
+  styleCatalog:        (directableOnly = true) =>
+    req("GET", `/v4/style-catalog${directableOnly ? "?directable_only=1" : ""}`),
+  stylePreview:        (kind, id) =>
+    req("GET", `/v4/style-catalog/preview?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`),
   v4ListBgSamples:     ()             => req("GET",  `/v4/bg-samples`),
   // List user-uploaded bg videos (reuses the global assets system; we
   // just filter by folder_path so only v4 bg uploads come back).
@@ -663,6 +804,27 @@ export const api = {
   // can be used as a per-job intro by id. Body: {filename, folder_path, kind}.
   importSampleAsset:   (filename, folder_path = "job_intros", kind = "video") =>
     req("POST", `/assets/import-sample`, { filename, folder_path, kind }),
+  // Upload a REFERENCE video clip (B-roll) the AI can cut to full-screen.
+  // Stored in the user-assets pool with the subject as its description — the
+  // name-tag the timing AI matches against the spoken words. Returns the
+  // created asset {id, ...}. Select it as a job "reference clip" (it rides the
+  // bulletin_image_ids field) and the render turns it into an AI-timed cutaway.
+  uploadReferenceClip: async (file, description = "") => {
+    const tok = getToken();
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("kind", "video");
+    fd.append("folder_path", "reference_clips");
+    fd.append("description", (description || "").slice(0, 200));
+    const headers = {};
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+    const res = await fetch(`${BASE}/assets/upload`, { method: "POST", headers, body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `reference clip upload ${res.status}`);
+    }
+    return res.json();
+  },
   // ── Meta (Facebook + Instagram) OAuth + publishing ─────────────
   metaConfig:          ()             => req("GET", `/meta/oauth/config`),
   metaStartOAuth:      ()             => req("GET", `/meta/oauth/start`),
@@ -684,6 +846,34 @@ export const api = {
   // Per-channel SEO learning for the channel-wise Insights tab: what the
   // feedback loop has learnt per channel (winning keywords, signal, status).
   seoLearning:         ()             => req("GET", "/performance/seo-learning"),
+  // REAL learning curves: per-day vph/CTR of published videos + snapshot
+  // timeline for a channel (7/30/90d windows) — powers the graphs.
+  seoLearningCurves:   (channelId, days = 30) =>
+    req("GET", `/performance/seo-learning/curves?channel_id=${channelId}&days=${days}`),
+  // Best-time-to-post report: measured upload-hour + weekday performance
+  // (avg views/hour + real CTR + sample counts, IST) + a recommendation.
+  // days = 30 | 90 | 3650 (all-time, default).
+  seoLearningBestTimes: (channelId, days = 3650) =>
+    req("GET", `/performance/seo-learning/best-times?channel_id=${channelId}&days=${days}`),
+  // Week-by-week measured rollup (published + avg vph + CTR + WoW %) — the
+  // multi-week view behind the single uplift chip.
+  seoLearningWeeklyUplift: (channelId, weeks = 8) =>
+    req("GET", `/performance/seo-learning/weekly-uplift?channel_id=${channelId}&weeks=${weeks}`),
+  // Learn NOW: poll fresh stats + ingest real thumbnail CTR + recompute
+  // the policy snapshots the generator reads.
+  seoLearningRelearn:  (channelId)    =>
+    req("POST", `/performance/seo-learning/relearn${channelId ? `?channel_id=${channelId}` : ""}`),
+  // Server-side relearn state — survives navigating away and back.
+  seoLearningRelearnStatus: (channelId) =>
+    req("GET", `/performance/seo-learning/relearn-status?channel_id=${channelId}`),
+  // Competitor intelligence (public data): tracked rivals + learned formula.
+  competitorsList:     ()             => req("GET", "/performance/competitors"),
+  competitorLearn:     (compId)       => req("POST", `/performance/competitors/${compId}/learn`),
+  competitorToggle:    (channelId, enabled) =>
+    req("POST", `/performance/seo-learning/competitor-toggle?channel_id=${channelId}&enabled=${enabled}`),
+  // User-level SEO writer engine: gemini | claude (Claude auto-falls back
+  // to Gemini on failure at generation time).
+  seoEngineSet:        (engine)       => req("POST", `/performance/seo-engine?engine=${engine}`),
   // Per-channel SEO preview for a job: exact title/desc/tags per channel + why.
   v4PerChannelSeoPreview: (jobId, mode = "per_channel", target = "bulletin", index = 0, generate = false) =>
     req("GET", `/v4/jobs/${jobId}/seo/per-channel-preview?mode=${encodeURIComponent(mode)}&target=${encodeURIComponent(target)}&index=${index}&generate=${generate ? 1 : 0}`),
@@ -925,11 +1115,14 @@ export const api = {
 
   // AI-generate an image from a prompt and save it as a user asset (job-agnostic) — returns
   // the asset dict (id + url), usable in a template slot just like an upload.
+  // body: {story, note?} — note = the user's own words guiding this specific image;
+  // omitted = AI decides from the story/video.
   aiGenerateAsset: (body) => req("POST", "/assets/ai-generate", body),
 
   // AI-generate a STORY-DRIVEN SEQUENCE of distinct images (one per visual beat) and save each
-  // as a user asset — for a carousel/slideshow. body: {story, count?, language?, width?, height?}.
-  // count omitted = the planner decides how many the story needs. Returns {assets:[…], count}.
+  // as a user asset — for a carousel/slideshow. body: {story, count?, note?, language?, width?, height?}.
+  // count omitted = the planner decides how many the story needs; note = optional user guidance
+  // applied to the whole sequence. Returns {assets:[…], count}.
   aiGenerateBatch: (body) => req("POST", "/assets/ai-generate-batch", body),
 
   // Insights / Trend Finder — channel root-cause analyzer.
@@ -1084,6 +1277,16 @@ export const api = {
       xhr.onerror = () => reject(new Error("SEO download failed — network error"));
       xhr.send();
     }),
+
+  // ── Desktop app only (local backend) — AI provider keys + readiness ──
+  // These MUST live on `api`: DesktopSettings.jsx calls api.desktopGetKeys.
+  // They historically sat only inside adminApi below, so every build shipped
+  // an `api` object without them and the AI Providers panel failed with
+  // "api.desktopGetKeys is not a function" at runtime — the member simply
+  // never existed here. Kept in adminApi too so no other caller moves.
+  desktopGetKeys:   ()     => req("GET",  "/desktop-local/keys"),
+  desktopSaveKeys:  (body) => req("POST", "/desktop-local/keys", body),
+  desktopPreflight: ()     => req("GET",  "/desktop-local/preflight"),
 };
 
 // ── Phase 12 — Admin panel ──────────────────────────────────────────────────
@@ -1093,6 +1296,18 @@ export const adminApi = {
     req("GET", `/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
   getUser:      (id)                        => req("GET",  `/admin/users/${id}`),
   toggleAdmin:  (id)                        => req("POST", `/admin/users/${id}/toggle-admin`),
+  // ── Super Admin: desktop account requests + managed key bundles ──
+  accountRequests:      (status = "pending") => req("GET",  `/admin/account-requests?status=${status}`),
+  decideAccountRequest: (id, action)         => req("POST", `/admin/account-requests/${id}/${action}`),
+  managedKeys:          (userId)             => req("GET",  `/admin/managed-keys${userId ? `?user_id=${userId}` : ""}`),
+  setManagedKey:        (payload)            => req("PUT",  "/admin/managed-keys", payload),
+  // Per-user Google key minting + usage/billing.
+  mintUserKeys:         (id)                 => req("POST", `/admin/users/${id}/mint-keys`),
+  revokeUserKeys:       (id)                 => req("POST", `/admin/users/${id}/revoke-keys`),
+  mintedKeys:           (id)                 => req("GET",  `/admin/users/${id}/minted-keys`),
+  usage:                (days = 7, refresh)  => req("GET",  `/admin/usage?days=${days}${refresh ? "&refresh=1" : ""}`),
+  billingRates:         ()                   => req("GET",  "/admin/billing-rates"),
+  setBillingRates:      (rates)              => req("PUT",  "/admin/billing-rates", { rates }),
   listJobs:     (filters = {}) => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([k, v]) => {
@@ -1186,6 +1401,8 @@ export const adminApi = {
   // ── Plan tiers (subscription parameters) ──────────────────────────────
   // Edits take effect on the user's next publish/claim — every enforcement
   // site reads the PlanTier row live (no restart needed).
+  adminDesktopLicenses:      ()   => req("GET",  "/desktop/admin/licenses"),
+  adminRevokeDesktopLicense: (id) => req("POST", `/desktop/admin/licenses/${id}/revoke`),
   listPlanTiers:  ()            => req("GET",   "/admin/plan-tiers"),
   updatePlanTier: (id, payload) => req("PATCH", `/admin/plan-tiers/${id}`, payload),
   // Put a user on a tier. body: { plan_tier_id }
@@ -1216,6 +1433,14 @@ export const adminApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+
+  // ── Desktop app only (local backend) — AI provider keys + readiness ──
+  // The desktop backend stores the user's own AI keys on their machine.
+  // GET returns masked keys (never the full secret); POST saves new ones.
+  // Preflight reports per-feature readiness in plain language.
+  desktopGetKeys:   ()     => req("GET",  "/desktop-local/keys"),
+  desktopSaveKeys:  (body) => req("POST", "/desktop-local/keys", body),
+  desktopPreflight: ()     => req("GET",  "/desktop-local/preflight"),
 };
 
 // ── Wave 2 — editor beta ────────────────────────────────────────────────────

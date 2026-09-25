@@ -34,8 +34,11 @@ export default function CustomTemplatePicker({ selectedKey, onSelect, browseMode
   // Refetch when the required kind changes (e.g. user switches Short ↔ Full video).
   useEffect(() => { reload(); }, [kind]);
 
-  const mine = items.filter((t) => t.mine);
-  const community = items.filter((t) => !t.mine);
+  // First-party curated designs (is_builtin) get their own group ABOVE the
+  // user's creations — they're the platform's templates, not "user creations".
+  const builtin = items.filter((t) => t.is_builtin);
+  const mine = items.filter((t) => t.mine && !t.is_builtin);
+  const community = items.filter((t) => !t.mine && !t.is_builtin);
 
   // Showcase (Library browse) = Pinterest-style MASONRY so mixed 16:9 / 9:16 / 1:1 / 4:5
   // template previews pack by height instead of leaving ragged gaps in a uniform grid.
@@ -84,6 +87,10 @@ export default function CustomTemplatePicker({ selectedKey, onSelect, browseMode
               ? "bg-indigo-600/80 text-white" : "bg-pink-600/80 text-white"}`}>
               {t.kind === "full" ? "FULL" : "SHORT"}
             </span>
+            {t.format === "svg" && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 bg-violet-600/80 text-white"
+                title="SVG layout template (not builder-editable)">SVG</span>
+            )}
             <div className="text-sm text-white font-medium truncate">{t.name}</div>
           </div>
           <div className="text-[11px] text-gray-400 mt-0.5">
@@ -93,15 +100,22 @@ export default function CustomTemplatePicker({ selectedKey, onSelect, browseMode
           </div>
           {invalid && <div className="text-[11px] text-red-400 mt-0.5">⚠ no video slot</div>}
         </div>
-        {/* visibility badge */}
-        <span className={`absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded font-semibold
-          ${t.visibility === "public" ? "bg-emerald-600/90 text-white" : "bg-gray-900/80 text-gray-300"}`}>
-          {t.visibility === "public" ? "Public" : "Private"}
-        </span>
-        {t.mine && (
+        {/* badge: built-in (first-party) vs public/private */}
+        {t.is_builtin ? (
+          <span className="absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded font-semibold
+            bg-amber-500/90 text-black">Built-in</span>
+        ) : (
+          <span className={`absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0.5 rounded font-semibold
+            ${t.visibility === "public" ? "bg-emerald-600/90 text-white" : "bg-gray-900/80 text-gray-300"}`}>
+            {t.visibility === "public" ? "Public" : "Private"}
+          </span>
+        )}
+        {t.mine && !t.is_builtin && (
           <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+            {t.format !== "svg" && (
             <span onClick={(e) => { e.stopPropagation(); window.open(`/builder/${t.id}`, "_blank"); }} title="Edit in the visual builder"
               className="text-[10px] px-1.5 py-0.5 rounded bg-teal-600/90 text-white cursor-pointer">✎ Edit</span>
+            )}
             <span onClick={(e) => toggleVisibility(t, e)} title="Toggle public/private"
               className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/90 text-white cursor-pointer">
               {t.visibility === "public" ? "Make private" : "Publish"}
@@ -156,6 +170,17 @@ export default function CustomTemplatePicker({ selectedKey, onSelect, browseMode
         <div className="text-gray-500 text-sm">Loading…</div>
       ) : (
         <>
+          {builtin.length > 0 && (
+            <>
+              <div className="text-amber-300/90 text-xs mb-2 uppercase tracking-wide">
+                Built-in templates <span className="text-gray-500 normal-case">— polished first-party designs</span>
+              </div>
+              <div className={`${gridCls} mb-5`}>
+                {builtin.map((t) => <Card key={t.id} t={t} />)}
+              </div>
+              <div className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Your templates</div>
+            </>
+          )}
           <div className={gridCls}>
             <BuildTile />
             <UploadTile />
@@ -214,7 +239,18 @@ export default function CustomTemplatePicker({ selectedKey, onSelect, browseMode
 // output aspect (falls back to a 9:16 short).
 function parseCanvas(html) {
   const m = /kaizer:canvas[^>]*content=["']?\s*(\d{2,5})\s*[x×]\s*(\d{2,5})/i.exec(html || "");
-  return m ? { w: +m[1], h: +m[2] } : { w: 1080, h: 1920 };
+  if (m) return { w: +m[1], h: +m[2] };
+  // SVG layout: read the viewBox (else width/height attrs) so the pre-upload
+  // preview shows the real aspect — the backend derives kind the same way.
+  const src = String(html || "");
+  if (/^\s*(<\?xml[^>]*\?>\s*)?(<!--[\s\S]*?-->\s*|<!doctype[^>]*>\s*)*<svg/i.test(src)) {
+    const vb = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(src);
+    if (vb && +vb[1] > 0 && +vb[2] > 0) return { w: +vb[1], h: +vb[2] };
+    const wm = /<svg[^>]*\swidth\s*=\s*["']?(\d+)/i.exec(src);
+    const hm = /<svg[^>]*\sheight\s*=\s*["']?(\d+)/i.exec(src);
+    if (wm && hm && +wm[1] > 0 && +hm[1] > 0) return { w: +wm[1], h: +hm[1] };
+  }
+  return { w: 1080, h: 1920 };
 }
 
 /** A safe, scaled-down live preview of the template HTML, rendered in a fully sandboxed
@@ -248,10 +284,10 @@ function UploadModal({ onClose, onUploaded, onShowGuide, expectKind }) {
   const [review, setReview] = useState(null);   // {res, warnings} held so the user sees the slot check
   const inputRef = useRef(null);
 
-  // Choosing a file: if it's a single .html, read it so we can preview it before upload.
+  // Choosing a file: if it's a single .html / .svg, read it so we can preview it before upload.
   function onPickFile(f) {
     setFile(f); setFilePreview(""); setErr("");
-    if (f && /\.html?$/i.test(f.name)) {
+    if (f && /\.(html?|svg)$/i.test(f.name)) {
       const r = new FileReader();
       r.onload = () => setFilePreview(String(r.result || ""));
       r.readAsText(f);
@@ -272,7 +308,7 @@ function UploadModal({ onClose, onUploaded, onShowGuide, expectKind }) {
       fd.append("name", name || "Pasted template");
     } else {
       fd.append("file", file);
-      fd.append("name", name || file.name.replace(/\.(zip|html?)$/i, ""));
+      fd.append("name", name || file.name.replace(/\.(zip|html?|svg)$/i, ""));
     }
     fd.append("visibility", visibility);
     if (whenUse.trim()) fd.append("when_to_use", whenUse.trim());
@@ -327,7 +363,9 @@ function UploadModal({ onClose, onUploaded, onShowGuide, expectKind }) {
           <div>
             <h3 className="text-white font-semibold text-lg">Add a template</h3>
             <p className="text-gray-400 text-xs mt-1">
-              Upload a file or paste your HTML. Mark slots with <code>data-kaizer="video|headline|…"</code>.{" "}
+              Upload a file or paste your HTML — or an <b>SVG layout</b> (mark slots with{" "}
+              <code>id="video-slot"</code> / <code>data-kaizer-slot="video"</code>).
+              For HTML, mark slots with <code>data-kaizer="video|headline|…"</code>.{" "}
               <button type="button" onClick={onShowGuide}
                  className="text-teal-400 hover:underline">See the rules</button>.
             </p>
@@ -349,7 +387,7 @@ function UploadModal({ onClose, onUploaded, onShowGuide, expectKind }) {
             For a <b>{expectKind === "full" ? "full-form video" : "short"}</b>, set
             <code className="mx-1">{`<meta name="kaizer:canvas" content="${expectKind === "full" ? "1920x1080" : "1080x1920"}">`}</code>
             — the kind is detected from the canvas, so a {expectKind === "full" ? "portrait" : "landscape"} template
-            won't be usable here.
+            won't be usable here. (For an <b>SVG</b> layout the kind comes from its <code>viewBox</code> aspect instead.)
           </p>
         )}
 
@@ -362,20 +400,21 @@ function UploadModal({ onClose, onUploaded, onShowGuide, expectKind }) {
                   p-6 text-center cursor-pointer">
                 <div className="text-2xl">📦</div>
                 <div className="text-sm text-gray-300 mt-1">
-                  {file ? <span className="text-teal-300 font-medium">{file.name}</span> : "Click to choose a .zip / .html"}
+                  {file ? <span className="text-teal-300 font-medium">{file.name}</span> : "Click to choose a .zip / .html / .svg"}
                 </div>
-                <input ref={inputRef} type="file" accept=".zip,.html,.htm" className="hidden"
+                <input ref={inputRef} type="file" accept=".zip,.html,.htm,.svg" className="hidden"
                        onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
               </div>
             ) : (
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Paste your template HTML</label>
+                <label className="block text-xs text-gray-400 mb-1">Paste your template HTML (or a standalone SVG layout)</label>
                 <textarea value={code} onChange={(e) => setCode(e.target.value)} rows={12} spellCheck={false}
                   placeholder={'<!DOCTYPE html>\n<html>\n  <head><meta name="kaizer:canvas" content="1080x1920"></head>\n  <body> … your design with data-kaizer slots … </body>\n</html>'}
                   className="w-full bg-[#0d1119] border border-gray-700 rounded-lg px-3 py-2 text-white
                              text-[12px] font-mono resize-y leading-relaxed" />
                 <p className="text-[11px] text-gray-500 mt-1">
                   HTML + CSS only (JS &amp; external links are stripped). For bundled gifs/fonts, upload a .zip instead.
+                  A pasted <b>SVG</b> is detected automatically and needs a <code>video-slot</code> marked element.
                 </p>
               </div>
             )}

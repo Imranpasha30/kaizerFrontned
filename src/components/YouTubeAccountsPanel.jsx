@@ -3,7 +3,7 @@ import {
   Youtube, Plus, CheckCircle2, Loader2, RefreshCw, AlertCircle, Users,
   Image as ImageIcon, X, Unlink, Trash2, Copy,
 } from "lucide-react";
-import { api } from "../api/client";
+import { api, isDesktop } from "../api/client";
 import LogoPicker from "./LogoPicker";
 
 /**
@@ -350,6 +350,39 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
     try {
       setConnecting(true);
       const { auth_url } = await api.newYtAccount();
+      // Desktop shell: Google BLOCKS OAuth consent inside embedded windows —
+      // open the SYSTEM browser via the shell bridge instead. No postMessage
+      // comes back from an external browser, so completion is detected by
+      // polling the account list until a new row lands (~3 min budget).
+      const _ext = typeof window !== "undefined"
+        && window.kaizerDesktop && window.kaizerDesktop.openExternal;
+      if (isDesktop() && _ext) {
+        window.kaizerDesktop.openExternal(auth_url);
+        setNotice("Finish the Google sign-in in your browser — this list "
+                  + "updates automatically once the channel connects.");
+        const before = (accounts || []).length;
+        let ticks = 0;
+        const timer = setInterval(async () => {
+          ticks += 1;
+          try {
+            const rows = (await api.listYtAccounts()) || [];
+            if (rows.length > before) {
+              clearInterval(timer);
+              setConnecting(false);
+              setNotice("YouTube account connected.");
+              setError("");
+              load();
+              onRefresh?.();
+              return;
+            }
+          } catch {}
+          if (ticks >= 60) {
+            clearInterval(timer);
+            setConnecting(false);
+          }
+        }, 3000);
+        return;
+      }
       const w = window.open(
         auth_url,
         "kaizer_yt_new_account",
@@ -706,11 +739,11 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
       {/* Brand stamp + per-account socials modal */}
       {brandAcc && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 overflow-y-auto py-6"
+          className="fixed inset-0 z-50 flex bg-black/60 px-3 overflow-y-auto py-6"
           onClick={closeBrandEditor}
         >
           <div
-            className="bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
+            className="m-auto bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
@@ -753,12 +786,23 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                   <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-video rounded border border-border bg-black">
                     <defs>
                       <linearGradient id="ytapvid" x1="0" y1="0" x2="1" y2="1">
-                        <stop offset="0%" stopColor="#1a1a1a" />
-                        <stop offset="100%" stopColor="#2a2a2a" />
+                        <stop offset="0%" stopColor="#3d4f66" />
+                        <stop offset="55%" stopColor="#2e3d52" />
+                        <stop offset="100%" stopColor="#22304a" />
                       </linearGradient>
                     </defs>
                     <rect x="0" y="0" width={W} height={H} fill="url(#ytapvid)" />
-                    <text x={W / 2} y={H / 2 + 4} fill="rgba(255,255,255,.15)" fontSize="12" textAnchor="middle">video frame</text>
+                    {/* Rule-of-thirds guides — placement reads at a glance */}
+                    <g stroke="rgba(255,255,255,.10)" strokeWidth="1">
+                      <line x1={W / 3} y1="0" x2={W / 3} y2={H} />
+                      <line x1={(W * 2) / 3} y1="0" x2={(W * 2) / 3} y2={H} />
+                      <line x1="0" y1={H / 3} x2={W} y2={H / 3} />
+                      <line x1="0" y1={(H * 2) / 3} x2={W} y2={(H * 2) / 3} />
+                    </g>
+                    {/* Play glyph + label — unmistakably the video canvas */}
+                    <circle cx={W / 2} cy={H / 2 - 8} r="16" fill="rgba(255,255,255,.14)" stroke="rgba(255,255,255,.35)" />
+                    <path d={`M ${W / 2 - 4} ${H / 2 - 15} L ${W / 2 + 8} ${H / 2 - 8} L ${W / 2 - 4} ${H / 2 - 1} Z`} fill="rgba(255,255,255,.65)" />
+                    <text x={W / 2} y={H / 2 + 24} fill="rgba(255,255,255,.5)" fontSize="11" textAnchor="middle">your video frame</text>
 
                     {/* Channel logo bug — always top-right, full opacity */}
                     {logoUrl ? (
@@ -772,7 +816,7 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                       <rect
                         x={W - bugSize - bugM} y={bugM}
                         width={bugSize} height={bugSize}
-                        fill="rgba(255,255,255,.04)" stroke="rgba(255,255,255,.15)" strokeDasharray="2 2"
+                        fill="rgba(255,255,255,.10)" stroke="rgba(255,255,255,.45)" strokeDasharray="2 2"
                       />
                     )}
 
@@ -996,7 +1040,7 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
                   ["website",   "Website",     "https://example.com"],
                   ["email",     "Email",       "you@example.com"],
                 ].map(([key, label, ph]) => (
-                  <label key={key} className="grid grid-cols-[110px,1fr] items-center gap-2">
+                  <label key={key} className="grid grid-cols-[110px_1fr] items-center gap-2">
                     <span className="text-[11px] text-gray-400">{label}</span>
                     <input
                       type="text"
@@ -1036,11 +1080,11 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
         const allSelected = others.length > 0 && others.every((a) => copyTargets.has(a.primary_profile_id));
         return (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 overflow-y-auto py-6"
+            className="fixed inset-0 z-50 flex bg-black/60 px-3 overflow-y-auto py-6"
             onClick={closeCopyModal}
           >
             <div
-              className="bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
+              className="m-auto bg-[#0c0c0c] border border-border rounded-lg p-5 max-w-lg w-full"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-3">
@@ -1145,11 +1189,11 @@ export default function YouTubeAccountsPanel({ oauthConfigured, onRefresh }) {
       {/* Logo editor modal — overlay for the YT account being edited */}
       {logoAcc && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3"
+          className="fixed inset-0 z-50 flex bg-black/60 px-3 overflow-y-auto py-6"
           onClick={closeLogoEditor}
         >
           <div
-            className="bg-[#0c0c0c] border border-border rounded-lg p-4 max-w-lg w-full"
+            className="m-auto bg-[#0c0c0c] border border-border rounded-lg p-4 max-w-lg w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">

@@ -346,9 +346,9 @@ export default function LogoPicker({ value, onChange, initialPreview = null, cur
           owns.  Confirm writes logo_asset_id on each selected channel in
           one round-trip. */}
       {applyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setApplyOpen(false)}>
+        <div className="fixed inset-0 z-50 flex bg-black/60 px-3 overflow-y-auto py-6" onClick={() => setApplyOpen(false)}>
           <div
-            className="bg-[#0c0c0c] border border-border rounded-lg p-4 max-w-md w-full mx-3"
+            className="m-auto bg-[#0c0c0c] border border-border rounded-lg p-4 max-w-md w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-2">

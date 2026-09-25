@@ -118,7 +118,7 @@ function classifyLine(line) {
   if (m(/^\s*\[v4\]\s+shorts\s+plan/i)) {
     return { tag: "PLAN",    kind: TAG_KIND.plan,     msg: stripV4(line) };
   }
-  if (m(/^\s*\[v4\]\s+short_\d+:\s+trimmed/i)) {
+  if (m(/^\s*\[v4\]\s+short_\d+\S*:\s+trimmed/i)) {
     return { tag: "TRIM",    kind: TAG_KIND.trim,     msg: stripV4(line) };
   }
   if (m(/^\s*\[v4\]\s+SEO\s+generated/i)) {
@@ -178,6 +178,64 @@ function humanizeMsg(s) {
  * (stageIdx, counters) reflect the latest state. Activity list is
  * emitted oldest-first internally then reversed for display.
  */
+// Real substeps per stage, derived from orchestrator log markers (in
+// pipeline order). `start` flips the substep active; `finish` (optional)
+// marks it done even if nothing later has started — so the checklist
+// under each stage reflects what the engine is ACTUALLY doing and the
+// user never stares at a silent 10-minute step.
+const SUBSTEP_DEFS = {
+  trim: [
+    { key: "extract",    label: "Extracting audio",
+      start: /\[v4\/step1\]\s+extracting audio/i },
+    { key: "transcribe", label: "Transcribing speech (Deepgram)",
+      start: /\[v4\/step1\]\s+Deepgram .*transcribing/i,
+      finish: /\[v4\/step1\]\s+got \d+ words/i },
+    { key: "cutplan",    label: "AI cut-plan (keep/cut decisions)",
+      start: /\[v4\/step1\]\s+\S+.*planning KEEP\/CUT/i,
+      finish: /\[v4\/step1\]\s+\d+ stories,/i },
+    { key: "refclips",   label: "Placing your reference clips",
+      start: /\[v4\/refclips\]/i,
+      finish: /\[v4\/refclips\]\s+\d+\/\d+ crew moment/i },
+    { key: "encode",     label: "Cutting + encoding the master",
+      start: /\[v4\/step1\]\s+atomic ffmpeg trim\+concat/i,
+      finish: /\[v4\/step1\]\s+done --/i },
+  ],
+  canvas: [
+    { key: "pool",    label: "Ingesting images",
+      start: /\[v4\]\s+pool ingested/i },
+    { key: "aiimg",   label: "Generating story images (AI)",
+      start: /\[v4\/image\]|\[v4\/image-ai\]|\[nano-banana\]/i,
+      finish: /\[v4\]\s+auto-fetched \d+/i },
+    { key: "asked",   label: "Noting what you can change",
+      start: /\[v4\/imagery\]\s+\d+ picture question|\[v4\]\s+picture questions/i,
+      finish: /picture question\(s\) written/i },
+    { key: "timing",  label: "Syncing images to speech",
+      start: /\[v4\/img-timing\]/i },
+    { key: "plan",    label: "Planning shorts",
+      start: /\[v4\]\s+shorts (cap|plan)/i },
+    { key: "strim",   label: "Trimming shorts",
+      start: /\[v4\]\s+short_\d+\S*:\s+trimmed/i },
+    { key: "seo",     label: "Writing SEO",
+      start: /\[v4\]\s+(SEO generated|bulletin SEO)/i },
+  ],
+  render: [
+    { key: "director", label: "AI Director planning the show",
+      start: /\[v4\/director\]|\[v4\/director-platform\]|director engine=platform/i,
+      finish: /\[v4\/director\]\s+plan:|director engine=platform planned \d+/i },
+    { key: "compose",  label: "Composing full video",
+      start: /\[v4\/v1_bridge\]\s+story \d+\/\d+ (composed|cache hit)|\[ffmpeg\/compose_story/i,
+      finish: /\[v4\/v1_bridge\]\s+stitched \d+ stories|\[v4\]\s+bulletin rendered/i },
+    { key: "opener",   label: "Building the opener",
+      start: /\[v4\/v1_bridge\]\s+OPENER:|\[v4\/opener\]/i,
+      finish: /\[v4\/v1_bridge\]\s+OPENER:.*built in/i },
+    { key: "stitch",   label: "Stitching + ticker",
+      start: /\[v4\/v1_bridge\]\s+stitched \d+ stories/i,
+      finish: /\[v4\]\s+bulletin rendered/i },
+    { key: "shorts",   label: "Rendering shorts",
+      start: /\[v4\]\s+short \d+ rendered/i },
+  ],
+};
+
 export function parseV4Log(lines, { status } = {}) {
   const activity = [];
   let stageIdx = 0;
@@ -185,6 +243,13 @@ export function parseV4Log(lines, { status } = {}) {
   let stage3Started = false;
   let done = false;
   let failed = false;
+
+  // Substep tracking: per stage, the highest substep whose start-marker
+  // matched (-1 = none yet) + a set of finished substep keys + live counts.
+  const subReached = { trim: -1, canvas: -1, render: -1 };
+  const subFinished = { trim: new Set(), canvas: new Set(), render: new Set() };
+  let storiesComposed = 0;
+  let storiesTotal = 0;
 
   let imagesPreselected = 0;
   let shortsPlanned = 0;
@@ -223,7 +288,14 @@ export function parseV4Log(lines, { status } = {}) {
     } else if (/^\s*\[v4\]\s+job\s+\S+\s+DONE/i.test(raw)) {
       stageIdx = 3;
       done = true;
-    } else if (/^\s*\[v4\]\s+FAILED/i.test(raw) || / failed /i.test(raw) && /^\s*\[v4\]/.test(raw)) {
+    } else if (
+      /^\s*\[v4\]\s+FAILED/i.test(raw)
+      || (/ failed /i.test(raw) && /^\s*\[v4\]/.test(raw)
+          // Soft-skips are RECOVERED conditions ("image auto-fetch failed
+          // (soft-skip)") — the pipeline continues. Treating them as fatal
+          // showed a "Pipeline failed" card over a HEALTHY running job.
+          && !/\(soft(?:-skip)?\)/i.test(raw))
+    ) {
       failed = true;
     }
 
@@ -235,11 +307,25 @@ export function parseV4Log(lines, { status } = {}) {
     if ((m = raw.match(/^\s*\[v4\]\s+shorts\s+plan\s+--?\s*(\d+)\s+candidates/i))) {
       shortsPlanned = Math.max(shortsPlanned, parseInt(m[1], 10) || 0);
     }
-    if (/^\s*\[v4\]\s+short_\d+:\s+trimmed/i.test(raw))           shortsTrimmed++;
+    // NOTE \S* after the index: labels are now e.g. "short_01_s01p1:" —
+    // the old `short_\d+:` never matched, so trims counted 0 forever.
+    if (/^\s*\[v4\]\s+short_\d+\S*:\s+trimmed/i.test(raw))        shortsTrimmed++;
     if (/^\s*\[v4\]\s+short\s+\d+\s+rendered/i.test(raw))         shortsRendered++;
     if (/^\s*\[v4\]\s+bulletin\s+rendered/i.test(raw))            bulletinRendered = true;
     if (/^\s*\[v4\]\s+SEO\s+generated/i.test(raw))                seoGenerated = true;
     if ((m = raw.match(/^\s*\[v4\]\s+output_format=([a-z-]+)/i)))  outputFormat = m[1].toLowerCase();
+    if ((m = raw.match(/\[v4\/v1_bridge\]\s+story\s+(\d+)\/(\d+)\s+(composed|cache hit)/i))) {
+      storiesComposed += 1;
+      storiesTotal = Math.max(storiesTotal, parseInt(m[2], 10) || 0);
+    }
+
+    // Substep start/finish markers (per stage, in pipeline order).
+    for (const [sk, defs] of Object.entries(SUBSTEP_DEFS)) {
+      for (let d = 0; d < defs.length; d++) {
+        if (defs[d].start.test(raw)) subReached[sk] = Math.max(subReached[sk], d);
+        if (defs[d].finish && defs[d].finish.test(raw)) subFinished[sk].add(defs[d].key);
+      }
+    }
 
     // Activity log entry.
     const c = classifyLine(raw);
@@ -309,6 +395,52 @@ export function parseV4Log(lines, { status } = {}) {
     failed = true;
   }
 
+  // Materialize the substep checklists. A substep is done when its finish
+  // marker fired, a LATER substep in the same stage started, or the whole
+  // stage is behind us; the highest started substep is "active". Live
+  // counts make the busy steps feel alive (stories 3/9, shorts 2/8).
+  const STAGE_KEYS = ["trim", "canvas", "render"];
+  // Which AI Director ENGINE ran (dual-director feature): the platform
+  // engine logs under [v4/director-platform] / "director engine=platform";
+  // label the substep with the ENGINE THE USER PICKED, not a generic name.
+  const directorEngine = lines.some((l) =>
+    /director engine=platform|\[v4\/director-platform\]/i.test(l)) ? "platform" : "v4";
+  const substeps = {};
+  STAGE_KEYS.forEach((sk, sIdx) => {
+    const defs = SUBSTEP_DEFS[sk];
+    const stageDone = done || stageIdx > sIdx;
+    substeps[sk] = defs.map((d, i) => {
+      let state = "pending";
+      if (stageDone) state = "done";
+      else if (i < subReached[sk]) state = "done";
+      else if (i === subReached[sk])
+        state = subFinished[sk].has(d.key) ? "done" : "active";
+      let label = d.label;
+      if (d.key === "director" && state !== "pending")
+        label = directorEngine === "platform"
+          ? "AI Director planning (Platform — classic 5-mood)"
+          : "AI Director planning (Kaizer V4 — full arsenal)";
+      if (d.key === "aiimg" && imagesPreselected === 0 && state !== "pending") {
+        // count comes from auto-fetched later; keep the base label
+      }
+      if (d.key === "strim" && shortsPlanned > 0 && state !== "pending")
+        label = `Trimming shorts (${Math.min(shortsTrimmed, shortsPlanned)}/${shortsPlanned})`;
+      if (d.key === "compose" && storiesTotal > 0 && state !== "pending")
+        label = `Composing full video (${Math.min(storiesComposed, storiesTotal)}/${storiesTotal} stories)`;
+      if (d.key === "shorts" && state !== "pending") {
+        const totalS = Math.max(shortsPlanned, shortsRendered);
+        label = totalS > 0
+          ? `Rendering shorts (${Math.min(shortsRendered, totalS)}/${totalS})`
+          : label;
+      }
+      return { key: d.key, label, state };
+    });
+    // While a stage is active but nothing matched yet, pulse its first
+    // substep so the rail never looks frozen at a stage boundary.
+    if (!stageDone && sIdx === stageIdx && subReached[sk] < 0 && substeps[sk][0])
+      substeps[sk][0].state = "active";
+  });
+
   return {
     stageIdx,
     stageFrac,
@@ -316,6 +448,7 @@ export function parseV4Log(lines, { status } = {}) {
     done,
     failed,
     outputFormat,
+    substeps,
     activity: activity.slice().reverse(), // newest first for display
     counters: {
       imagesPreselected,

@@ -75,13 +75,13 @@ export default function BulletinImagesPanel({ jobId, onRecomposeStarted }) {
   }, [recomposing, reload]);
 
   // ── Replace one image ─────────────────────────────────────────
-  async function replaceImage(storyIdx, slotIdx, file) {
+  async function replaceImage(storyIdx, slotIdx, file, label = "") {
     if (!file) return;
     const key = `${storyIdx}:${slotIdx}`;
     setReplacingKey(key);
     setError("");
     try {
-      await api.replaceBulletinImage(jobId, storyIdx, slotIdx, file);
+      await api.replaceBulletinImage(jobId, storyIdx, slotIdx, file, label);
       setPendingChange(true);
       await reload();
     } catch (e) {
@@ -313,7 +313,7 @@ function PoolGrid({ pool, replacingKey, onReplace }) {
               key={img.abs_path}
               img={img}
               busy={busy}
-              onPick={(file) => onReplace(img.story_index, img.slot_index, file)}
+              onPick={(file, label) => onReplace(img.story_index, img.slot_index, file, label)}
             />
           );
         })}
@@ -324,48 +324,60 @@ function PoolGrid({ pool, replacingKey, onReplace }) {
 
 function PoolCard({ img, busy, onPick }) {
   const [bust, setBust] = useState(Date.now());
+  // Subject label ("name-tag contract") — sent along when the image is
+  // replaced so the speech-sync knows what the new picture shows.
+  const [label, setLabel] = useState(img.label || "");
   const usedIn = (img.story_indexes || [img.story_index]).map((i) => i + 1);
   return (
-    <label className="relative block cursor-pointer rounded overflow-hidden border border-border hover:border-accent group">
-      <input
-        type="file"
-        accept="image/*"
-        className="hidden"
-        disabled={busy}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) {
-            onPick(f);
-            setBust(Date.now());
-          }
-          e.target.value = "";
-        }}
-      />
-      <img
-        src={`${img.url}&t=${bust}`}
-        alt={img.filename}
-        className="w-full aspect-[16/9] object-cover bg-surface"
-        loading="lazy"
-        onError={(e) => { e.currentTarget.style.display = "none"; }}
-      />
-      <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white">
-        <Upload size={14} /> <span className="ml-1">Replace</span>
-      </div>
-      <div className="absolute top-0.5 right-0.5 px-1 py-0.5 bg-black/70 rounded text-[9px] text-gray-300 tabular-nums">
-        #{img.pool_slot ?? img.slot_index}
-      </div>
-      <div
-        className="absolute bottom-0.5 left-0.5 px-1 py-0.5 bg-black/70 rounded text-[9px] text-emerald-300 tabular-nums"
-        title={`Used in stor${usedIn.length === 1 ? "y" : "ies"} ${usedIn.join(", ")}`}
-      >
-        story {usedIn.join(",")}
-      </div>
-      {busy && (
-        <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-          <Loader2 size={16} className="animate-spin text-accent2" />
+    <div>
+      <label className="relative block cursor-pointer rounded overflow-hidden border border-border hover:border-accent group">
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) {
+              onPick(f, label);
+              setBust(Date.now());
+            }
+            e.target.value = "";
+          }}
+        />
+        <img
+          src={`${img.url}&t=${bust}`}
+          alt={img.filename}
+          className="w-full aspect-[16/9] object-cover bg-surface"
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+        />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-white">
+          <Upload size={14} /> <span className="ml-1">Replace</span>
         </div>
-      )}
-    </label>
+        <div className="absolute top-0.5 right-0.5 px-1 py-0.5 bg-black/70 rounded text-[9px] text-gray-300 tabular-nums">
+          #{img.pool_slot ?? img.slot_index}
+        </div>
+        <div
+          className="absolute bottom-0.5 left-0.5 px-1 py-0.5 bg-black/70 rounded text-[9px] text-emerald-300 tabular-nums"
+          title={`Used in stor${usedIn.length === 1 ? "y" : "ies"} ${usedIn.join(", ")}`}
+        >
+          story {usedIn.join(",")}
+        </div>
+        {busy && (
+          <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+            <Loader2 size={16} className="animate-spin text-accent2" />
+          </div>
+        )}
+      </label>
+      <input
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="what's in this image?"
+        title="Subject label — used to show this image exactly when its subject is spoken. Applied when you replace the image."
+        className="mt-0.5 w-full bg-black/40 border border-border rounded px-1 py-0.5 text-[9px] text-gray-300 placeholder-gray-600"
+      />
+    </div>
   );
 }
 

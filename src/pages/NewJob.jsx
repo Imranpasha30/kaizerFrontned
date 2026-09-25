@@ -1,11 +1,27 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { Upload, ChevronRight, ChevronLeft, Loader2, Film, Languages, Image as ImageIcon, Star, Mic } from "lucide-react";
+import { Upload, ChevronRight, ChevronLeft, Loader2, Film, Languages, Image as ImageIcon, Star, Mic,
+  Smartphone, Layers, Clapperboard, Video, Sparkles, Podcast } from "lucide-react";
 import { api, getToken } from "../api/client";
 import CustomTemplatePicker from "../components/CustomTemplatePicker";
 import TemplateMediaPicker from "../components/TemplateMediaPicker";
 import LibraryVideoPicker from "../components/LibraryVideoPicker";
 import TemplateStep from "../components/TemplateStep";
+import AuroraBackground from "../components/ui/AuroraBackground";
+import { GlassCard, StepHeading, ChoiceGrid, ChoiceCard, Badge, Segmented, Toggle, Field } from "../components/wizard/kit";
+import StyleDirector from "../components/wizard/StyleDirector";
+
+// Pick a friendly icon for a platform/output tile from its key.
+function tileIcon(key) {
+  const k = String(key).toLowerCase();
+  if (k.includes("anchor")) return Mic;
+  if (k.includes("podcast")) return Podcast;
+  if (k.includes("trailer")) return Clapperboard;
+  if (k.includes("plus") || k === "full_video_shorts_v4" || k.includes("_v2") || k.includes("_v3")) return Layers;
+  if (k.includes("short") || k.includes("reel")) return Smartphone;
+  if (k.includes("full")) return Film;
+  return Video;
+}
 
 // Stamps ?token=<jwt> onto backend URLs so plain <video src=...> /
 // <img src=...> tags can authenticate. Browser tags can't attach
@@ -19,10 +35,10 @@ function withAuth(url) {
 
 // Kind-first wizard: choose what you're making (the platform/output kind) FIRST, then
 // the template step shows ONLY templates that fit that kind (short / full / both).
-const STEPS         = ["Choose Platform", "Choose Template", "Add Media",     "Choose Language", "Confirm"];
-const STEPS_LONGFORM = ["Choose Platform", "Choose Template", "Long-form mode", "Choose Language", "Confirm"];
-// V2 wizard inserts one extra "Choose STT" step between Language and Confirm.
-const STEPS_V2      = ["Choose Platform", "Choose Template", "Add Media",     "Choose Language", "Choose STT", "Confirm"];
+const STEPS         = ["Format", "Template", "Media", "Language", "Review"];
+const STEPS_LONGFORM = ["Format", "Template", "Long-form", "Language", "Review"];
+// V2 wizard inserts one extra "Transcription" step between Language and Review.
+const STEPS_V2      = ["Format", "Template", "Media", "Language", "Transcription", "Review"];
 
 // Platforms that skip the per-clip frame layout (16:9 long-form only).
 const LONGFORM_PLATFORMS = new Set(["youtube_full"]);
@@ -133,6 +149,13 @@ const V4_PLATFORM_KEY = "full_video_shorts_v4";
 function isV4(platform) {
   return platform === V4_PLATFORM_KEY;
 }
+// Every platform tile either IS full_video_shorts_v4 or remaps to it
+// (LEGACY_TO_V4_PRESET). Audio-first works for all of them, so the Audio Story
+// toggle is offered on ANY V4-backed platform — not just the "Full Video +
+// Shorts" tile. (LEGACY_TO_V4_PRESET is defined below; this runs at call time.)
+function isV4Backed(platform) {
+  return isV4(platform) || Object.prototype.hasOwnProperty.call(LEGACY_TO_V4_PRESET, platform);
+}
 
 // Step 12.5 / backlog 59: language codes the V2 wizard treats as
 // "Indian-language" for STT-provider recommendation. When the user
@@ -167,8 +190,8 @@ const DEFAULT_TRANSITION = "smart_cut";
 // kaizer/KaizerBackend/pipeline_v2/pipeline_v2/stages/stage_2_providers.py
 // (VALID_PROVIDERS). Backend is source of truth; UI just labels.
 const STAGE_2_PROVIDER_CATALOG = [
-  { name: "gemini", label: "Gemini 2.5 Pro", description: "Google's most capable model. Strong on Telugu / code-mixed transcripts. Default since V2 ship." },
-  { name: "claude", label: "Claude Sonnet 4.6 (default)",        description: "Anthropic's alt option. Deterministic (T=0). Prompt caching reduces per-job cost after first run." },
+  { name: "gemini", label: "Faster", description: "Quicker and lower cost. Great for most videos." },
+  { name: "claude", label: "Most accurate (default)", description: "Best editorial judgment on Indian-language news. Recommended." },
 ];
 const DEFAULT_STAGE_2_PROVIDER = "claude";
 
@@ -179,34 +202,55 @@ const DEFAULT_STAGE_2_PROVIDER = "claude";
 const V4_TRIM_PLANNER_CATALOG = [
   {
     name: "claude",
-    label: "Claude Opus 4.7 (default)",
-    description: "Anthropic's flagship. Strongest editorial judgment on Telugu / Hindi news (repetition, trail-offs, story boundaries). ~10× the cost of Gemini per job.",
+    label: "Anthropic (Claude)",
+    description: "Sharpest sense of what to keep vs. cut on Telugu / Hindi news — repetition, trail-offs, story boundaries. Needs credit on the Anthropic API account, or the job fails at the first step.",
   },
   {
     name: "gemini",
-    label: "Gemini 2.5 Flash",
-    description: "Google's fast model on Vertex AI. ~10× cheaper than Claude. Quality is comparable on clean transcripts; pick this for A/B compare or volume runs.",
+    label: "Google (Gemini)",
+    description: "Runs on your Google / Vertex account. Fast, low cost, reliable on clean audio. Use this when the Anthropic balance is empty.",
+  },
+  {
+    name: "openai",
+    label: "OpenAI (ChatGPT)",
+    description: "Runs on your OpenAI account (GPT-4o). A third editorial opinion — handy when the other balances are empty.",
   },
 ];
+// No forced default — the user picks the engine per job in the wizard.
 const DEFAULT_V4_TRIM_PLANNER = "claude";
+
+// V4 content type / edit profile. "auto" = the system classifies the
+// transcript and picks the editing persona itself (asks you only when
+// unsure); an explicit pick answers the question up front. Drives HOW
+// the AI edits: what counts as junk, how stories/chapters are grouped,
+// how aggressively silence is tightened.
+const V4_CONTENT_TYPE_CATALOG = [
+  { name: "auto",      label: "Auto detect (default)", hint: "System reads the transcript and decides" },
+  { name: "news",      label: "News show",             hint: "Presenter, story segments, on-screen headline bar" },
+  { name: "podcast",   label: "Podcast",               hint: "Conversation → chapters" },
+  { name: "interview", label: "Interview",             hint: "Question-and-answer beats" },
+  { name: "vlog",      label: "Vlog / creator",        hint: "Fast cuts, hook first" },
+  { name: "generic",   label: "Other",                 hint: "Lecture, tutorial, speech…" },
+];
+const DEFAULT_V4_CONTENT_TYPE = "auto";
 
 // V4 image-provider catalog. Controls how per-story sidebar images
 // AND the thumbnail get generated. Persisted on Job.v4_image_provider.
 const V4_IMAGE_PROVIDER_CATALOG = [
   {
     name: "auto",
-    label: "Auto (multi-source, default)",
-    description: "Google search + Pexels + DuckDuckGo + OpenAI fallback. Best when news has real-world reference photos (politicians, events, places). Free for most queries.",
+    label: "Smart mix (default)",
+    description: "Finds real reference photos (people, places, events) from the web, with AI as a fallback. Free for most. Recommended.",
   },
   {
     name: "gemini",
-    label: "Gemini 2.5 Flash Image (Nano Banana)",
-    description: "Pure AI generation via Google. ~$0.02 per image. Symbolic / illustrative — never returns real photos. Best for opinion pieces or stories with no good reference.",
+    label: "AI-generated",
+    description: "Purely AI-drawn, illustrative images (never real photos). Best for opinion pieces or stories with no good reference photo.",
   },
   {
     name: "openai",
-    label: "OpenAI gpt-image-1",
-    description: "OpenAI's image model. ~$0.04 per image. Sharpest cinematic Telugu-news-channel look. Best for thumbnails and stories where visual polish matters most.",
+    label: "Premium AI images",
+    description: "The sharpest, most cinematic AI images. Best when visual polish matters most.",
   },
 ];
 const DEFAULT_V4_IMAGE_PROVIDER = "auto";
@@ -231,8 +275,35 @@ const V4_OUTPUT_FORMAT_CATALOG = [
     label: "Full video only",
     description: "Render just the long-form bulletin — no shorts. Pick this when you only need the single long-form upload.",
   },
+  {
+    name: "trailer-only",
+    label: "Trailer only",
+    description: "No bulletin, no shorts — just a movie-style teaser of your video: the most dramatic moments, fast cuts, title cards and sound design. Delivered in 16:9 (plus a 9:16 companion).",
+  },
 ];
 const DEFAULT_V4_OUTPUT_FORMAT = "both";
+
+// V4 full-form EFFECTS mode — how much of the editing engine treats the
+// long-form video. Persisted on Job.v4_effects_mode; the per-story render
+// applies (and caches) the resolved look. Off = exactly the classic render.
+const V4_EFFECTS_CATALOG = [
+  {
+    name: "auto",
+    label: "Polished (recommended)",
+    description: "A tasteful news-channel finish on every story — subtle contrast, crispness and a soft vignette. Safe and professional.",
+  },
+  {
+    name: "rich",
+    label: "Cinematic (AI Director)",
+    description: "The AI edits story-by-story like a TV editor: each story gets its own mood, color and transition based on what it's about (crime = cold, comedy = bright), plus matching sound.",
+  },
+  {
+    name: "off",
+    label: "Off (clean)",
+    description: "No effects — the classic untouched render.",
+  },
+];
+const DEFAULT_V4_EFFECTS_MODE = "auto";
 
 // Legacy single-output platform tiles now run on the V4 canvas pipeline.
 // Each maps to a V4 output-format so the job is a GENUINE
@@ -246,7 +317,33 @@ const LEGACY_TO_V4_PRESET = {
   facebook_reel:            "shorts-only",
   youtube_full:             "full-only",
   youtube_full_plus_shorts: "both",
+  movie_trailer:            "trailer-only",
 };
+
+// Synthetic step-0 tile (not a backend platform): upload a video, get ONLY
+// its movie-style trailer. Runs the V4 pipeline with the trailer-only
+// output format; the template step is skipped (the trailer engine owns the
+// whole look — 31 style packs, not canvas templates).
+const TRAILER_TILE = ["movie_trailer", {
+  label: "Movie Trailer",
+  width: 1920, height: 1080,
+}];
+
+// Synthetic step-0 tile (not a backend platform): the News-Anchor studio.
+// Clicking it NAVIGATES to /anchor (an AI presenter reads a typed script
+// via /api/avatar) — it never submits through this wizard's create_job.
+const ANCHOR_TILE = ["news_anchor", {
+  label: "News Anchor",
+  width: 1080, height: 1920,
+}];
+
+// Synthetic step-0 tile (not a backend platform): the Podcast editor.
+// Clicking it NAVIGATES to /podcast-studio (AI multi-cam edit of a single
+// camera via /api/podcast) — it never submits through this wizard's create_job.
+const PODCAST_TILE = ["podcast_editor", {
+  label: "Podcast Editor",
+  width: 1920, height: 1080,
+}];
 
 // The original publish target each tile maps to — persisted on the job so the
 // editor knows which platform's SEO to lead with (Instagram caption+hashtags
@@ -258,6 +355,7 @@ const TILE_TARGET_PLATFORM = {
   facebook_reel:            "facebook",
   youtube_full:             "youtube",
   youtube_full_plus_shorts: "youtube",
+  movie_trailer:            "youtube",
 };
 
 export default function NewJob() {
@@ -271,6 +369,10 @@ export default function NewJob() {
   const [libraryItem] = useState(initialLibraryItem);
   const [step, setStep]       = useState(0);
   const [file, setFile]       = useState(null);
+  // V4 audio-first mode: the narration AUDIO is the master track; the uploaded
+  // video (if any) becomes a MUTED reference b-roll; no video → fullscreen images.
+  const [audioFirst, setAudioFirst] = useState(false);
+  const [audioFile, setAudioFile]   = useState(null);
   const [platform, setPlatform]   = useState("");
   const [frame, setFrame]     = useState("");
   // Custom-template selection + per-slot media (the wizard's Media step).
@@ -325,6 +427,13 @@ export default function NewJob() {
   // calling OpenAI gpt-image-1 per story.
   const [userAssets, setUserAssets] = useState([]);
   const [bulletinImageIds, setBulletinImageIds] = useState([]);
+  // Reference B-roll clips the AI cuts to full-screen. Each is uploaded to the
+  // asset pool tagged with its subject, and its id rides bulletin_image_ids so
+  // the render turns it into an AI-timed cutaway. [{id, name, tag}]
+  const [refClips, setRefClips] = useState([]);
+  const [refFile, setRefFile]   = useState(null);   // pending clip file
+  const [refTag, setRefTag]     = useState("");      // pending clip subject/tag
+  const [refBusy, setRefBusy]   = useState(false);
   // Cached-images prompt: when the user picks a video file we hash it
   // and ask the backend if previously-generated images exist for that
   // exact source. Non-empty result drives the "reuse" / "regenerate"
@@ -377,6 +486,7 @@ export default function NewJob() {
   // Only meaningful for V4 platforms; backend stamps NULL for V1/V2
   // rows. Default is "claude" so existing users see no behaviour change.
   const [v4TrimPlanner, setV4TrimPlanner] = useState(DEFAULT_V4_TRIM_PLANNER);
+  const [v4ContentType, setV4ContentType] = useState(DEFAULT_V4_CONTENT_TYPE);
 
   // V4 image provider — "auto" (V1 multi-source), "gemini" (Nano Banana),
   // or "openai" (gpt-image-1). Controls per-story sidebar images AND
@@ -387,6 +497,57 @@ export default function NewJob() {
   // (skip the full video), or "full-only" (skip shorts). NULL persisted
   // for non-V4 platforms.
   const [v4OutputFormat, setV4OutputFormat] = useState(DEFAULT_V4_OUTPUT_FORMAT);
+  const [v4EffectsMode, setV4EffectsMode] = useState("rich");
+  // Which AI Director ENGINE plans the per-story direction: "v4" (ours,
+  // full arsenal — default) | "platform" (classic 5-mood signal engine).
+  const [v4DirectorEngine, setV4DirectorEngine] = useState("v4");
+  // Which BRAIN writes the Director's plan. Gemini also LISTENS/LOOKS via
+  // the sensors; Claude/ChatGPT direct text-only from transcript + facts.
+  const [v4DirectorProvider, setV4DirectorProvider] = useState("gemini");
+  // THEME PACK: the visual skin of the built-in render ("" = classic).
+  // The theme only styles the look — layouts/animations run inside it.
+  const [v4Theme, setV4Theme] = useState("");
+  // User-directed style/effect picks ("edit using THESE"). Empty object = the
+  // AI Director decides everything (the default). Any pinned category
+  // constrains the render. Wired to v4_style_directives on submit.
+  const [v4StyleDirectives, setV4StyleDirectives] = useState({});
+  // "AI does everything" (default) vs "I'll choose myself" — the single
+  // switch that hides all technical grids for normal users.
+  const [aiAuto, setAiAuto] = useState(true);
+  const enableAiAuto = () => {
+    setAiAuto(true);
+    setV4ContentType("auto");
+    setV4TrimPlanner(DEFAULT_V4_TRIM_PLANNER);
+    setV4ImageProvider("auto");
+    setV4EffectsMode("rich");
+    setV4DirectorEngine("v4");
+    setV4DirectorProvider("gemini");
+    setV4StyleDirectives({});   // hand every choice back to the AI Director
+  };
+  // Upload one tagged reference clip → add its id to the reference list AND to
+  // bulletin_image_ids so it submits with the job and becomes an AI cutaway.
+  const addRefClip = async () => {
+    if (!refFile || refBusy) return;
+    const tag = (refTag || refFile.name.replace(/\.[^.]+$/, "")).trim();
+    setRefBusy(true);
+    try {
+      const asset = await api.uploadReferenceClip(refFile, tag);
+      if (asset && asset.id) {
+        setRefClips((prev) => [...prev, { id: asset.id, name: refFile.name, tag }]);
+        setBulletinImageIds((prev) => (prev.includes(asset.id) ? prev : [...prev, asset.id]));
+        setRefFile(null);
+        setRefTag("");
+      }
+    } catch (e) {
+      setError(e.message || "Reference clip upload failed");
+    } finally {
+      setRefBusy(false);
+    }
+  };
+  const removeRefClip = (id) => {
+    setRefClips((prev) => prev.filter((c) => c.id !== id));
+    setBulletinImageIds((prev) => prev.filter((x) => x !== id));
+  };
   // Stage 2/3: edit-first — defer the up-front render; refine the scene in the editor, then Export.
   const [v4DeferRender, setV4DeferRender] = useState(false);
   // Shorts cap — default 8/job; opt-in to allow more.
@@ -540,7 +701,14 @@ export default function NewJob() {
       e.preventDefault();
       el.classList.remove("border-accent2");
       const f = e.dataTransfer.files[0];
-      if (f && f.type.startsWith("video/")) { setFile(f); }
+      if (!f) return;
+      // Accept by MIME *or* extension: Windows often hands a bare .mp4 with
+      // an EMPTY type, which the old MIME-only check dropped SILENTLY — the
+      // file looked attached but state stayed null → cryptic 422 on submit.
+      const okType = f.type.startsWith("video/");
+      const okExt = /\.(mp4|mov|m4v|webm|mkv|avi|mpg|mpeg|3gp)$/i.test(f.name || "");
+      if (okType || okExt) { setFile(f); setPickedLib(null); setError(""); }
+      else { setError(`"${f.name || "That file"}" isn't a video — drop an MP4/MOV/WebM.`); }
     };
     el.addEventListener("dragover", over);
     el.addEventListener("dragleave", leave);
@@ -553,12 +721,32 @@ export default function NewJob() {
     setUploadPct(0);
     setError("");
     try {
+      if (isV4Backed(platform) && audioFirst && !audioFile) {
+        setError("Select the narration audio first.");
+        setSubmitting(false);
+        return;
+      }
       const form = new FormData();
       const _lib = pickedLib || libraryItem;   // inline Library pick OR the handoff item
-      if (_lib) {
+      // Source gate: exactly one source must be present. Without this,
+      // `form.append("video", null)` sends the STRING "null" and the API
+      // rejects it with a cryptic 422 ("Expected UploadFile, received str").
+      const _audioMode = isV4Backed(platform) && audioFirst;
+      if (!_audioMode && !_lib && !file) {
+        setError("Add a video first — drop a file above or pick one from your Library.");
+        setSubmitting(false);
+        return;
+      }
+      if (_audioMode) {
+        // Audio-first: the narration audio is the master/source; the uploaded
+        // video (if any) becomes the OPTIONAL muted reference b-roll.
+        form.append("v4_audio_first", "true");
+        form.append("audio", audioFile);
+        if (file) form.append("video", file);
+      } else if (_lib) {
         form.append("library_item_id", String(_lib.id));
       } else {
-        form.append("video", file);
+        form.append("video", file);   // guaranteed non-null by the gate above
       }
       form.append("platform", platform);
       form.append("frame_layout", frame);
@@ -631,12 +819,49 @@ export default function NewJob() {
       if (isV4(platform) && v4TrimPlanner) {
         form.append("v4_trim_planner", v4TrimPlanner);
       }
+      // Content type / edit profile — "auto" lets the system classify;
+      // an explicit pick answers the type question up front.
+      if (isV4(platform) && v4ContentType) {
+        form.append("v4_content_type", v4ContentType);
+      }
       // V4 image provider — same pattern; backend coerces unknown to "auto".
       if (isV4(platform) && v4ImageProvider) {
         form.append("v4_image_provider", v4ImageProvider);
       }
       if (isV4(platform) && v4OutputFormat) {
         form.append("v4_output_format", v4OutputFormat);
+      }
+      if (isV4(platform) && v4EffectsMode) {
+        form.append("v4_effects_mode", v4EffectsMode);
+      }
+      // Director ENGINE pick — which AI plans per-story direction. The
+      // guard mirrors the picker's visibility gates exactly, so a pick made
+      // and then hidden (AI-auto re-enabled, effects downgraded, trailer-
+      // only) can never silently govern a render; omitted → backend
+      // defaults to "v4".
+      if (isV4(platform) && !aiAuto && v4OutputFormat !== "trailer-only"
+          && v4EffectsMode === "rich" && v4DirectorEngine) {
+        form.append("v4_director_engine", v4DirectorEngine);
+      }
+      // Director BRAIN pick — same visibility-mirrored guard as the engine
+      // pick above; omitted → backend defaults to "gemini" (the only brain
+      // that also listens to the audio via the sensors).
+      if (isV4(platform) && !aiAuto && v4OutputFormat !== "trailer-only"
+          && v4EffectsMode === "rich" && v4DirectorProvider) {
+        form.append("v4_director_provider", v4DirectorProvider);
+      }
+      // THEME PACK — only for built-in renders (a custom template IS its
+      // own look; the backend validates the key against the registry).
+      if (isV4(platform) && v4Theme && !fullformLayout) {
+        form.append("v4_theme", v4Theme);
+      }
+      // User-directed style/effect picks — only when the user pinned something
+      // AND effects aren't off. Empty/off ⇒ omitted ⇒ full AI-Director autonomy.
+      if (isV4(platform) && !aiAuto && v4EffectsMode !== "off") {
+        const _sd = v4StyleDirectives || {};
+        const _hasPicks = Object.values(_sd).some(
+          (x) => (Array.isArray(x) ? x.length > 0 : !!x));
+        if (_hasPicks) form.append("v4_style_directives", JSON.stringify(_sd));
       }
       if (isV4(platform) && v4DeferRender) {
         form.append("v4_defer_render", "true");   // edit-first: pipeline skips the up-front render
@@ -696,7 +921,10 @@ export default function NewJob() {
   // filtered template step (step 1) — a Short job never even sees full-form templates.
   const templateKind = !isV4(platform) ? "short"
     : v4OutputFormat === "shorts-only" ? "short"
-    : v4OutputFormat === "full-only" ? "full"
+    // trailer-only: the 16:9 trailer engine owns the whole look — no
+    // layout template applies, so treat it like a full-form job for the
+    // wizard's template step (which it will simply skip choosing).
+    : (v4OutputFormat === "full-only" || v4OutputFormat === "trailer-only") ? "full"
     : "both";
 
   // Drop selections that no longer apply when the output kind changes, so a stale
@@ -707,10 +935,21 @@ export default function NewJob() {
     else if (templateKind === "full") { setFrame(""); setCustomTpl(null); }
   }, [templateKind]);
 
+  // Audio-first is V4-only. If the operator navigates back and switches to a
+  // non-V4 platform, clear the audio-first state so the Confirm screen + submit
+  // never describe/attempt an audio-first job on a platform that can't run it.
+  useEffect(() => {
+    if (!isV4Backed(platform)) { setAudioFirst(false); setAudioFile(null); }
+  }, [platform]);
+
   // canNext indexed by step. V2 has 6 steps (0-5); V1 has 5 (0-4).
   // Step order is now: 0 Platform · 1 Template · 2 Media · 3 Language · (STT) · Confirm.
-  const _media = (!!file || !!libraryItem || !!pickedLib);
-  const _templateOk = templateKind === "short" ? !!frame
+  const _media = (isV4Backed(platform) && audioFirst)
+    ? !!audioFile                                   // audio-first: narration required, video optional
+    : (!!file || !!libraryItem || !!pickedLib);
+  const _templateOk = (isV4(platform) && v4OutputFormat === "trailer-only")
+    ? true                       // trailer: no canvas template — style packs own the look
+    : templateKind === "short" ? !!frame
     : templateKind === "full" ? fullChosen
     : (!!frame && fullChosen);   // both: need a short template AND a full-form choice
   const canNext = isV2(platform)
@@ -722,28 +961,41 @@ export default function NewJob() {
     : (isLongForm(platform) ? STEPS_LONGFORM : STEPS);
 
   return (
-    <div className="max-w-2xl lg:max-w-3xl xl:max-w-4xl mx-auto px-4 sm:px-6 py-6">
-      <h1 className="text-xl font-bold text-white mb-6">New Job</h1>
+    <div className="relative z-10 max-w-2xl lg:max-w-3xl xl:max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+      <AuroraBackground />
+      <div className="mb-7">
+        <div className="text-[11px] uppercase tracking-[0.28em] font-semibold text-accent2/90">Create</div>
+        <h1 className="mt-1.5 text-3xl sm:text-4xl font-bold text-white tracking-tight">New video</h1>
+        <p className="mt-2 text-sm text-gray-400 max-w-lg leading-relaxed">
+          A few quick choices and Kaizer builds your full video and short clips.
+          Pick what you want, or let AI handle everything.
+        </p>
+      </div>
 
       {/* Step indicators — labels swap based on platform.
           V1 4-platform path: STEPS or STEPS_LONGFORM (5 entries).
           V2 path: STEPS_V2 (6 entries — extra "Choose STT" step). */}
-      <div className="flex items-center gap-2 mb-8">
+      <div className="flex items-center gap-2 mb-8 rounded-2xl border border-white/10 bg-white/[0.04]
+                      backdrop-blur-xl px-3 py-2.5 shadow-[0_12px_44px_-14px_rgba(0,0,0,0.75)]">
         {stepLabels.map((label, i) => (
           <React.Fragment key={i}>
             <button
               onClick={() => i < step && !(libraryItem && i === 0) && setStep(i)}
               disabled={i >= step || (libraryItem && i === 0)}
-              className={`flex items-center gap-1.5 text-xs font-medium
-                ${i === step ? "text-accent2" : i < step ? "text-green-400 cursor-pointer" : "text-gray-600"}`}
+              className={`flex items-center gap-2 text-xs font-medium transition-colors duration-300
+                ${i === step ? "text-white" : i < step ? "text-emerald-300 cursor-pointer hover:text-emerald-200" : "text-gray-500"}`}
             >
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                ${i === step ? "bg-accent text-white" : i < step ? "bg-green-800 text-green-300" : "bg-surface text-gray-600"}`}>
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300
+                ${i === step ? "bg-gradient-to-br from-accent to-accent2 text-white shadow-lg shadow-accent/40 scale-110"
+                  : i < step ? "bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
+                  : "bg-white/5 text-gray-500 border border-white/10"}`}>
                 {i < step ? "\u2713" : i + 1}
               </div>
               <span className="hidden sm:inline">{label}</span>
             </button>
-            {i < stepLabels.length - 1 && <div className="flex-1 h-px bg-border" />}
+            {i < stepLabels.length - 1 && (
+              <div className={`flex-1 h-px transition-colors duration-500 ${i < step ? "bg-emerald-400/30" : "bg-white/10"}`} />
+            )}
           </React.Fragment>
         ))}
       </div>
@@ -782,7 +1034,9 @@ export default function NewJob() {
         </div>
       )}
 
-      <div className="card p-5 sm:p-6">
+      <div className="relative rounded-3xl border border-white/10 bg-white/[0.045] backdrop-blur-2xl
+                      shadow-[0_24px_80px_-32px_rgba(0,0,0,0.85)] p-5 sm:p-7">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
         {/* Step 2: Add Media (video upload + per-slot media). Hidden while
             the V4 bg sub-phase is showing. */}
         {step === 2 && (!isV4(platform) || v4StepPhase !== "bg") && (
@@ -826,18 +1080,61 @@ export default function NewJob() {
                 >Edit</Link>
               </div>
             )}
-            <h2 className="font-semibold text-white mb-4">Add your media</h2>
-            {/* Upload a new video OR pick one from your Library — no page-leave. */}
-            <div className="flex gap-2 mb-3">
-              {["upload", "library"].map((tb) => (
-                <button key={tb} type="button" onClick={() => setMediaTab(tb)}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition
-                    ${mediaTab === tb ? "border-accent bg-accent/10 text-white"
-                                      : "border-border text-gray-400 hover:border-gray-500"}`}>
-                  {tb === "upload" ? "Upload" : "From Library"}
-                </button>
-              ))}
-            </div>
+            <StepHeading eyebrow="Media" title="Add your video"
+              hint="Upload a video (or pick one from your Library). Kaizer transcribes it, finds the best moments, and builds your full video and short clips." />
+
+            {/* V4 audio-first: narration audio is the master track. */}
+            {isV4Backed(platform) && (
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+                <Toggle
+                  checked={audioFirst}
+                  onChange={(v) => { setAudioFirst(v); if (v) { setMediaTab("upload"); setPickedLib(null); } }}
+                  label="Audio Story mode"
+                  hint="Upload narration audio as the master track — the video below is optional (muted reference b-roll)."
+                />
+                {audioFirst && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      Upload the <b className="text-gray-200">narration audio</b> (the voice explaining the story).
+                      We transcribe it, write SEO from it, and show generated/uploaded images.
+                      The video below is <b className="text-gray-200">optional</b> and will be
+                      <b className="text-gray-200"> muted</b> (reference b-roll) — with no video, the images fill the screen.
+                    </p>
+                    <label className="border-2 border-dashed border-purple-500/40 rounded-lg p-4
+                                      flex flex-col items-center gap-2 cursor-pointer hover:border-purple-400 transition-colors">
+                      {/* Broad accept: WhatsApp audio downloads as .mpeg/.opus/.ogg which the
+                          OS often maps to video/*, so "audio/*" alone hides them. List the
+                          extensions explicitly. The backend runs any file through ffmpeg+Deepgram. */}
+                      <input type="file"
+                        accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.oga,.opus,.mpeg,.mpga,.flac,.wma,.amr,.weba"
+                        className="hidden"
+                        onChange={e => { const f = e.target.files[0]; if (f) setAudioFile(f); }} />
+                      {audioFile ? (
+                        <>
+                          <Mic size={26} className="text-purple-300" />
+                          <span className="text-white font-medium text-center break-all">{audioFile.name}</span>
+                          <span className="text-gray-500 text-xs">{(audioFile.size / 1024 / 1024).toFixed(1)} MB</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mic size={26} className="text-gray-600" />
+                          <span className="text-gray-400 text-center text-sm">Click to select the narration audio (MP3, M4A, WAV, MPEG, OGG, OPUS, AAC…)</span>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Upload a new video OR pick one from your Library — no page-leave.
+                When audio-first is on, this video is the OPTIONAL muted reference b-roll. */}
+            {!(isV4Backed(platform) && audioFirst) && (
+              <div className="mb-3">
+                <Segmented value={mediaTab} onChange={setMediaTab}
+                  options={[{ value: "upload", label: "Upload" }, { value: "library", label: "From Library" }]} />
+              </div>
+            )}
             {mediaTab === "upload" ? (
               <label
                 ref={dropRef}
@@ -875,6 +1172,56 @@ export default function NewJob() {
               </div>
             )}
 
+            {/* Reference clips (B-roll) — extra videos the AI cuts to full-screen. */}
+            {isV4Backed(platform) && !audioFirst && (
+              <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Clapperboard size={15} className="text-accent2" />
+                  <div className="text-sm font-semibold text-white">
+                    Reference clips <span className="text-[11px] text-gray-400 font-normal">(optional B-roll)</span>
+                  </div>
+                </div>
+                <p className="text-[12px] text-gray-400 leading-relaxed mb-3">
+                  Add extra videos the AI can cut to full-screen when their subject comes up — footage of an
+                  incident, a person, or a place. Tag each clip with what it shows and the AI plays it at the right moment.
+                </p>
+
+                {refClips.length > 0 && (
+                  <div className="space-y-2 mb-3">
+                    {refClips.map((c) => (
+                      <div key={c.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                        <Video size={15} className="text-accent2 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12px] text-white truncate">{c.name}</div>
+                          <div className="text-[11px] text-gray-400 truncate">Shows: <span className="text-gray-300">{c.tag}</span></div>
+                        </div>
+                        <button type="button" onClick={() => removeRefClip(c.id)}
+                          className="text-[11px] text-gray-500 hover:text-red-300 flex-shrink-0">Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <label className="flex-shrink-0 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[12px] text-gray-300 cursor-pointer hover:border-white/25">
+                    <Upload size={14} />
+                    {refFile ? <span className="truncate max-w-[150px]">{refFile.name}</span> : "Choose clip"}
+                    <input type="file" accept="video/*" className="hidden"
+                      onChange={(e) => { const f = e.target.files[0]; if (f) setRefFile(f); }} />
+                  </label>
+                  <input type="text" value={refTag}
+                    onChange={(e) => setRefTag(e.target.value.slice(0, 200))}
+                    placeholder="What does it show? e.g. flood in Hyderabad"
+                    className="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-[12px] text-white placeholder-gray-600 outline-none focus:border-accent" />
+                  <button type="button" onClick={addRefClip} disabled={!refFile || refBusy}
+                    className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-accent to-accent2 text-white text-[12px] font-semibold px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                    {refBusy ? <Loader2 size={13} className="animate-spin" /> : null}
+                    Add clip
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Per-slot Media step for the chosen custom template. Filled
                 after the main video is uploaded. */}
             {customTpl && (
@@ -884,6 +1231,7 @@ export default function NewJob() {
                   slots={customTpl.slots || []}
                   mainFile={file}
                   onMainFile={setFile}
+                  engine={v4ImageProvider}
                   onChange={({ templateMedia, mainSlot, ready }) => {
                     setTemplateMedia(templateMedia);
                     setMainMediaSlot(mainSlot);
@@ -924,22 +1272,59 @@ export default function NewJob() {
             (short / full / both) this implies then filters the template step. */}
         {step === 0 && (
           <div>
-            <h2 className="font-semibold text-white mb-4">What are you making?</h2>
-            <p className="text-xs text-gray-500 -mt-3 mb-4">
-              Pick the output first — the next step shows only the templates that fit it
-              (a Short job won&apos;t show full-form templates, and vice-versa).
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {Object.entries(platforms).map(([key, info]) => (
-                <button
+            <StepHeading eyebrow="Format" title="What are you making?"
+              hint="Pick the output first. The next step only shows templates that fit — a Short won't show full-video layouts, and vice-versa." />
+            <ChoiceGrid min={210}>
+              {[...Object.entries(platforms),
+                ...(Object.keys(platforms).length ? [TRAILER_TILE, ANCHOR_TILE, PODCAST_TILE] : []),
+              ].map(([key, info]) => (
+                <ChoiceCard
                   key={key}
+                  selected={selectedTileKey === key || platform === key}
+                  icon={tileIcon(key)}
+                  title={info.label}
+                  desc={key === "news_anchor"
+                    ? "An AI presenter reads your script on camera — pick an avatar + voice."
+                    : key === "podcast_editor"
+                    ? "One camera in, virtual multi-cam out — AI cuts filler, punches in, makes promos."
+                    : key === "movie_trailer"
+                    ? "Turn your video into a dramatic teaser — fast cuts, title cards, sound design."
+                    : isV4(key)
+                    ? `${info.width}×${info.height} · perfect audio sync · editable timeline`
+                    : `${info.width}×${info.height}`}
+                  badge={isV2(key) ? <Badge tone="accent">Beta</Badge>
+                    : isV4(key) ? <Badge tone="emerald">Recommended</Badge>
+                    : key === "movie_trailer" ? <Badge tone="violet">Cinematic</Badge>
+                    : key === "news_anchor" ? <Badge tone="violet">AI Presenter</Badge>
+                    : key === "podcast_editor" ? <Badge tone="violet">AI Multi-cam</Badge>
+                    : null}
                   onClick={() => {
+                    if (key === "news_anchor") {
+                      // The Anchor Studio is its own page — it renders via
+                      // /api/avatar, never through this wizard's create_job.
+                      navigate("/anchor");
+                      return;
+                    }
+                    if (key === "podcast_editor") {
+                      // The Podcast editor is its own page — it renders via
+                      // /api/podcast, never through this wizard's create_job.
+                      navigate("/podcast-studio");
+                      return;
+                    }
                     setSelectedTileKey(key);
                     // Always land on the Media upload view (not a stale bg sub-phase).
                     setV4StepPhase("frame");
                     // Remember the publish target this tile represents (or
                     // youtube for the V4-native / any other tile).
                     setV4TargetPlatform(TILE_TARGET_PLATFORM[key] || "youtube");
+                    if (key === "movie_trailer") {
+                      // Upload video → trailer. No canvas template to pick —
+                      // the trailer engine owns the whole look (style packs).
+                      setPlatform("full_video_shorts_v4");
+                      setV4OutputFormat("trailer-only");
+                      setStep(2);   // straight to Add Media
+                      return;
+                    }
                     // Legacy single-output tiles (Reel / Short / Full Video /
                     // combined) now run on the V4 canvas pipeline. Remap to a
                     // genuine full_video_shorts_v4 job with the matching
@@ -955,43 +1340,9 @@ export default function NewJob() {
                     // Platform is step 0 now — advance to the (kind-filtered) template step.
                     setStep(1);
                   }}
-                  className={`relative p-4 rounded-lg border text-left transition-all
-                    ${selectedTileKey === key || platform === key
-                      ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
-                      : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
-                >
-                  {/* Phase 14 / V2 Beta (D-13.7): amber BETA pill so the
-                      V2 option is visually distinct from the four
-                      production-stable V1 platforms. */}
-                  {isV2(key) && (
-                    <span
-                      className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full
-                                 text-[9px] font-bold tracking-widest uppercase
-                                 bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                    >
-                      Beta
-                    </span>
-                  )}
-                  {isV4(key) && (
-                    <span
-                      className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full
-                                 text-[9px] font-bold tracking-widest uppercase
-                                 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                      title="V4 — trim + canvas architecture. Zero lipsync drift, editable canvas timeline."
-                    >
-                      New
-                    </span>
-                  )}
-                  <div className="font-medium">{info.label}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{info.width} x {info.height}</div>
-                  {isV4(key) && (
-                    <div className="text-[10px] text-emerald-400/80 mt-1">
-                      Lipsync locked · editable canvas
-                    </div>
-                  )}
-                </button>
+                />
               ))}
-            </div>
+            </ChoiceGrid>
           </div>
         )}
 
@@ -1026,16 +1377,11 @@ export default function NewJob() {
             picking anything keeps the legacy flat-color background. */}
         {step === 2 && !isLongForm(platform) && isV4(platform) && v4StepPhase === "bg" && (
           <div>
-            <div className="mb-5">
-              <h2 className="font-semibold text-white text-lg">Studio background</h2>
-              <p className="text-xs text-gray-500 mt-1">
-                Choose how the background of your bulletin behaves. You can change all of this later in the editor
-                before re-rendering — nothing here is permanent.
-              </p>
-            </div>
+            <StepHeading eyebrow="Background" title="Studio background"
+              hint="How the background behaves behind the anchor. Optional — you can change all of this later in the editor." />
 
             {/* Three-way mode selector — drives the rest of this step. */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            <ChoiceGrid min={200} className="mb-5">
               {[
                 {
                   key: "none",
@@ -1052,30 +1398,21 @@ export default function NewJob() {
                   title: "Intro reel, then background",
                   desc: "Bg plays full-screen with audio first (5–15s), then drops behind the bulletin (muted).",
                 },
-              ].map((m) => {
-                const sel = v4BgMode === m.key;
-                return (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => {
-                      setV4BgMode(m.key);
-                      if (m.key === "none") { setV4BgRef(""); setV4BgIntroSec(0); }
-                      // Default 8s intro the first time the user picks intro mode.
-                      if (m.key === "intro_bg" && !v4BgIntroSec) setV4BgIntroSec(8);
-                      if (m.key === "bg") setV4BgIntroSec(0);
-                    }}
-                    className={`text-left p-3 rounded-lg border-2 transition-all
-                      ${sel
-                        ? "border-accent ring-2 ring-accent/40 bg-accent/5"
-                        : "border-border hover:border-accent/60"}`}
-                  >
-                    <div className={`font-semibold text-sm mb-1 ${sel ? "text-white" : "text-gray-200"}`}>{m.title}</div>
-                    <div className="text-[11px] text-gray-500 leading-tight">{m.desc}</div>
-                  </button>
-                );
-              })}
-            </div>
+              ].map((m) => (
+                <ChoiceCard
+                  key={m.key}
+                  selected={v4BgMode === m.key}
+                  title={m.title}
+                  desc={m.desc}
+                  onClick={() => {
+                    setV4BgMode(m.key);
+                    if (m.key === "none") { setV4BgRef(""); setV4BgIntroSec(0); }
+                    if (m.key === "intro_bg" && !v4BgIntroSec) setV4BgIntroSec(8);
+                    if (m.key === "bg") setV4BgIntroSec(0);
+                  }}
+                />
+              ))}
+            </ChoiceGrid>
 
             {/* When mode = "none", the rest of the step is just a continue button. */}
             {v4BgMode === "none" && (
@@ -1230,40 +1567,89 @@ export default function NewJob() {
               </div>
             )}
 
-            {/* V4 KEEP/CUT planner picker. Identical system prompt
-                + word-level transcript are sent to either model, so
-                this is a clean A/B for quality vs cost. */}
+            {/* WHO DECIDES — the one switch normal users need. AI mode
+                hides every technical grid; Manual reveals them all. */}
             <div className="mt-6 pt-5 border-t border-gray-800">
               <div className="mb-3">
-                <h3 className="font-semibold text-white text-sm">AI engine for trim decisions</h3>
+                <h3 className="font-semibold text-white text-sm">How should this video be edited?</h3>
+              </div>
+              <ChoiceGrid min={240}>
+                <ChoiceCard
+                  selected={aiAuto}
+                  icon={Sparkles}
+                  title="AI edits everything"
+                  badge={<Badge tone="emerald">Recommended</Badge>}
+                  desc="The AI watches and listens to your video, then picks the style, effects, transitions, graphics, captions and sounds that fit each story — like a TV editor. You just upload."
+                  onClick={enableAiAuto}
+                />
+                <ChoiceCard
+                  selected={!aiAuto}
+                  title="I'll choose myself"
+                  desc="Unlock the expert controls: video type, effects level, AI engines and image source."
+                  onClick={() => setAiAuto(false)}
+                />
+              </ChoiceGrid>
+              {aiAuto && (
+                <div className="mt-3 p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-[11px] leading-relaxed" style={{ color: "#B9D9C7" }}>
+                  ✓ AI will detect the video type, apply the matching cinematic look per story, place
+                  graphics &amp; captions where they help, and mix the sound like a broadcast — automatically.
+                </div>
+              )}
+            </div>
+
+            {/* AI model — its OWN separate block, shown in BOTH modes (AI-auto
+                and expert). Picks which provider/credit the keep-vs-cut step
+                spends: Claude = Anthropic credit, Gemini = Google/Vertex. */}
+            <div className="mt-6 pt-5 border-t border-gray-800">
+              <div className="mb-3">
+                <h3 className="font-semibold text-white text-sm">AI model</h3>
                 <p className="text-[11px] text-gray-500 mt-1">
-                  Decides which spans of speech to keep / cut and groups them into stories. Pick once per job — the
-                  V4 editor will show which engine planned the trim so you can compare quality side-by-side.
+                  Which AI does the editing — deciding what to keep vs. cut.
+                  <b className="text-gray-300"> Claude</b> uses your Anthropic credit;
+                  <b className="text-gray-300"> Gemini</b> uses your Google / Vertex credit. If one
+                  account is out of balance, switch to the other so the job doesn&apos;t fail at the first step.
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {V4_TRIM_PLANNER_CATALOG.map((p) => {
-                  const sel = v4TrimPlanner === p.name;
-                  return (
-                    <button
-                      key={p.name}
-                      type="button"
-                      onClick={() => setV4TrimPlanner(p.name)}
-                      className={`text-left p-3 rounded-lg border-2 transition-all ${
-                        sel
-                          ? "border-accent bg-accent/10 ring-1 ring-accent/40"
-                          : "border-gray-800 hover:border-gray-700 bg-gray-900/40"
-                      }`}
-                    >
-                      <div className="text-sm font-medium" style={{ color: "#F4F4F5" }}>{p.label}</div>
-                      <div className="text-[11px] mt-1 leading-relaxed" style={{ color: "#C8C8D0" }}>
-                        {p.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <ChoiceGrid min={220}>
+                {V4_TRIM_PLANNER_CATALOG.map((p) => (
+                  <ChoiceCard
+                    key={p.name}
+                    selected={v4TrimPlanner === p.name}
+                    title={p.label}
+                    desc={p.description}
+                    onClick={() => setV4TrimPlanner(p.name)}
+                  />
+                ))}
+              </ChoiceGrid>
             </div>
+
+            {/* Content type / edit profile — what kind of video this is
+                decides HOW the AI edits (news stories vs podcast
+                chapters vs interview Q&A). Auto = classify from the
+                transcript; the system asks only when it is unsure. */}
+            {!aiAuto && (
+            <div className="mt-6 pt-5 border-t border-gray-800">
+              <div className="mb-3">
+                <h3 className="font-semibold text-white text-sm">What type of video is this?</h3>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Drives the editing style — what counts as junk, how the video is chaptered, how tight the cuts are.
+                  Leave on <b className="text-gray-300">Auto</b> and the system identifies it from the speech itself.
+                </p>
+              </div>
+              <ChoiceGrid min={150}>
+                {V4_CONTENT_TYPE_CATALOG.map((t) => (
+                  <ChoiceCard
+                    key={t.name}
+                    selected={v4ContentType === t.name}
+                    title={t.label}
+                    desc={t.hint}
+                    onClick={() => setV4ContentType(t.name)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </div>
+
+            )}
 
             {/* V4 predefined-description shortcut. When non-empty the
                 orchestrator preserves the source video AS-IS (no
@@ -1278,15 +1664,15 @@ export default function NewJob() {
                 </h3>
                 <p className="text-[11px] text-gray-500 mt-1">
                   Paste a finished description if your video is already polished and you don't want it re-trimmed.
-                  Leave empty for the normal flow (Claude trim + auto-generated SEO). Any language — Telugu, Hindi, English, etc.
+                  Leave empty and the AI trims your video and writes the title &amp; description automatically. Any language works.
                 </p>
               </div>
               <textarea
                 rows={5}
                 value={v4PredefinedDescription}
                 onChange={(e) => setV4PredefinedDescription(e.target.value)}
-                placeholder={"Optional. Paste your bulletin description here.\nExample: 'తెలంగాణలో నేడు మోదీ ర్యాలీ. ముఖ్యాంశాలు ఇవీ...'"}
-                className="w-full bg-gray-900/40 border-2 border-gray-800 hover:border-gray-700 focus:border-accent rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-600 resize-y"
+                placeholder={"Optional. Paste your finished video description here.\nExample: 'తెలంగాణలో నేడు మోదీ ర్యాలీ. ముఖ్యాంశాలు ఇవీ...'"}
+                className="w-full bg-black/30 border border-white/10 hover:border-white/20 focus:border-accent rounded-xl px-3 py-2 text-sm text-gray-100 placeholder-gray-600 resize-y outline-none"
                 maxLength={8000}
                 style={{ color: "#F4F4F5" }}
               />
@@ -1295,7 +1681,7 @@ export default function NewJob() {
                   {v4PredefinedDescription.trim() ? (
                     <>✓ <strong>Source-preserved mode</strong> will engage — your video stays full-length, this text becomes the SEO description.</>
                   ) : (
-                    <>Leave empty for the standard Claude-trimmed flow.</>
+                    <>Leave empty to let the AI trim your video automatically.</>
                   )}
                 </div>
                 <div className="text-[10px] text-gray-500 tabular-nums">
@@ -1315,43 +1701,150 @@ export default function NewJob() {
                   shorts/reels, or both. Picking one skips the other&apos;s render.
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {V4_OUTPUT_FORMAT_CATALOG.map((p) => {
-                  const sel = v4OutputFormat === p.name;
-                  return (
-                    <button
-                      key={p.name}
-                      type="button"
-                      onClick={() => setV4OutputFormat(p.name)}
-                      className={`text-left p-3 rounded-lg border-2 transition-all ${
-                        sel
-                          ? "border-accent bg-accent/10 ring-1 ring-accent/40"
-                          : "border-gray-800 hover:border-gray-700 bg-gray-900/40"
-                      }`}
-                    >
-                      <div className="text-sm font-medium" style={{ color: "#F4F4F5" }}>{p.label}</div>
-                      <div className="text-[11px] mt-1 leading-relaxed" style={{ color: "#C8C8D0" }}>
-                        {p.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <ChoiceGrid min={200}>
+                {V4_OUTPUT_FORMAT_CATALOG.map((p) => (
+                  <ChoiceCard
+                    key={p.name}
+                    selected={v4OutputFormat === p.name}
+                    title={p.label}
+                    desc={p.description}
+                    onClick={() => setV4OutputFormat(p.name)}
+                  />
+                ))}
+              </ChoiceGrid>
             </div>
+
+            {/* Full-form EFFECTS: how much of the editing engine treats the
+                long-form video (broadcast polish / cinematic pack / off). */}
+            {!aiAuto && v4OutputFormat !== "trailer-only" && (
+              <div className="mt-5">
+                <div className="mb-3">
+                  <h3 className="text-sm font-semibold text-white">Effects on the full video</h3>
+                  <p className="text-[11px] mt-1" style={{ color: "#9CA3AF" }}>
+                    The trailer always gets the full treatment. This controls the LONG-FORM video&apos;s look.
+                  </p>
+                </div>
+                <ChoiceGrid min={200}>
+                  {V4_EFFECTS_CATALOG.map((p) => (
+                    <ChoiceCard
+                      key={p.name}
+                      selected={v4EffectsMode === p.name}
+                      title={p.label}
+                      desc={p.description}
+                      onClick={() => setV4EffectsMode(p.name)}
+                    />
+                  ))}
+                </ChoiceGrid>
+
+                {/* DIRECTOR ENGINE: which AI plans the per-story direction.
+                    Both are real engines — "Kaizer V4" is our full-arsenal
+                    per-story director; "Platform" is the classic 5-mood
+                    signal engine (measures audio/pace/cuts/brightness, then
+                    an LLM sanity-check). Only "rich" (Cinematic) actually
+                    runs a director on the full video, so the picker shows
+                    ONLY there — offering it on auto/off would be a silent
+                    no-op of an explicit user choice. */}
+                {v4EffectsMode === "rich" && (
+                  <div className="mt-5">
+                    <div className="mb-3">
+                      <h3 className="text-sm font-semibold text-white">AI Director engine</h3>
+                      <p className="text-[11px] mt-1" style={{ color: "#9CA3AF" }}>
+                        Which director plans each story&apos;s look. Kaizer V4 is the default and most capable.
+                      </p>
+                    </div>
+                    <ChoiceGrid min={200}>
+                      <ChoiceCard
+                        selected={v4DirectorEngine === "v4"}
+                        title="Kaizer V4 — full arsenal"
+                        desc="Per-story moods, 76 transitions, 75 effects, timed overlays, layout switching, sound design. Recommended."
+                        onClick={() => setV4DirectorEngine("v4")}
+                      />
+                      <ChoiceCard
+                        selected={v4DirectorEngine === "platform"}
+                        title="Platform — classic"
+                        desc="Simpler 5-mood engine: measures energy, pace, cuts & brightness per story, LLM tone-check, subtler treatment."
+                        onClick={() => setV4DirectorEngine("platform")}
+                      />
+                    </ChoiceGrid>
+
+                    {/* DIRECTOR BRAIN — which AI writes the per-story plan.
+                        The pacing/vision/tone sensors stay on Gemini (they
+                        listen to the audio and look at frames); Claude and
+                        ChatGPT direct text-only from transcript + facts. */}
+                    <div className="mt-4 mb-3">
+                      <h3 className="text-sm font-semibold text-white">Director brain</h3>
+                      <p className="text-[11px] mt-1" style={{ color: "#9CA3AF" }}>
+                        Which AI writes the plan. Gemini also LISTENS to the audio and LOOKS at
+                        frames; Claude and ChatGPT direct text-only. Missing key → quietly Gemini.
+                      </p>
+                    </div>
+                    <ChoiceGrid min={180}>
+                      <ChoiceCard
+                        selected={v4DirectorProvider === "gemini"}
+                        title="Gemini"
+                        desc="Sees and hears the video via the sensors. Recommended."
+                        onClick={() => setV4DirectorProvider("gemini")}
+                      />
+                      <ChoiceCard
+                        selected={v4DirectorProvider === "claude"}
+                        title="Claude"
+                        desc="Text-only direction. Runs on your Anthropic account."
+                        onClick={() => setV4DirectorProvider("claude")}
+                      />
+                      <ChoiceCard
+                        selected={v4DirectorProvider === "openai"}
+                        title="ChatGPT"
+                        desc="Text-only direction. Runs on your OpenAI account (GPT-4o)."
+                        onClick={() => setV4DirectorProvider("openai")}
+                      />
+                    </ChoiceGrid>
+                  </div>
+                )}
+
+                {/* THEME: the visual skin of the built-in render. The theme
+                    only styles the look (backdrop, frame colour, ticker) —
+                    the AI's layout switching + animations run inside it.
+                    Hidden when a custom template is picked (it IS the look). */}
+                {!fullformLayout && (
+                  <div className="mt-5">
+                    <div className="mb-3">
+                      <h3 className="text-sm font-semibold text-white">Theme</h3>
+                      <p className="text-[11px] mt-1" style={{ color: "#9CA3AF" }}>
+                        The look your video wears — layouts and animations run inside it.
+                      </p>
+                    </div>
+                    <ChoiceGrid min={200}>
+                      {[["", "Classic", "The standard studio look"],
+                        ["obsidian", "Obsidian Editorial", "Dark newspaper-luxury, gold hairlines"],
+                        ["ivory", "Ivory Light", "Bright airy premium, coral accents"],
+                        ["nightline", "Nightline Horizon", "Dusk glow, prime-time feel"],
+                        ["verde", "Studio Verde", "Deep emerald cinema, mint light"]].map(([k, label, desc]) => (
+                        <ChoiceCard key={k || "classic"} selected={v4Theme === k}
+                          title={label} desc={desc} onClick={() => setV4Theme(k)} />
+                      ))}
+                    </ChoiceGrid>
+                  </div>
+                )}
+
+                {/* Direct the AI: optionally pin exact packs / transitions /
+                    effects / overlays / captions. Empty = the AI Director
+                    decides. Only shown when effects aren't turned off. */}
+                {v4EffectsMode !== "off" && (
+                  <StyleDirector value={v4StyleDirectives} onChange={setV4StyleDirectives} />
+                )}
+              </div>
+            )}
 
             {/* Edit-first (defer render): the pipeline produces the scene fast and skips the
                 up-front MP4 render; refine it in the editor, then Export. */}
-            <label className="mt-5 flex items-start gap-2.5 cursor-pointer rounded-lg border border-gray-800 hover:border-gray-600 p-3">
-              <input type="checkbox" checked={v4DeferRender}
-                onChange={(e) => setV4DeferRender(e.target.checked)} className="mt-0.5" />
-              <span>
-                <span className="text-sm text-white font-medium">Edit first — defer render</span>
-                <span className="block text-[11px] text-gray-500 mt-0.5">
-                  Finish fast with just the cut + scene (no MP4 yet). Refine everything in the
-                  editor, then <b className="text-gray-300">Export to MP4</b> when it's perfect.
-                </span>
-              </span>
-            </label>
+            <div className="mt-5">
+              <Toggle
+                checked={v4DeferRender}
+                onChange={setV4DeferRender}
+                label="Edit first"
+                hint="Finish fast with just the cut & scene (no video file yet). Refine everything in the editor, then export when it's perfect."
+              />
+            </div>
 
             {/* Shorts count cap + opt-in for more. Only shown when shorts
                 will be produced (full-only skips shorts entirely). */}
@@ -1364,14 +1857,13 @@ export default function NewJob() {
                     Turn this on to allow more.
                   </p>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-gray-300 mb-2 cursor-pointer">
-                  <input
-                    type="checkbox"
+                <div className="mb-2">
+                  <Toggle
                     checked={v4MoreShorts}
-                    onChange={(e) => { setV4MoreShorts(e.target.checked); if (!e.target.checked) setV4MaxShorts(8); }}
+                    onChange={(v) => { setV4MoreShorts(v); if (!v) setV4MaxShorts(8); }}
+                    label="Allow more than 8 shorts"
                   />
-                  Allow more than 8 shorts
-                </label>
+                </div>
                 {v4MoreShorts && (
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-[12px] text-gray-400">Max shorts</span>
@@ -1393,6 +1885,7 @@ export default function NewJob() {
             {/* V4 image-provider picker. Controls how every story's
                 sidebar image AND the final thumbnail get generated.
                 Default "auto" keeps today's V1 multi-source chain. */}
+            {!aiAuto && (
             <div className="mt-6 pt-5 border-t border-gray-800">
               <div className="mb-3">
                 <h3 className="font-semibold text-white text-sm">AI engine for images</h3>
@@ -1401,29 +1894,20 @@ export default function NewJob() {
                   images yourself, those always win and no AI generation runs.
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {V4_IMAGE_PROVIDER_CATALOG.map((p) => {
-                  const sel = v4ImageProvider === p.name;
-                  return (
-                    <button
-                      key={p.name}
-                      type="button"
-                      onClick={() => setV4ImageProvider(p.name)}
-                      className={`text-left p-3 rounded-lg border-2 transition-all ${
-                        sel
-                          ? "border-accent bg-accent/10 ring-1 ring-accent/40"
-                          : "border-gray-800 hover:border-gray-700 bg-gray-900/40"
-                      }`}
-                    >
-                      <div className="text-sm font-medium" style={{ color: "#F4F4F5" }}>{p.label}</div>
-                      <div className="text-[11px] mt-1 leading-relaxed" style={{ color: "#C8C8D0" }}>
-                        {p.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <ChoiceGrid min={200}>
+                {V4_IMAGE_PROVIDER_CATALOG.map((p) => (
+                  <ChoiceCard
+                    key={p.name}
+                    selected={v4ImageProvider === p.name}
+                    title={p.label}
+                    desc={p.description}
+                    onClick={() => setV4ImageProvider(p.name)}
+                  />
+                ))}
+              </ChoiceGrid>
             </div>
+
+            )}
 
             {/* Continue + Back actions */}
             <div className="flex items-center gap-3 mt-5">
@@ -1448,32 +1932,22 @@ export default function NewJob() {
         {/* Step 3: Language */}
         {step === 3 && (
           <div>
-            <h2 className="font-semibold text-white mb-4 flex items-center gap-2">
-              <Languages size={18} className="text-accent2" /> Choose Language
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Drives Gemini analysis, title generation, on-screen card font, and follow-bar text.
-              Pick the language the video is in so the output is authentic.
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <StepHeading eyebrow="Language" title="What language is the video in?" icon={Languages}
+              hint="This sets the transcription, the titles, and the on-screen fonts — so everything reads naturally." />
+            <ChoiceGrid min={150}>
               {languages.length === 0 && (
                 <span className="text-gray-500 text-sm">Loading languages…</span>
               )}
               {languages.map((l) => (
-                <button
+                <ChoiceCard
                   key={l.code}
-                  onClick={() => { setLanguage(l.code); setStep(4); /* V2: next step = STT picker; V1: next step = Confirm */ }}
-                  className={`p-4 rounded-lg border text-left transition-all
-                    ${language === l.code
-                      ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
-                      : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
-                >
-                  <div className="text-xl font-semibold mb-1">{l.native}</div>
-                  <div className="text-xs text-gray-500">{l.english}</div>
-                  <div className="text-[10px] text-gray-600 mt-0.5">{l.script} · {l.code}</div>
-                </button>
+                  selected={language === l.code}
+                  title={l.native}
+                  desc={`${l.english} · ${l.script}`}
+                  onClick={() => { setLanguage(l.code); setStep(4); }}
+                />
               ))}
-            </div>
+            </ChoiceGrid>
           </div>
         )}
 
@@ -1482,16 +1956,9 @@ export default function NewJob() {
             the Confirm screen below. */}
         {step === 4 && isV2(platform) && (
           <div>
-            <h2 className="font-semibold text-white mb-4 flex items-center gap-2">
-              <Mic size={18} className="text-accent2" /> Choose Speech-to-Text Provider
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              V2 supports multiple STT providers with different cost / quality
-              trade-offs. Defaults to the first configured provider. Unconfigured
-              providers are visible but disabled — your operator needs to set the
-              corresponding API key env var to enable them.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <StepHeading eyebrow="Transcription" title="How should we read the speech?" icon={Mic}
+              hint="This turns the spoken audio into text so the AI can edit it. The recommended option gives the best results for Indian languages. Greyed-out options aren't available on your account yet." />
+            <ChoiceGrid min={220}>
               {sttProviders.length === 0 && (
                 <span className="text-gray-500 text-sm">Loading providers…</span>
               )}
@@ -1508,46 +1975,23 @@ export default function NewJob() {
                   && Array.isArray(p.warnings)
                   && p.warnings.length > 0;
                 return (
-                  <button
+                  <ChoiceCard
                     key={p.id}
-                    onClick={() => { if (!disabled) { setSttProvider(p.id); setStep(5); } }}
+                    selected={selected}
                     disabled={disabled}
-                    className={`p-4 rounded-lg border text-left transition-all
-                      ${selected
-                        ? "border-accent bg-accent/10 text-white ring-1 ring-accent/30"
-                        : disabled
-                          ? "border-border bg-black/20 text-gray-600 cursor-not-allowed"
-                          : isRecommended
-                            ? "border-green-500/60 hover:border-green-400 hover:bg-green-500/[0.04] text-gray-300"
-                            : "border-border hover:border-gray-500 hover:bg-white/[0.02] text-gray-300"}`}
+                    title={p.display_name}
+                    desc={p.description}
+                    badge={isRecommended
+                      ? <Badge tone="emerald">Recommended for Telugu / Hindi</Badge>
+                      : <Badge tone="slate">{p.tier}</Badge>}
+                    onClick={() => { if (!disabled) { setSttProvider(p.id); setStep(5); } }}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{p.display_name}</div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase
-                        ${p.tier === "free" ? "bg-green-900/40 text-green-300"
-                          : p.tier === "mid" ? "bg-blue-900/40 text-blue-300"
-                          : "bg-purple-900/40 text-purple-300"}`}>
-                        {p.tier}
-                      </span>
-                    </div>
-                    {isRecommended && (
-                      <div className="text-[10px] text-green-300 mt-1 font-semibold uppercase tracking-wider">
-                        Recommended for Telugu / Hindi
-                      </div>
-                    )}
-                    <div className="text-xs text-gray-500 mt-1">
+                    <div className="mt-2 text-[11px] text-gray-400">
                       {p.cost_per_min_usd === 0
                         ? "Free"
-                        : `~$${(p.cost_per_min_usd).toFixed(4)}/min`}
+                        : (p.cost_per_min_usd < 0.01 ? "Low cost" : `~$${(p.cost_per_min_usd).toFixed(2)}/min`)}
+                      {!p.configured && <span className="ml-2 text-yellow-400/80">Not available on your account</span>}
                     </div>
-                    <div className="text-[11px] text-gray-500 mt-1.5 leading-snug">
-                      {p.description}
-                    </div>
-                    {!p.configured && (
-                      <div className="text-[10px] text-yellow-400/80 mt-1.5">
-                        Not configured (operator must set API key env var)
-                      </div>
-                    )}
                     {showWarnings && (
                       <div className="text-[10px] text-amber-400/90 mt-1.5 leading-snug border-t border-amber-900/40 pt-1.5">
                         {p.warnings.map((w, idx) => (
@@ -1555,10 +1999,10 @@ export default function NewJob() {
                         ))}
                       </div>
                     )}
-                  </button>
+                  </ChoiceCard>
                 );
               })}
-            </div>
+            </ChoiceGrid>
           </div>
         )}
 
@@ -1567,12 +2011,18 @@ export default function NewJob() {
             V2 platform:  step === 5 (6-step wizard, STT is step 4). */}
         {((step === 4 && !isV2(platform)) || (step === 5 && isV2(platform))) && (
           <div>
-            <h2 className="font-semibold text-white mb-4">Confirm & Start</h2>
-            <div className="bg-black/40 rounded-lg p-4 flex flex-col gap-3 mb-4 text-sm">
-              <ConfirmRow label="Video"    value={file?.name} />
+            <StepHeading eyebrow="Review" title="Review & create"
+              hint="Everything look good? Name it if you like, choose where to publish, and start." />
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 flex flex-col gap-3 mb-4 text-sm">
+              <ConfirmRow label={audioFirst ? "Narration audio" : "Video"}
+                value={audioFirst ? (audioFile?.name || "—") : file?.name} />
+              {audioFirst && (
+                <ConfirmRow label="Reference video"
+                  value={file ? `${file.name} (muted)` : "none — fullscreen images"} />
+              )}
               <ConfirmRow label="Platform" value={platforms[platform]?.label} />
               {isLongForm(platform) ? (
-                <ConfirmRow label="Mode"  value="Long-form bulletin (TV9 broadcast layout)" />
+                <ConfirmRow label="Mode"  value="Full-length video (news studio layout)" />
               ) : (
                 <>
                   <ConfirmRow label="Making" value={
@@ -1595,7 +2045,7 @@ export default function NewJob() {
               })()} />
               {isV2(platform) && (
                 <ConfirmRow
-                  label="STT Provider"
+                  label="Transcription"
                   value={sttProviders.find((p) => p.id === sttProvider)?.display_name || sttProvider}
                 />
               )}
@@ -1607,7 +2057,7 @@ export default function NewJob() {
               )}
               {isV2(platform) && (
                 <ConfirmRow
-                  label="Editorial AI"
+                  label="AI editor"
                   value={STAGE_2_PROVIDER_CATALOG.find((p) => p.name === stage2Provider)?.label || stage2Provider}
                 />
               )}
@@ -1616,7 +2066,7 @@ export default function NewJob() {
             {/* Item 104: V2 bulletin transition selection. Only shown
                 for V2 -- the V1 stitcher does not support transitions. */}
             {isV2(platform) && (
-              <div className="bg-surface border border-border rounded p-3 mb-4">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
                 <label htmlFor="transition-style"
                        className="text-sm font-medium text-gray-200 block mb-1.5">
                   Full Video transition
@@ -1625,7 +2075,7 @@ export default function NewJob() {
                   id="transition-style"
                   value={transitionStyle}
                   onChange={(e) => setTransitionStyle(e.target.value)}
-                  className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                  className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded
                              text-sm text-white
                              focus:outline-none focus:border-accent2"
                 >
@@ -1655,16 +2105,16 @@ export default function NewJob() {
 
             {/* Item 114: Stage 2 provider selection. Shown for V2 and V3. */}
             {usesStage2Provider(platform) && (
-              <div className="bg-surface border border-border rounded p-3 mb-4">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
                 <label htmlFor="stage-2-provider"
                        className="text-sm font-medium text-gray-200 block mb-1.5">
-                  Editorial AI <span className="text-[11px] text-gray-500 font-normal">(which LLM picks the cuts)</span>
+                  AI editor <span className="text-[11px] text-gray-500 font-normal">(which AI chooses the cuts)</span>
                 </label>
                 <select
                   id="stage-2-provider"
                   value={stage2Provider}
                   onChange={(e) => setStage2Provider(e.target.value)}
-                  className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                  className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded
                              text-sm text-white
                              focus:outline-none focus:border-accent2"
                 >
@@ -1681,7 +2131,7 @@ export default function NewJob() {
             {/* Phase 14 / V2 Beta (D-13.11): optional human-readable
                 name. Caps at 120 chars; blank falls back to the
                 filename. Renamable mid-flight from JobDetail. */}
-            <div className="bg-surface border border-border rounded p-3 mb-4">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
               <label htmlFor="job-name" className="text-sm font-medium text-gray-200 block mb-1.5">
                 Name this job <span className="text-[11px] text-gray-500 font-normal">(optional)</span>
               </label>
@@ -1691,8 +2141,8 @@ export default function NewJob() {
                 value={jobName}
                 onChange={(e) => setJobName(e.target.value.slice(0, 120))}
                 maxLength={120}
-                placeholder={file?.name ? file.name.slice(0, 80) : "Bandi Bhagirath bulletin"}
-                className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                placeholder={file?.name ? file.name.slice(0, 80) : "My news video"}
+                className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded
                            text-sm text-white placeholder-gray-600
                            focus:outline-none focus:border-accent2"
               />
@@ -1708,7 +2158,7 @@ export default function NewJob() {
                 Job so the editor + Publish flow default to them. Lives on the
                 Confirm step (no wizard step changes). */}
             {isV4(platform) && pubChannels.length > 0 && (
-              <div className="bg-surface border border-border rounded p-3 mb-4">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-sm font-medium text-gray-200">
                     Choose channels{" "}
@@ -1742,7 +2192,7 @@ export default function NewJob() {
                             <div className="text-[10px] text-gray-500 mb-1">Intro for this channel:</div>
                             <div className="flex items-center gap-1">
                               <select
-                                className="flex-1 min-w-0 bg-black/40 border border-border rounded px-1 py-0.5 text-[10px] text-gray-200"
+                                className="flex-1 min-w-0 bg-black/30 border border-white/10 rounded px-1 py-0.5 text-[10px] text-gray-200"
                                 value={ci.assetId > 0 && ci.demoFile ? `demo:${ci.demoFile}` : (ci.assetId > 0 ? "uploaded" : "own")}
                                 onFocus={ensureIntroSamples}
                                 onChange={async (e) => {
@@ -1812,7 +2262,7 @@ export default function NewJob() {
                 finishes (Campaigns → live V2 publish pipeline). Only shown
                 when the user has at least one plan. */}
             {plans.length > 0 && (
-              <div className="bg-surface border border-border rounded p-3 mb-4">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
                 <label htmlFor="attach-plan" className="text-sm font-medium text-gray-200 block mb-1.5">
                   Auto-publish with a Publishing Plan{" "}
                   <span className="text-[11px] text-gray-500 font-normal">(optional)</span>
@@ -1821,7 +2271,7 @@ export default function NewJob() {
                   id="attach-plan"
                   value={attachPlanId}
                   onChange={(e) => setAttachPlanId(e.target.value)}
-                  className="w-full px-3 py-2 bg-black/40 border border-border rounded
+                  className="w-full px-3 py-2 bg-black/30 border border-white/10 rounded
                              text-sm text-white focus:outline-none focus:border-accent2"
                 >
                   <option value="">Don't auto-publish</option>
@@ -1844,7 +2294,7 @@ export default function NewJob() {
             )}
 
             {/* Default image toggle */}
-            <div className="bg-surface border border-border rounded p-3 mb-4">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
               {defaultAsset ? (
                 <label className="flex items-start gap-2.5 cursor-pointer">
                   <input
@@ -1858,7 +2308,7 @@ export default function NewJob() {
                       <Star size={12} className="text-yellow-400" fill="currentColor" /> Use my default image
                     </div>
                     <div className="text-[11px] text-gray-500 mt-0.5">
-                      Every clip will use your default ad image instead of a generated / stock photo. Saves Pexels+Gemini quota and keeps branding consistent.
+                      Every clip will use your default image instead of a generated or stock photo. Saves image-generation cost and keeps your branding consistent.
                     </div>
                   </div>
                   <img
@@ -1886,14 +2336,15 @@ export default function NewJob() {
                 gen step saves ~$0.04 per image, ~$0.20-0.40 per
                 bulletin, and avoids the 5-img/min rate-limit pause. */}
             {platformProducesBulletin && (
-              <div className="bg-surface border border-border rounded p-3 mb-4">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 mb-4">
                 <div className="text-sm font-medium text-gray-200 mb-1">
-                  Pre-select bulletin images <span className="text-[11px] text-gray-500 font-normal">(optional)</span>
+                  Your own images &amp; reference clips <span className="text-[11px] text-gray-500 font-normal">(optional)</span>
                 </div>
-                <div className="text-[11px] text-gray-500 mb-3">
-                  Pick any number of images. The bulletin's per-story carousel will
-                  cycle through your selection instead of generating fresh images
-                  via OpenAI. Leave empty to keep auto-generation.
+                <div className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+                  Pick your own photos to use instead of AI-generated ones. You can also add short
+                  <b className="text-gray-300"> reference video clips</b> (B-roll) here — tag each one with its
+                  subject in the asset&apos;s description, and the AI will cut to it full-screen when that
+                  subject is mentioned. Leave empty to let the AI choose everything.
                 </div>
 
                 {/* "We've seen this video before — reuse its images?" prompt.
@@ -1916,7 +2367,7 @@ export default function NewJob() {
                       <span className="font-semibold text-white">{cachedAssets.length}</span>{" "}
                       image{cachedAssets.length === 1 ? "" : "s"} for this exact
                       source video in a previous job. Reuse them instead of
-                      calling OpenAI gpt-image-1 again ($ + rate-limit saved)?
+                      generating new images again (saves time and cost)?
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -1941,7 +2392,7 @@ export default function NewJob() {
                 )}
                 {!hashingFile && cachedDecision === "reuse" && (
                   <div className="text-[11px] text-accent2 mb-3 flex items-center gap-1.5">
-                    ✓ Reusing {cachedAssets.length} image{cachedAssets.length === 1 ? "" : "s"} from previous job — no OpenAI call.
+                    ✓ Reusing {cachedAssets.length} image{cachedAssets.length === 1 ? "" : "s"} from a previous job — no new images generated.
                   </div>
                 )}
                 {!hashingFile && cachedDecision === "fresh" && (
@@ -2086,7 +2537,7 @@ export default function NewJob() {
             {submitting && (
               <div className="mb-3">
                 <div className="flex justify-between text-xs text-gray-400 mb-1">
-                  <span>{uploadPct < 100 ? "Uploading video\u2026" : "Starting pipeline\u2026"}</span>
+                  <span>{uploadPct < 100 ? "Uploading video\u2026" : "Preparing your video\u2026"}</span>
                   <span>{uploadPct}%</span>
                 </div>
                 <div className="w-full h-2 bg-surface rounded-full overflow-hidden">
@@ -2099,12 +2550,17 @@ export default function NewJob() {
             )}
             <button
               onClick={submit}
-              disabled={submitting}
+              disabled={submitting
+                || (isV4Backed(platform) && audioFirst && !audioFile)
+                /* non-audio path always needs a source: an uploaded file OR a
+                   Library pick. Without this gate the button submitted with no
+                   file → form "video"="null" → 422. */
+                || (!(isV4Backed(platform) && audioFirst) && !file && !(pickedLib || libraryItem))}
               className="btn btn-primary w-full flex items-center justify-center gap-2"
             >
               {submitting
-                ? <><Loader2 size={16} className="animate-spin" /> {uploadPct < 100 ? `Uploading ${uploadPct}%` : "Starting pipeline\u2026"}</>
-                : "\u25B6 Start Pipeline"}
+                ? <><Loader2 size={16} className="animate-spin" /> {uploadPct < 100 ? `Uploading ${uploadPct}%` : "Preparing your video\u2026"}</>
+                : "Create video"}
             </button>
           </div>
         )}

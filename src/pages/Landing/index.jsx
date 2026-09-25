@@ -1,14 +1,16 @@
 import React from 'react';
-import KaizerXLanding from './KaizerXLanding';
+import LandingV2 from './LandingV2';
 
 /**
  * Landing page — Kaizer X (Sharkify Private Limited).
  *
- * Newsroom-motif AI video production studio landing with a self-contained
- * dark/light theme (default dark) and verbatim marketing copy. Replaces the
- * earlier SimpleLanding (kept on disk) and the retired newspaper "V7" design.
- * Edit ./KaizerXLanding.jsx to change the page.
+ * This is the desktop landing, generated from
+ * kaizer-desktop/renderer/landing.html so the two stay identical. To change
+ * the page, edit that file and re-run scratchpad/port_landing.py.
+ *
+ * The earlier landings are still on disk and no longer routed:
+ * KaizerXLanding.jsx (newsroom motif), SimpleLanding.jsx, KaizerV7App.jsx.
  */
 export default function LandingPage() {
-  return <KaizerXLanding />;
+  return <LandingV2 />;
 }

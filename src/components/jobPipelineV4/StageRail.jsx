@@ -35,8 +35,29 @@ const STATE_FROM_IDX = (i, stageIdx, failed) => {
   return "pending";
 };
 
-/** Right-rail vertical 3-step pipeline. */
-export default function StageRail({ stageIdx, stageFrac, failed, counters }) {
+/** One live substep row: ✓ done · pulsing ● active · dim ○ pending. */
+function SubstepRow({ step }) {
+  const mark = step.state === "done" ? "✓" : step.state === "active" ? "●" : "○";
+  const color = step.state === "done" ? "var(--v4p-ok, #34d399)"
+              : step.state === "active" ? "var(--v4p-accent, #f59e0b)"
+              : "var(--v4p-tx-faint, #6b7280)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6,
+                  fontSize: 11, lineHeight: "18px", color,
+                  opacity: step.state === "pending" ? 0.55 : 1 }}>
+      <span style={{ width: 12, textAlign: "center",
+                     animation: step.state === "active"
+                       ? "v4p-pulse 1.2s ease-in-out infinite" : "none" }}>
+        {mark}
+      </span>
+      <span className="truncate">{step.label}</span>
+    </div>
+  );
+}
+
+/** Right-rail vertical 3-step pipeline (with live substeps under the
+ * active stage so a long step never looks stuck). */
+export default function StageRail({ stageIdx, stageFrac, failed, counters, substeps }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 2200);
@@ -80,6 +101,12 @@ export default function StageRail({ stageIdx, stageFrac, failed, counters }) {
           const pct = state === "done" ? 100
                      : state === "active" ? Math.round(stageFrac * 100)
                      : 0;
+          // Real substeps parsed from the live log; only shown expanded on
+          // the stage the pipeline is actually in (or halted at) so the
+          // user always sees WHAT the engine is doing, not just a spinner.
+          const stageSubs = (substeps && substeps[s.key]) || [];
+          const showSubs = (state === "active" || state === "failed")
+            && stageSubs.length > 0;
           return (
             <div key={s.key} className={`v4p-stage-row v4p-${state}`}>
               <div className="v4p-stage-node">
@@ -96,6 +123,14 @@ export default function StageRail({ stageIdx, stageFrac, failed, counters }) {
                         ? "halted"
                         : "queued"}
                 </div>
+                {showSubs && (
+                  <div style={{ marginTop: 4, display: "flex",
+                                flexDirection: "column", gap: 1 }}>
+                    {stageSubs.map((st) => (
+                      <SubstepRow key={st.key} step={st} />
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="v4p-stage-amt">
                 {state === "pending" ? "—" : `${pct}%`}

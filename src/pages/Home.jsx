@@ -6,6 +6,7 @@ import {
   Plus, Trash2, Edit2, Loader2, CheckCircle, XCircle, Clock, StopCircle,
   Search, Film, Activity, Layers, Calendar, Video, Sparkles, AlertTriangle,
   Languages, ChevronLeft, ChevronRight, ImageOff, Play, MoreVertical, ExternalLink,
+  Pause, PauseCircle, RotateCcw,
 } from "lucide-react";
 import { api } from "../api/client";
 
@@ -19,6 +20,7 @@ const STATUS_ICON = {
   done:      <CheckCircle  size={12} />,
   failed:    <XCircle      size={12} />,
   cancelled: <StopCircle   size={12} />,
+  paused:    <PauseCircle  size={12} />,
 };
 
 const STATUS_PILL = {
@@ -27,6 +29,7 @@ const STATUS_PILL = {
   done:      "bg-green-900/80 text-green-100  border-green-500/60",
   failed:    "bg-red-900/80 text-red-100      border-red-500/60",
   cancelled: "bg-amber-900/80 text-amber-100  border-amber-500/60",
+  paused:    "bg-sky-900/80  text-sky-100     border-sky-500/60",
 };
 
 const STATUS_DOT = {
@@ -35,6 +38,7 @@ const STATUS_DOT = {
   done:      "bg-green-400",
   failed:    "bg-red-400",
   cancelled: "bg-amber-400",
+  paused:    "bg-sky-400",
 };
 
 const STATUS_PLACEHOLDER_BG = {
@@ -43,6 +47,7 @@ const STATUS_PLACEHOLDER_BG = {
   done:      "from-emerald-900 via-green-950 to-black",
   failed:    "from-red-900 via-rose-950 to-black",
   cancelled: "from-amber-900 via-amber-950 to-black",
+  paused:    "from-sky-900 via-slate-950 to-black",
 };
 
 const PLATFORM_LABEL = {
@@ -176,7 +181,7 @@ function PlaceholderArt({ job }) {
   );
 }
 
-const JobCard = React.memo(function JobCard({ job, onDelete, onCancel, onEdit }) {
+const JobCard = React.memo(function JobCard({ job, onDelete, onCancel, onEdit, onPause, onResume, onRetry }) {
   const isActive  = job.status === "running" || job.status === "pending";
   const isRunning = job.status === "running";
   const isVertical = job.thumbnail_aspect === "9:16";
@@ -309,14 +314,50 @@ const JobCard = React.memo(function JobCard({ job, onDelete, onCancel, onEdit })
               <Edit2 size={12}/>
             </button>
           )}
-          {isActive && (
+          {(job.status === "pending" || job.status === "queued") && (
+            <button
+              type="button"
+              onClick={(e) => onPause(job.id, e)}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md
+                         bg-black/70 backdrop-blur-md border border-white/15 text-white/90
+                         hover:bg-sky-700 hover:border-sky-500 transition-all"
+              title="Pause (hold in queue)"
+            >
+              <Pause size={12}/>
+            </button>
+          )}
+          {job.status === "paused" && (
+            <button
+              type="button"
+              onClick={(e) => onResume(job.id, e)}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md
+                         bg-black/70 backdrop-blur-md border border-white/15 text-white/90
+                         hover:bg-emerald-700 hover:border-emerald-500 transition-all"
+              title="Resume (put back in queue)"
+            >
+              <Play size={12}/>
+            </button>
+          )}
+          {(job.status === "failed" || job.status === "cancelled") && !isQuickPublish && (
+            <button
+              type="button"
+              onClick={(e) => onRetry(job.id, e)}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md
+                         bg-black/70 backdrop-blur-md border border-white/15 text-white/90
+                         hover:bg-blue-700 hover:border-blue-500 transition-all"
+              title="Retry (re-run without re-uploading)"
+            >
+              <RotateCcw size={12}/>
+            </button>
+          )}
+          {(isActive || job.status === "paused") && (
             <button
               type="button"
               onClick={(e) => onCancel(job.id, e)}
               className="inline-flex items-center justify-center w-7 h-7 rounded-md
                          bg-black/70 backdrop-blur-md border border-white/15 text-white/90
                          hover:bg-amber-700 hover:border-amber-500 transition-all"
-              title="Stop job"
+              title="Stop / cancel job"
             >
               <StopCircle size={12}/>
             </button>
@@ -475,6 +516,48 @@ export default function Home() {
       setJobs(j => j.map(x => x.id === id ? { ...x, status: "cancelled" } : x));
     } catch (err) {
       alert("Cancel failed: " + (err.message || "unknown error"));
+    }
+  }, []);
+
+  // Hold a queued job so it won't run when its turn comes (single-GPU box →
+  // one render at a time). Optimistic; the poll reconciles the real status.
+  const pauseJob = useCallback(async (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await api.pauseJob(id);
+      setJobs(j => j.map(x => x.id === id ? { ...x, status: "paused" } : x));
+    } catch (err) {
+      alert("Pause failed: " + (err.message || "unknown error"));
+    }
+  }, []);
+
+  const resumeJob = useCallback(async (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await api.resumeJob(id);
+      setJobs(j => j.map(x => x.id === id ? { ...x, status: "pending" } : x));
+    } catch (err) {
+      alert("Resume failed: " + (err.message || "unknown error"));
+    }
+  }, []);
+
+  // Re-run a finished/failed/cancelled job from its saved settings — no
+  // re-upload. Custom logo / pre-picked images / bg clip aren't re-applied.
+  const retryJob = useCallback(async (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(
+      "Retry this job?\n\n" +
+      "It re-runs from your saved settings (source video + effects) without " +
+      "re-uploading. It joins the queue and runs one at a time."
+    )) return;
+    try {
+      await api.retryJob(id);
+      setJobs(j => j.map(x => x.id === id ? { ...x, status: "pending" } : x));
+    } catch (err) {
+      alert("Retry failed: " + (err.message || "unknown error"));
     }
   }, []);
 
@@ -676,6 +759,9 @@ export default function Home() {
                 onDelete={deleteJob}
                 onCancel={cancelJob}
                 onEdit={editJob}
+                onPause={pauseJob}
+                onResume={resumeJob}
+                onRetry={retryJob}
               />
             ))}
           </div>

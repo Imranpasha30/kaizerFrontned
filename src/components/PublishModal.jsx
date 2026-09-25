@@ -3,11 +3,15 @@ import { Link as RLink } from "react-router-dom";
 import {
   Youtube, Lock, Globe, Link as LinkIcon, Calendar,
   AlertCircle, CheckCircle2, Loader2, Sparkles, Smartphone, Clapperboard,
+  Image as ImageIcon,
 } from "lucide-react";
-import { api } from "../api/client";
+import { api, isDesktop } from "../api/client";
 import Modal from "./Modal";
 import PostizCrossPostSection, { matchChannelForIntegration } from "./PostizCrossPostSection";
 import { useAuth } from "../auth/AuthProvider";
+import { friendlyPublishError } from "../utils/uploadErrors";
+import ChannelPublishSettings, { buildPublishSettingsByChannel } from "./ChannelPublishSettings";
+import BestTimeHint from "./BestTimeHint";
 
 // Compose a FULL social caption from a clip's SEO — title + description +
 // hashtags. Used for RAW Postiz posts (no style profile to brand with) so
@@ -104,6 +108,29 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   // Per-destination variant overrides: { "<dest_channel_id>": <variant_channel_id> }
   // Lets each selected YouTube destination use a different SEO variant.
   const [variantByDest, setVariantByDest] = useState({});
+  // Per-channel SEO generated on-demand from THIS modal ("✦ Write distinct
+  // SEO"). Holds ONLY freshly-generated variants (keyed by channel id) and is
+  // merged on top of the clip's persisted seo_variants so the picker + preview
+  // update live without a re-fetch. Reset to {} on every open.
+  const [seoVariantsLocal, setSeoVariantsLocal] = useState({});
+  const [genSeoBusy, setGenSeoBusy] = useState(false);
+  const [genSeoMsg, setGenSeoMsg] = useState("");
+  // Bumped after a per-channel SEO generation so each destination's
+  // ComposedPreview re-fetches (it caches its result otherwise).
+  const [seoRefreshKey, setSeoRefreshKey] = useState(0);
+  // ── Thumbnail (videos only; Shorts never get a custom thumbnail) ──────
+  //   thumbScope : "all" (one thumbnail for every channel) | "per_channel"
+  //   thumbAllMode: "rendered" (pipeline thumbnail) | "custom" (staged upload)
+  //   thumbByChannel: { "<channelId>": { mode, key, url } }
+  const [thumbScope, setThumbScope] = useState("all");
+  const [thumbAllMode, setThumbAllMode] = useState("rendered");
+  const [thumbAllKey, setThumbAllKey] = useState("");
+  const [thumbAllUrl, setThumbAllUrl] = useState("");
+  const [thumbByChannel, setThumbByChannel] = useState({});
+  const [thumbBusy, setThumbBusy] = useState("");   // slot currently uploading ("all" | channelId)
+  // Per-channel YouTube publish-setting overrides (category/language/playlist/
+  // license/made-for-kids) for THIS upload: { "<channelId>": {...} }.
+  const [settingsByChannel, setSettingsByChannel] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   // Non-error "already published" notice (dedupe-by-design) — shown in a
@@ -140,8 +167,14 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   const destsTouchedRef = useRef(false);
 
   const hasSeo = !!(clip && clip.seo && clip.seo.title);
-  const variantMap = (clip?.seo_variants && typeof clip.seo_variants === "object")
-    ? clip.seo_variants : {};
+  // Persisted per-channel variants from the clip, with any freshly-generated
+  // ones ("✦ Write distinct SEO") layered on top so the UI reflects them
+  // immediately. The backend persists the generated variants to clip.seo_variants
+  // too, so publish uses them via _compose_metadata's direct channel match.
+  const variantMap = {
+    ...(clip?.seo_variants && typeof clip.seo_variants === "object" ? clip.seo_variants : {}),
+    ...(seoVariantsLocal || {}),
+  };
   const variantList = Object.entries(variantMap).map(([cid, v]) => ({
     channelId: Number(cid),
     score: Number(v?.seo_score || 0),
@@ -150,6 +183,122 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   const bestVariant = variantList.length
     ? [...variantList].sort((a, b) => b.score - a.score)[0]
     : null;
+
+  // ── Per-channel "✦ Write distinct SEO" ────────────────────────────────
+  // Generate a distinct title/description/tags for EACH selected destination,
+  // using the live per-channel SEO engine. The backend persists each variant
+  // to clip.seo_variants (marked _per_channel), so at publish every channel
+  // gets its own SEO via _compose_metadata's direct channel match — no extra
+  // payload wiring needed. We also merge the previews into local state so the
+  // per-destination preview ("preview what will be uploaded") reflects it now.
+  async function generatePerChannelSeo() {
+    const ids = [];
+    for (const destKey of selectedDests) {
+      const pid = profileByDest[destKey];
+      if (pid != null && !ids.includes(Number(pid))) ids.push(Number(pid));
+    }
+    if (ids.length === 0) {
+      setGenSeoMsg("Select at least one destination first.");
+      return;
+    }
+    if (!clip?.id) return;
+    setGenSeoBusy(true);
+    setGenSeoMsg(`Writing distinct SEO for ${ids.length} channel${ids.length === 1 ? "" : "s"}… this can take ~10s per channel.`);
+
+    // Merge any PERSISTED per-channel variants into local state (the backend
+    // saves them even if the HTTP request is slow / times out). Returns count.
+    const mergeFromVariants = (sv) => {
+      const fresh = {};
+      for (const id of ids) {
+        const v = sv?.[String(id)];
+        if (v && typeof v === "object" && v._per_channel && v.title) fresh[String(id)] = v;
+      }
+      if (Object.keys(fresh).length) {
+        setSeoVariantsLocal((prev) => ({ ...prev, ...fresh }));
+        setSeoVariantOverride("auto");
+        setSeoRefreshKey((k) => k + 1);
+      }
+      return Object.keys(fresh).length;
+    };
+
+    try {
+      const res = await api.quickSeoPerChannel(clip.id, { mode: "per_channel", channel_ids: ids });
+      const fresh = {};
+      for (const p of (res?.previews || [])) {
+        const cid = p.channel_id ?? p.channelId;
+        if (cid == null) continue;
+        fresh[String(cid)] = {
+          title: p.title || "",
+          description: p.description || "",
+          tags: p.tags || p.keywords || [],
+          hashtags: p.hashtags || [],
+          seo_score: p.seo_score ?? p.score ?? 0,
+          _per_channel: true,
+        };
+      }
+      setSeoVariantsLocal((prev) => ({ ...prev, ...fresh }));
+      setSeoVariantOverride("auto");
+      setSeoRefreshKey((k) => k + 1);
+      const n = res?.applied ?? Object.keys(fresh).length;
+      setGenSeoMsg(
+        `Wrote distinct SEO for ${n} channel${n === 1 ? "" : "s"}. ` +
+        `Open “preview what will be uploaded” under a destination to check.`
+      );
+    } catch (e) {
+      // The request may have timed out (slow multi-channel generation) while the
+      // server kept going and PERSISTED the result. Poll the saved variants and
+      // recover them instead of showing a false "failed".
+      let recovered = 0;
+      for (let i = 0; i < 18 && recovered < ids.length; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        try {
+          const fresh = await api.getClip(clip.id);
+          let sv = fresh?.seo_variants;
+          if (typeof sv === "string") { try { sv = JSON.parse(sv); } catch { sv = {}; } }
+          recovered = mergeFromVariants(sv || {});
+        } catch { /* keep polling */ }
+      }
+      if (recovered > 0) {
+        setGenSeoMsg(
+          `Wrote distinct SEO for ${recovered} channel${recovered === 1 ? "" : "s"} ` +
+          `(the response was slow, so the saved result was recovered).`
+        );
+      } else {
+        setGenSeoMsg(
+          (e?.message ? e.message + " — " : "") +
+          "Per-channel SEO is taking too long (Gemini rate limit). Try again, or do fewer channels at once."
+        );
+      }
+    } finally {
+      setGenSeoBusy(false);
+    }
+  }
+
+  // Stage a custom thumbnail (no clip mutation) → returns a storage key the
+  // publish payload references. slot = "all" (shared) or a channel id string.
+  async function uploadThumb(file, slot) {
+    if (!file || !clip?.id) return;
+    setThumbBusy(slot);
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await api.stageThumbnail(clip.id, fd);
+      if (slot === "all") {
+        setThumbAllMode("custom");
+        setThumbAllKey(res.key);
+        setThumbAllUrl(res.url);
+      } else {
+        setThumbByChannel((prev) => ({
+          ...prev,
+          [slot]: { mode: "custom", key: res.key, url: res.url },
+        }));
+      }
+    } catch (e) {
+      setError(e?.message || "Thumbnail upload failed");
+    } finally {
+      setThumbBusy("");
+    }
+  }
 
   // Fetch the active upload provider once on open. Cheap (1 GET); only
   // fires when the modal opens, not on every render.
@@ -178,6 +327,18 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     // Reset per-destination map — will be filled by the effect below once
     // the list of destinations is computed.
     setVariantByDest({});
+    // Drop any per-channel SEO generated in a previous open of the modal.
+    setSeoVariantsLocal({});
+    setGenSeoBusy(false);
+    setGenSeoMsg("");
+    // Reset thumbnail selection.
+    setThumbScope("all");
+    setThumbAllMode("rendered");
+    setThumbAllKey("");
+    setThumbAllUrl("");
+    setThumbByChannel({});
+    setThumbBusy("");
+    setSettingsByChannel({});
 
     // Load the user's named publish presets — shows up as preset buttons.
     api.listChannelGroups().then(setGroups).catch(() => setGroups([]));
@@ -569,6 +730,33 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
     if (seoVariantOverride && seoVariantOverride !== "auto") {
       payload.seo_variant_override = Number(seoVariantOverride);
     }
+    // Thumbnail (videos only; the backend ignores thumbnails for Shorts).
+    if (publishKind === "video") {
+      if (thumbScope === "per_channel") {
+        const tbc = {};
+        for (const cid of ids.map(Number)) {
+          const sel = thumbByChannel[String(cid)];
+          tbc[String(cid)] = (sel && sel.mode === "custom" && sel.key)
+            ? `custom:${sel.key}`
+            : "rendered";
+        }
+        payload.thumbnail_by_channel = tbc;
+      } else if (thumbAllMode === "custom" && thumbAllKey) {
+        payload.thumbnail_mode = "custom";
+        payload.custom_thumbnail_r2_key = thumbAllKey;
+      } else {
+        payload.thumbnail_mode = "rendered";
+      }
+    }
+
+    // Per-channel YouTube publish settings override (category / language /
+    // playlist / license / made-for-kids). Pre-filled from each channel's
+    // defaults; only sent for channels with a non-default value.
+    const _psbc = buildPublishSettingsByChannel(settingsByChannel, channels, ids.map(Number));
+    if (Object.keys(_psbc).length > 0) {
+      payload.publish_settings_by_channel = _psbc;
+    }
+
     // Per-destination overrides — keyed by destination profile id.
     // Only send entries for destinations that are actually being published to.
     const perDest = {};
@@ -630,7 +818,7 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
       onPublished?.(res);
       onClose?.();
     } catch (err) {
-      setError(err.message || "Publish failed");
+      setError(friendlyPublishError(err));
     } finally {
       setSubmitting(false);
     }
@@ -639,12 +827,14 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
   if (!clip) return null;
 
   return (
-    <Modal open={open} onClose={onClose} title="Publish to YouTube" size="md">
+    <Modal open={open} onClose={onClose} title="Clip Publish — Publish to YouTube" size="md">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {/* Active upload provider banner — visible to ALL users so it
             is obvious whether the click hits Postiz or our native YT
-            path. Only admins can flip it (Admin → Settings). */}
-        {activeProvider && (
+            path. Only admins can flip it (Admin → Settings). Hidden on
+            desktop: publishes there are always native YT, and the gated
+            settings endpoint's 404 fallback would falsely claim Postiz. */}
+        {!isDesktop() && activeProvider && (
           <div className={`text-[11px] px-3 py-2 rounded border flex items-center gap-2 ${
             activeProvider === "postiz"
               ? "bg-purple-950/30 border-purple-900/50 text-purple-200"
@@ -823,6 +1013,24 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
                           {ytHandle ? `youtube.com/${ytHandle}` : "your YouTube channel"}
                         </div>
                       </div>
+                      {/* CTR score of this channel's distinct SEO variant (persisted
+                          clip.seo_variants + freshly generated), same coloring as the
+                          V4 editor badge: emerald >= 70, amber below. Hidden when the
+                          variant has no score (adapted/base fallback). */}
+                      {(() => {
+                        const v = variantMap[String(activeProfileId)];
+                        const s = Number(v?.seo_score);
+                        return Number.isFinite(s) && s > 0 ? (
+                          <span
+                            className={`flex-shrink-0 text-[9px] px-1 py-px rounded font-medium tabular-nums ${
+                              s >= 70 ? "bg-emerald-900/50 text-emerald-300" : "bg-amber-900/40 text-amber-300"
+                            }`}
+                            title="SEO / CTR score of this channel's distinct SEO variant"
+                          >
+                            ✦ CTR {s}/100
+                          </span>
+                        ) : null;
+                      })()}
                       <CheckCircle2 size={14} className={`flex-shrink-0 ${isSel ? "text-green-500" : "text-gray-700"}`} />
                     </label>
                     {isSel && profiles.length > 1 && (
@@ -837,6 +1045,17 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
                         clipId={clip.id}
                         channelId={activeProfileId}
                         publishKind={publishKind}
+                        refreshKey={seoRefreshKey}
+                      />
+                    )}
+                    {/* Per-channel YouTube publish settings (category/language/
+                        playlist/license/made-for-kids) — pre-filled from this
+                        channel's defaults; edits override for this upload only. */}
+                    {isSel && publishKind === "video" && (
+                      <ChannelPublishSettings
+                        channel={activeProfile}
+                        value={settingsByChannel[String(activeProfileId)]}
+                        onChange={(obj) => setSettingsByChannel((p) => ({ ...p, [String(activeProfileId)]: obj }))}
                       />
                     )}
                     {/* Per-destination SEO variant picker (legacy variants only) */}
@@ -934,6 +1153,28 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
           )}
         </div>
 
+        {/* Per-channel distinct SEO — one click writes a unique title /
+            description / tags for EACH selected destination. Preview each
+            below via "preview what will be uploaded". */}
+        {hasSeo && connectedChannels.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={generatePerChannelSeo}
+              disabled={genSeoBusy}
+              className="self-start flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded border border-accent2/40 bg-accent2/10 text-accent2 hover:bg-accent2/20 disabled:opacity-50"
+              title="Generate a distinct title, description and tags for each selected channel"
+            >
+              {genSeoBusy
+                ? (<><Loader2 size={13} className="animate-spin" /> Writing distinct SEO…</>)
+                : (<><Sparkles size={13} /> ✦ Write distinct SEO per channel</>)}
+            </button>
+            {genSeoMsg && (
+              <p className="text-[10px] text-gray-400 leading-relaxed">{genSeoMsg}</p>
+            )}
+          </div>
+        )}
+
         {/* SEO variant picker — only shown when multiple variants exist */}
         {variantList.length > 0 && (
           <div className="flex flex-col gap-1.5">
@@ -954,7 +1195,7 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
                   const isBest = bestVariant && v.channelId === bestVariant.channelId;
                   return (
                     <option key={v.channelId} value={v.channelId}>
-                      {isBest ? "★ " : ""}{name} — score {v.score}/100{isBest ? " (best)" : ""}
+                      {isBest ? "★ " : ""}{name}{v.score > 0 ? ` — score ${v.score}/100` : ""}{isBest ? " (best)" : ""}
                     </option>
                   );
                 })}
@@ -1033,6 +1274,84 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
           </div>
         )}
 
+        {/* Thumbnail (videos only — Shorts use no custom thumbnail) */}
+        {publishKind === "video" && (
+          <div className="flex flex-col gap-2 bg-surface border border-border rounded p-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-300 flex items-center gap-1.5">
+                <ImageIcon size={13} className="text-accent2" /> Thumbnail
+              </label>
+              {connectedChannels.length > 1 && (
+                <div className="flex gap-1 text-[10px]">
+                  <button type="button" onClick={() => setThumbScope("all")}
+                    className={`px-2 py-0.5 rounded ${thumbScope === "all" ? "bg-accent2/20 text-accent2" : "text-gray-500 hover:text-gray-300"}`}>Same for all</button>
+                  <button type="button" onClick={() => setThumbScope("per_channel")}
+                    className={`px-2 py-0.5 rounded ${thumbScope === "per_channel" ? "bg-accent2/20 text-accent2" : "text-gray-500 hover:text-gray-300"}`}>Per channel</button>
+                </div>
+              )}
+            </div>
+
+            {thumbScope === "all" ? (
+              <div className="flex items-center gap-3">
+                <div className="w-24 h-14 rounded border border-border bg-black/40 overflow-hidden flex items-center justify-center text-[9px] text-gray-500 flex-shrink-0">
+                  {thumbAllMode === "custom" && thumbAllUrl
+                    ? <img src={thumbAllUrl} alt="custom thumbnail" className="w-full h-full object-cover" />
+                    : (clip?.thumb_storage_url
+                        ? <img src={clip.thumb_storage_url} alt="rendered thumbnail" className="w-full h-full object-cover" />
+                        : "rendered")}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex gap-1.5 text-[10px]">
+                    <button type="button" onClick={() => setThumbAllMode("rendered")}
+                      className={`px-2 py-1 rounded border ${thumbAllMode === "rendered" ? "border-accent2/50 text-accent2 bg-accent2/10" : "border-border text-gray-400"}`}>Use rendered</button>
+                    <label className={`px-2 py-1 rounded border cursor-pointer ${thumbAllMode === "custom" ? "border-accent2/50 text-accent2 bg-accent2/10" : "border-border text-gray-400"}`}>
+                      {thumbBusy === "all" ? "Uploading…" : "Upload custom"}
+                      <input type="file" accept="image/jpeg,image/png" className="hidden"
+                        onChange={(e) => { uploadThumb(e.target.files?.[0], "all"); e.target.value = ""; }} />
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-gray-500 leading-relaxed">
+                    {thumbAllMode === "custom"
+                      ? "Custom thumbnail applied to every channel."
+                      : "Uses the video's rendered thumbnail (default)."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 max-h-44 overflow-y-auto pr-1">
+                {[...selectedDests].map((destKey) => {
+                  const pid = profileByDest[destKey];
+                  const prof = channels.find((c) => c.id === pid);
+                  const sel = thumbByChannel[String(pid)];
+                  const isCustom = sel?.mode === "custom";
+                  return (
+                    <div key={destKey} className="flex items-center gap-2">
+                      <div className="w-16 h-9 rounded border border-border bg-black/40 overflow-hidden flex items-center justify-center text-[8px] text-gray-500 flex-shrink-0">
+                        {isCustom && sel.url
+                          ? <img src={sel.url} alt="" className="w-full h-full object-cover" />
+                          : "rendered"}
+                      </div>
+                      <span className="text-[11px] text-gray-300 flex-1 truncate">
+                        {prof?.youtube_channel_title || prof?.name || `#${pid}`}
+                      </span>
+                      <div className="flex gap-1 text-[9px]">
+                        <button type="button"
+                          onClick={() => setThumbByChannel((p) => ({ ...p, [String(pid)]: { mode: "rendered" } }))}
+                          className={`px-1.5 py-1 rounded border ${!isCustom ? "border-accent2/50 text-accent2 bg-accent2/10" : "border-border text-gray-400"}`}>rendered</button>
+                        <label className={`px-1.5 py-1 rounded border cursor-pointer ${isCustom ? "border-accent2/50 text-accent2 bg-accent2/10" : "border-border text-gray-400"}`}>
+                          {thumbBusy === String(pid) ? "…" : "upload"}
+                          <input type="file" accept="image/jpeg,image/png" className="hidden"
+                            onChange={(e) => { uploadThumb(e.target.files?.[0], String(pid)); e.target.value = ""; }} />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Privacy */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-gray-300">Visibility</label>
@@ -1085,6 +1404,7 @@ export default function PublishModal({ open, onClose, clip, jobId, onPublished }
             <p className="text-[11px] text-gray-500">
               Video is uploaded as <span className="text-gray-400">private</span> and YouTube will flip it public at your chosen time.
             </p>
+            <BestTimeHint onApply={(v) => setPublishAt(v)} />
           </div>
         )}
 
@@ -1305,7 +1625,7 @@ function PrivacyOption({ active, onClick, icon: Icon, label, hint }) {
  * on demand.  Also surfaces any cross-brand leak warnings from the backend
  * auditor as a prominent red banner so the user can bail before publish.
  */
-function ComposedPreview({ clipId, channelId, publishKind }) {
+function ComposedPreview({ clipId, channelId, publishKind, refreshKey = 0 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -1319,10 +1639,11 @@ function ComposedPreview({ clipId, channelId, publishKind }) {
       .then((res) => setData(res))
       .catch((e) => setErr(e.message || "Preview failed"))
       .finally(() => setLoading(false));
-  }, [open, clipId, channelId, publishKind]);
+  }, [open, clipId, channelId, publishKind, refreshKey]);
 
-  // Invalidate cache if destination or publishKind changes while expanded
-  useEffect(() => { setData(null); }, [channelId, publishKind]);
+  // Invalidate cache if destination / publishKind changes, OR after a fresh
+  // per-channel SEO generation (refreshKey bump) so the preview re-fetches.
+  useEffect(() => { setData(null); }, [channelId, publishKind, refreshKey]);
 
   return (
     <div className="mt-2 pl-6">

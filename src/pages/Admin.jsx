@@ -5,7 +5,7 @@ import {
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
   BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
-  Gauge, Terminal, Star, Workflow, Brain, Layers,
+  Gauge, Terminal, Star, Workflow, Brain, Layers, Clapperboard,
 } from "lucide-react";
 import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
@@ -19,6 +19,9 @@ import AdminV2Dashboard from "./AdminV2Dashboard";
 import AdminPipelineFlow from "./AdminPipelineFlow";
 import AdminLearning from "./AdminLearning";
 import AdminPlanTiers from "./AdminPlanTiers";
+import AdminDesktopLicenses from "./AdminDesktopLicenses";
+import AdminAccounts from "./AdminAccounts";
+import AdminEditingFeatures from "./admin/AdminEditingFeatures";
 import "../theme/admin-theme.css";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1712,6 +1715,9 @@ const TABS = [
   { path: "learning", label: "Learning",    icon: Brain,       comp: AdminLearning },
   { path: "live",     label: "Live events", icon: Radio,       comp: LiveEventsTab },
   { path: "plan-tiers", label: "Plan Tiers", icon: Layers,     comp: AdminPlanTiers },
+  { path: "accounts", label: "Accounts & Keys", icon: UserCog, comp: AdminAccounts },
+  { path: "desktop", label: "Desktop", icon: HardDrive, comp: AdminDesktopLicenses },
+  { path: "features", label: "Editing Features", icon: Clapperboard, comp: AdminEditingFeatures },
   { path: "settings", label: "Settings",    icon: SettingsIcon, comp: SettingsTab  },
   { path: "audit",    label: "Audit log",   icon: Shield,      comp: AuditTab      },
 ];
@@ -1731,8 +1737,10 @@ function AdminSidebar() {
           >
             KAIZER
           </div>
+          {/* "SUPER ADMIN" (operator, 2026-08-25): future org/team-scoped
+              admin & manager panels will sit BELOW this one. */}
           <span className="text-[10px] font-semibold tracking-[0.22em]" style={{ color: "var(--adm-cyan-2)" }}>
-            ADMIN
+            SUPER ADMIN
           </span>
         </div>
         <div className="text-[10px] mt-2 tracking-wider uppercase" style={{ color: "var(--adm-text-5)" }}>

@@ -1,6 +1,12 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { TrendingUp, Download, Loader2, Sparkles, AlertCircle, RefreshCw, Info, Clock, BarChart2, BookOpen } from "lucide-react";
 import { api } from "../api/client";
+
+// In-flight analyses, keyed by google_channel_id. The backend analyze runs in a
+// daemon thread (survives navigation); this lets the frontend RESUME polling
+// when the user leaves the Channel Doctor tab and comes back — instead of the
+// run appearing to "stop". Module-level so it outlives the component's mount.
+const _pendingRuns = new Map();   // gcid -> run_id
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fmtN = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(Math.round(n || 0)));
@@ -32,10 +38,12 @@ function ReportCharts({ data }) {
             <Clock size={14} className="text-accent2" /> Best time to post (your week)
           </div>
           <div className="overflow-x-auto">
-            <div className="inline-grid" style={{ gridTemplateColumns: "34px repeat(24, 14px)", gap: 2 }}>
+            <div className="inline-grid" style={{ gridTemplateColumns: "34px repeat(24, 16px)", gap: 2 }}>
               <div />
               {Array.from({ length: 24 }).map((_, h) => (
-                <div key={h} className="text-[7px] text-gray-600 text-center">{h % 6 === 0 ? h : ""}</div>
+                <div key={h} className="text-[8px] text-gray-500 text-center tabular-nums leading-none">
+                  {h % 3 === 0 ? String(h).padStart(2, "0") : ""}
+                </div>
               ))}
               {DOW.map((d, di) => (
                 <Fragment key={di}>
@@ -43,11 +51,12 @@ function ReportCharts({ data }) {
                   {Array.from({ length: 24 }).map((_, h) => {
                     const c = grid[`${di}-${h}`];
                     const v = c ? (c.score || 0) / maxHeat : 0;
+                    const t12 = `${((h % 12) || 12)}${h < 12 ? "AM" : "PM"}`;
                     return (
                       <div key={h}
-                        title={c ? `${d} ${String(h).padStart(2, "0")}:00 — ${c.score} early views/hr (n=${c.n})`
-                                 : `${d} ${String(h).padStart(2, "0")}:00 — no posts`}
-                        style={{ width: 14, height: 14, borderRadius: 2,
+                        title={c ? `${d} ${String(h).padStart(2, "0")}:00 (${t12}) — ${c.score} early views/hr (n=${c.n})`
+                                 : `${d} ${String(h).padStart(2, "0")}:00 (${t12}) — no posts`}
+                        style={{ width: 16, height: 16, borderRadius: 2,
                                  background: c ? `rgba(45,212,191,${0.12 + v * 0.88})` : "rgba(255,255,255,0.035)" }} />
                     );
                   })}
@@ -55,7 +64,10 @@ function ReportCharts({ data }) {
               ))}
             </div>
           </div>
-          <div className="text-[10px] text-gray-500 mt-1.5">Brighter = videos posted then gain views fastest. Hours are your channel's local time (0–23). Hover a square for details.</div>
+          <div className="text-[10px] text-gray-500 mt-1.5">
+            Columns = hour of day in your channel's local time (<span className="text-gray-400">00–23, so 18 = 6&nbsp;PM</span>);
+            rows = weekday. Brighter = videos posted then start fastest. <span className="text-gray-400">Hover any square for its exact time + stats.</span>
+          </div>
         </div>
       )}
 
@@ -223,44 +235,85 @@ export default function TrendFinderTab({ ytChannels = [], initialGcid = "" }) {
   const [report, setReport] = useState(null);
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
+  const [view, setView] = useState("plain");      // "plain" (default) | "analytics"
 
   const channel = useMemo(
     () => ytChannels.find((c) => c.google_channel_id === gcid) || null, [ytChannels, gcid]);
 
-  // Load an existing report (no re-run) when the channel changes.
+  // Track mount + the live channel so a poll loop started earlier can tell if
+  // the user left the tab or switched channel, and stop updating stale state.
+  const mounted = useRef(true);
+  const gcidRef = useRef(gcid);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { gcidRef.current = gcid; }, [gcid]);
+
+  // Poll a background run to completion. Only touches state while this tab is
+  // still mounted AND on the same channel; clears the run from _pendingRuns on
+  // any terminal state. Reused by analyze() and by the resume effect.
+  async function pollRun(runId, forGcid) {
+    const started = Date.now();
+    while (mounted.current) {
+      await new Promise((r) => setTimeout(r, 2000));
+      if (!mounted.current || gcidRef.current !== forGcid) return;  // left / switched
+      let st;
+      try { st = await api.insightsAnalyzeStatus(runId); }
+      catch { continue; }                                           // transient — keep polling
+      if (!mounted.current || gcidRef.current !== forGcid) return;
+      if (st.msg) setProg(st.msg);
+      if (st.status === "done") {
+        _pendingRuns.delete(forGcid);
+        const r = st.result || {};
+        setReport(r);
+        setNote(`Analyzed ${r.videos_analyzed} videos · ${r.access_mode === "full" ? "full analytics" : "public data only"}.`);
+        setBusy(false); setProg("");
+        return;
+      }
+      if (st.status === "failed") {
+        _pendingRuns.delete(forGcid);
+        setErr(st.error || "Analysis failed."); setBusy(false); setProg("");
+        return;
+      }
+      if (Date.now() - started > 10 * 60 * 1000) {
+        _pendingRuns.delete(forGcid);
+        setErr("Analysis is taking too long — please try again."); setBusy(false); setProg("");
+        return;
+      }
+    }
+  }
+
+  // On channel change / (re)mount: load the last completed report AND resume any
+  // in-flight run for this channel, so leaving + returning to the tab never
+  // "stops" the analysis — the backend keeps running; we just re-attach.
   useEffect(() => {
-    if (!gcid) { setReport(null); return; }
+    if (!gcid) { setReport(null); setBusy(false); return undefined; }
     let alive = true;
     setErr(""); setNote("");
     api.insightsLatest(gcid)
-      .then((r) => { if (alive) { setReport(r); } })
+      .then((r) => { if (alive) setReport(r); })
       .catch(() => { if (alive) setReport(null); });   // 404 = none yet
+    const pending = _pendingRuns.get(gcid);
+    if (pending) { setBusy(true); setProg("Resuming…"); pollRun(pending, gcid); }
+    else { setBusy(false); }
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gcid]);
 
   async function analyze() {
     if (!gcid) return;
     setBusy(true); setErr(""); setNote(""); setProg("Queued…");
     try {
-      // Background run (a big channel takes minutes) → poll for status.
+      // Background run (a big channel takes minutes) → poll for status. The
+      // run_id is cached so navigating away + back resumes instead of losing it.
       const { run_id } = await api.insightsAnalyze({ google_channel_id: gcid, provider, force });
-      const started = Date.now();
-      while (true) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const st = await api.insightsAnalyzeStatus(run_id);
-        if (st.msg) setProg(st.msg);
-        if (st.status === "done") {
-          const r = st.result || {};
-          setReport(r);
-          setNote(`Analyzed ${r.videos_analyzed} videos · ${r.access_mode === "full" ? "full analytics" : "public data only"}.`);
-          break;
-        }
-        if (st.status === "failed") { setErr(st.error || "Analysis failed."); break; }
-        if (Date.now() - started > 10 * 60 * 1000) { setErr("Analysis is taking too long — please try again."); break; }
-      }
+      _pendingRuns.set(gcid, run_id);
+      await pollRun(run_id, gcid);
     } catch (e) {
-      setErr(e?.message || "Analysis failed. Make sure this is your own connected channel.");
-    } finally { setBusy(false); setProg(""); }
+      _pendingRuns.delete(gcid);
+      if (mounted.current) {
+        setErr(e?.message || "Analysis failed. Make sure this is your own connected channel.");
+        setBusy(false); setProg("");
+      }
+    }
   }
 
   function exportMd() {
@@ -309,7 +362,9 @@ export default function TrendFinderTab({ ytChannels = [], initialGcid = "" }) {
           <span className="text-[11px] text-gray-400">Write-up</span>
           <select value={provider} onChange={(e) => setProvider(e.target.value)}
             className="bg-black border border-border rounded px-2 py-1.5 text-sm text-white">
-            <option value="gemini">Smart (AI-written)</option>
+            <option value="gemini">Gemini (AI-written)</option>
+            <option value="claude">Claude (AI-written)</option>
+            <option value="openai">ChatGPT (AI-written)</option>
             <option value="deterministic">Plain (facts only)</option>
           </select>
         </label>
@@ -374,6 +429,25 @@ export default function TrendFinderTab({ ytChannels = [], initialGcid = "" }) {
             {channel && <span className="text-[12px] text-gray-500">{channel.youtube_channel_title}</span>}
           </div>
 
+          {/* Plain (default) ↔ Analytics toggle — plain is jargon-free; analytics
+              keeps the exact numbers + correlations. Only shown when the report
+              carries the analytic narrative (new reports). */}
+          {report.report_json?.narrative_analytic && (
+            <div className="flex items-center gap-1.5 mb-3">
+              {[{ k: "plain", t: "Plain" }, { k: "analytics", t: "Analytics" }].map((o) => (
+                <button key={o.k} type="button" onClick={() => setView(o.k)}
+                  className={`px-2.5 py-1 rounded text-[11px] font-medium border ${
+                    view === o.k ? "border-accent2 text-accent2 bg-accent2/10"
+                                 : "border-border text-gray-500 hover:text-gray-300"}`}>
+                  {o.t}
+                </button>
+              ))}
+              <span className="text-[10px] text-gray-600 ml-1">
+                {view === "plain" ? "simple, no jargon" : "the exact numbers + correlations"}
+              </span>
+            </div>
+          )}
+
           {caveats.length > 0 && (
             <div className="mb-3 p-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-200/90 text-[11px] flex items-start gap-1.5">
               <Info size={13} className="mt-0.5 shrink-0" />
@@ -384,7 +458,9 @@ export default function TrendFinderTab({ ytChannels = [], initialGcid = "" }) {
           {/* Visual charts (heatmap, per-day, tiers, drivers, glossary) for non-experts. */}
           <ReportCharts data={report.report_json} />
 
-          <Markdown text={report.report_md} />
+          <Markdown text={view === "analytics"
+            ? (report.report_json?.narrative_analytic || report.report_md)
+            : (report.report_json?.narrative_plain || report.report_md)} />
         </div>
       )}
     </div>

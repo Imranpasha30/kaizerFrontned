@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, Input, PasswordInput } from "../components/ui";
+import { HOME_PATH } from "../lib/previewGate";
 
 /**
  * Login — Canva-grade two-column sign-in page.
@@ -19,18 +20,25 @@ import { Button, Input, PasswordInput } from "../components/ui";
  * the backend reports google_enabled.
  */
 export default function Login() {
-  const { loginEmail, loginGoogle, config, isAuthenticated, loading } = useAuth();
+  const { loginEmail, loginWithCode, requestCode, loginGoogle, config, isAuthenticated, loading } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   // Post-login landing → Library (shared company source-video pool).
   // Existing /app deep links still work because loc.state.from wins when
   // an unauth visitor was redirected here from a protected route.
-  const to  = loc.state?.from || "/library";
+  const to  = loc.state?.from || HOME_PATH;
 
   const [email, setEmail] = useState("");
   const [pw,    setPw]    = useState("");
   const [busy,  setBusy]  = useState(false);
   const [error, setError] = useState("");
+  // The emailed-code path. Two states only: "ask" for the address, then
+  // "enter" for the digits. A login screen with more steps than that is a
+  // login screen people get stuck in.
+  const [codeMode, setCodeMode] = useState(false);   // false = password form
+  const [codeStep, setCodeStep] = useState("ask");   // "ask" | "enter"
+  const [code,     setCode]     = useState("");
+  const [sentTo,   setSentTo]   = useState("");
   const gbtnRef = useRef(null);
 
   useEffect(() => {
@@ -92,6 +100,35 @@ export default function Login() {
       nav(to, { replace: true });
     } catch (err) {
       setError(err.message || "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function askForCode(e) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await requestCode(email.trim());
+      setSentTo(email.trim());
+      setCodeStep("enter");
+    } catch (err) {
+      setError(err.message || "Could not send a code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCode(e) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await loginWithCode(sentTo || email.trim(), code.trim());
+      nav(to, { replace: true });
+    } catch (err) {
+      setError(err.message || "That code did not work");
     } finally {
       setBusy(false);
     }
@@ -197,6 +234,77 @@ export default function Login() {
               </>
             )}
 
+            {codeMode ? (
+              <form onSubmit={codeStep === "ask" ? askForCode : submitCode}
+                    className="space-y-4">
+                <Input
+                  label="Email"
+                  icon={<Mail size={12} />}
+                  type="email"
+                  required
+                  autoFocus
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  disabled={codeStep === "enter"}
+                />
+
+                {codeStep === "ask" && (
+                  <p className="text-[11px] text-gray-500 -mt-1">
+                    No password needed. If you have not signed up yet, the
+                    first correct code creates your account.
+                  </p>
+                )}
+
+                {codeStep === "enter" && (
+                  <>
+                    <Input
+                      label="Six-digit code"
+                      icon={<Mail size={12} />}
+                      type="text"
+                      inputMode="numeric"
+                      autoFocus
+                      required
+                      maxLength={7}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder="123456"
+                    />
+                    <p className="text-[11px] text-gray-500 -mt-1">
+                      Sent to {sentTo}. It works once and expires in 10 minutes.
+                      {" "}
+                      <button type="button"
+                        onClick={() => { setCodeStep("ask"); setCode(""); setError(""); }}
+                        className="text-accent2 hover:underline">
+                        Use a different address
+                      </button>
+                    </p>
+                  </>
+                )}
+
+                {error && (
+                  <div role="alert"
+                    className="flex items-start gap-2 bg-red-950/50 border border-red-900/70 text-red-300 text-xs rounded-lg px-3 py-2">
+                    <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button type="submit" disabled={busy}
+                  className="w-full rounded-lg bg-accent2 text-black font-semibold text-sm py-2.5 disabled:opacity-50">
+                  {busy
+                    ? (codeStep === "ask" ? "Sending..." : "Checking...")
+                    : (codeStep === "ask" ? "Email me a code" : "Sign in")}
+                </button>
+
+                <button type="button"
+                  onClick={() => { setCodeMode(false); setCodeStep("ask"); setError(""); }}
+                  className="w-full text-[11px] text-gray-500 hover:text-gray-300">
+                  Use a password instead
+                </button>
+              </form>
+            ) : (
             <form onSubmit={submit} className="space-y-4">
               <Input
                 label="Email"
@@ -220,7 +328,18 @@ export default function Login() {
                 required
               />
 
-              <div className="flex justify-end -mt-1">
+              <div className="flex items-center justify-between -mt-1">
+                {/* The way INTO the emailed-code path -- shown only where the
+                    backend says it can serve it (see /auth/config). */}
+                {config.code_login ? (
+                  <button
+                    type="button"
+                    onClick={() => { setCodeMode(true); setCodeStep("ask"); setError(""); }}
+                    className="text-[11px] text-accent2 hover:underline"
+                  >
+                    Email me a code instead
+                  </button>
+                ) : <span />}
                 <Link
                   to="/forgot-password"
                   className="text-[11px] text-gray-500 hover:text-accent2 transition-colors"
@@ -259,6 +378,7 @@ export default function Login() {
                 </Link>
               </div>
             </form>
+            )}
           </div>
 
           <p className="text-center text-[10px] text-gray-700 mt-4">

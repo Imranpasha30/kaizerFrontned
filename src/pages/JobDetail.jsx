@@ -3,9 +3,9 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Edit2, Download, Loader2, ArrowLeft, AlertCircle, RotateCcw, Clock,
   Clapperboard, CheckSquare, Square, StopCircle, ExternalLink,
-  Check, X, Star, Pencil, CalendarClock, Send,
+  Check, X, Star, Pencil, CalendarClock, Send, Pause, Play,
 } from "lucide-react";
-import { api } from "../api/client";
+import { api, isDesktop } from "../api/client";
 import { openJobProgress } from "../api/ws";
 import { parseV2Error } from "../api/errorMessages";
 import { useAuth } from "../auth/AuthProvider";
@@ -185,6 +185,30 @@ export default function JobDetail() {
     }
   }
 
+  // ─── Pause / Resume / Retry ───────────────────────────────────────
+  const [queueBusy, setQueueBusy] = useState(false);
+  const [queueError, setQueueError] = useState("");
+  async function runQueueAction(fn, confirmMsg) {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setQueueBusy(true);
+    setQueueError("");
+    try {
+      await fn();
+      await loadJob();
+      await pollStatus();
+    } catch (e) {
+      setQueueError(e.message || "Action failed");
+    } finally {
+      setQueueBusy(false);
+    }
+  }
+  const doPause  = () => runQueueAction(() => api.pauseJob(jobId));
+  const doResume = () => runQueueAction(() => api.resumeJob(jobId));
+  const doRetry  = () => runQueueAction(
+    () => api.retryJob(jobId),
+    "Retry this job?\n\nIt re-runs from your saved settings (source video + " +
+    "effects) without re-uploading, and joins the queue (one render at a time).");
+
   if (!job) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-600">
@@ -198,6 +222,8 @@ export default function JobDetail() {
   const isDone      = currentStatus === "done";
   const isFailed    = currentStatus === "failed";
   const isCancelled = currentStatus === "cancelled";
+  const isPaused    = currentStatus === "paused";
+  const isQueued    = currentStatus === "pending" || currentStatus === "queued";
   // Quick Publish / raw upload: published as-is, never edited here -> no canvas editor; link
   // straight to the published YouTube video(s) instead.
   const isQuickPublish = (job.frame_layout || "") === "raw_upload";
@@ -296,26 +322,73 @@ export default function JobDetail() {
             </button>
           </div>
         )}
-        {isRunning && (
-          <div className="flex gap-2 self-start flex-shrink-0">
-            <button
-              onClick={doCancel}
-              disabled={cancelling}
-              className="btn btn-red flex items-center gap-1.5 text-sm"
-              title="Kill the pipeline subprocess and stop processing this job"
-            >
-              {cancelling
-                ? <Loader2 size={14} className="animate-spin" />
-                : <StopCircle size={14} />}
-              {cancelling ? "Stopping…" : "Stop Job"}
-            </button>
+        {(isRunning || isPaused || isFailed || isCancelled) && (
+          <div className="flex gap-2 self-start flex-shrink-0 flex-wrap">
+            {isQueued && (
+              <button
+                onClick={doPause}
+                disabled={queueBusy}
+                className="btn btn-secondary flex items-center gap-1.5 text-sm"
+                title="Hold this job in the queue — it won't run until you resume it"
+              >
+                {queueBusy
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <Pause size={14} />}
+                Pause
+              </button>
+            )}
+            {isPaused && (
+              <button
+                onClick={doResume}
+                disabled={queueBusy}
+                className="btn btn-green flex items-center gap-1.5 text-sm"
+                title="Put this job back in the render queue"
+              >
+                {queueBusy
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <Play size={14} />}
+                Resume
+              </button>
+            )}
+            {(isFailed || isCancelled) && !isQuickPublish && (
+              <button
+                onClick={doRetry}
+                disabled={queueBusy}
+                className="btn btn-secondary flex items-center gap-1.5 text-sm"
+                title="Re-run from your saved settings without re-uploading"
+              >
+                {queueBusy
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <RotateCcw size={14} />}
+                Retry
+              </button>
+            )}
+            {(isRunning || isPaused) && (
+              <button
+                onClick={doCancel}
+                disabled={cancelling}
+                className="btn btn-red flex items-center gap-1.5 text-sm"
+                title="Kill the pipeline subprocess and stop processing this job"
+              >
+                {cancelling
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <StopCircle size={14} />}
+                {cancelling ? "Stopping…" : "Stop Job"}
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {cancelError && (
+      {(cancelError || queueError) && (
         <div className="card p-3 mb-4 text-sm text-red-300 flex items-center gap-2">
-          <AlertCircle size={14} /> {cancelError}
+          <AlertCircle size={14} /> {cancelError || queueError}
+        </div>
+      )}
+      {isPaused && (
+        <div className="card p-3 mb-4 text-sm text-sky-300 flex items-center gap-2">
+          <Pause size={14} /> Job paused — it's holding its place and won't
+          render until you press Resume.
         </div>
       )}
       {isCancelled && (
@@ -390,6 +463,34 @@ export default function JobDetail() {
         <FailureCard rawError={status.error} />
       )}
 
+      {/* Done-with-warnings: shorts rendered but the FULL video did not
+          (job 600 class). The job is "done", so the red failure card never
+          shows — surface it loudly here instead of silently listing 8
+          shorts as if everything succeeded. */}
+      {isDone && ((status?.error || job.error || "").includes("Full video render FAILED")) && (
+        <div className="card p-4 mb-6 border-amber-700 bg-amber-500/10">
+          <p className="text-amber-300 text-sm font-semibold mb-1">
+            ⚠ The full video did not render — only the shorts are ready
+          </p>
+          <p className="text-xs text-amber-200/80 whitespace-pre-wrap break-words mb-3">
+            {(status?.error || job.error || "").slice(0, 400)}
+          </p>
+          <Link
+            to={`/jobs/${jobId}/v4-edit`}
+            className="btn btn-primary text-xs inline-flex items-center gap-1.5"
+          >
+            Open the canvas editor to re-render the full video
+          </Link>
+        </div>
+      )}
+
+      {/* 🎬 AI Director decisions — the dev/admin debugging view: every
+          sensor consulted, every choice, the model's own WHY per story,
+          and the self-review outcome. */}
+      {user?.is_admin && job?.platform === "full_video_shorts_v4" && (
+        <DirectorDecisions jobId={jobId} />
+      )}
+
       {/* Clips */}
       {isDone && job.clips?.length > 0 && (
         <div>
@@ -397,7 +498,10 @@ export default function JobDetail() {
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
               Clips ({job.clips.length})
             </h2>
-            {/* Bulk-select controls: select all / none + "Publish N clips" */}
+            {/* Bulk-select controls: select all / none + "Publish N clips".
+                Hidden in the desktop app — desktop v1 renders locally, no
+                publishing, so the whole select-to-publish cluster goes. */}
+            {!isDesktop() && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -425,13 +529,16 @@ export default function JobDetail() {
                 Publish {selectedClipIds.size || ""} selected
               </button>
             </div>
+            )}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 sm:gap-4">
             {job.clips.map((clip, i) => {
               const isSelected = selectedClipIds.has(clip.id);
               return (
                 <div key={clip.id} className="relative">
-                  {/* Selection checkbox — sits on top-left of the card. */}
+                  {/* Selection checkbox — sits on top-left of the card.
+                      Only used for bulk publish → hidden in the desktop app. */}
+                  {!isDesktop() && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -453,6 +560,7 @@ export default function JobDetail() {
                   >
                     {isSelected ? <CheckSquare size={13} /> : <Square size={13} />}
                   </button>
+                  )}
                   <ClipCard clip={clip} jobId={jobId} index={i} />
                 </div>
               );
@@ -505,14 +613,19 @@ export default function JobDetail() {
       {/* Phase 14 / V2 Beta (D-13.13): feedback panel. Only on
           completed jobs the current user owns. Backend's POST
           /feedback also enforces ownership + done-status. */}
+      {/* Shown whenever there is something to change -- NOT gated on isDone,
+          because the questions are written during the run and the panel
+          hides itself when there are none. */}
+      <QuestionsPanel jobId={jobId} />
+
       {isDone && (
         <FeedbackPanel jobId={jobId} />
       )}
 
       {/* Auto-publish via a Publishing Plan (Campaigns → live V2 publish
           path). Fans this finished job's clips out to the plan's channels,
-          spaced per the plan's schedule. */}
-      {isDone && (
+          spaced per the plan's schedule. Publishing — hidden on desktop. */}
+      {isDone && !isDesktop() && (
         <PublishingPlanRunner jobId={jobId} />
       )}
 
@@ -936,6 +1049,105 @@ function PublishingPlanRunner({ jobId }) {
 }
 
 
+/* What the render asked, and what it did while waiting for an answer.
+ *
+ * The pipeline never stops for these. It writes each question with the
+ * answer it is ABOUT TO USE, ships that, and carries on -- so this panel is
+ * a chance to change a decision, never a gate in front of one. Answering
+ * nothing leaves the programme exactly as it came out.
+ *
+ * Re-render is therefore the operator's move, not this panel's: a change
+ * here is only felt on the next pass.
+ */
+function QuestionsPanel({ jobId }) {
+  const [data,    setData]    = useState(null);
+  const [saving,  setSaving]  = useState(false);
+  const [err,     setErr]     = useState("");
+  const [savedAt, setSavedAt] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    api.getJobQuestions(jobId)
+       .then((d) => { if (alive) setData(d); })
+       .catch(() => { if (alive) setData({ questions: [] }); });
+    return () => { alive = false; };
+  }, [jobId, savedAt]);
+
+  const qs = (data && data.questions) || [];
+  if (!qs.length) return null;
+
+  const pending = qs.filter((q) => !q.answer).length;
+
+  async function choose(qid, value) {
+    setSaving(true); setErr("");
+    try {
+      await api.saveJobAnswers(jobId, { [qid]: value });
+      setSavedAt(Date.now());
+    } catch (e) {
+      setErr(e.message || "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="card p-4 mb-6">
+      <div className="flex items-baseline justify-between mb-1">
+        <h3 className="text-sm font-semibold">Decisions you can change</h3>
+        <span className="text-xs text-gray-500">
+          {qs.length} moment{qs.length === 1 ? "" : "s"}
+          {pending ? ` - ${pending} using the default` : " - all answered"}
+        </span>
+      </div>
+      <p className="text-xs text-gray-500 mb-3">
+        Each of these already shipped with the choice shown in bold. Change one
+        and re-render to see it; leave them and nothing moves.
+      </p>
+      {err && <div className="text-xs text-red-400 mb-2">{err}</div>}
+
+      <div className="space-y-3">
+        {qs.map((q) => {
+          const current = q.answer || q.default;
+          return (
+            <div key={q.id} className="border border-gray-800 rounded p-3">
+              <div className="text-sm">{q.prompt}</div>
+              {q.context && (
+                <div className="text-xs text-gray-500 mt-0.5 italic">{q.context}</div>
+              )}
+              <div className="text-[11px] text-gray-600 mt-0.5">
+                {q.kind === "ref_clip" ? "a clip plays here" : "a picture shows here"}
+                {q.t != null && ` - at ${Number(q.t).toFixed(1)}s`}
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {(q.options || []).map((o) => {
+                  const on = String(o.value) === String(current);
+                  return (
+                    <button
+                      key={o.value}
+                      disabled={saving}
+                      onClick={() => choose(q.id, o.value)}
+                      title={o.why || ""}
+                      className={`text-xs px-2 py-1 rounded border flex items-center gap-1.5
+                        ${on ? "border-yellow-600 bg-yellow-950/30 text-yellow-200 font-semibold"
+                             : "border-gray-700 text-gray-300 hover:border-gray-500"}`}
+                    >
+                      {o.preview && (
+                        <img src={o.preview} alt=""
+                             className="w-7 h-7 object-cover rounded-sm" />
+                      )}
+                      <span>{o.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function FeedbackPanel({ jobId }) {
   const [rating,    setRating]    = useState(70);
   const [comment,   setComment]   = useState("");
@@ -1037,6 +1249,197 @@ function FeedbackPanel({ jobId }) {
           ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
           : <>Submit feedback</>}
       </button>
+    </div>
+  );
+}
+
+/** 🎬 AI DIRECTOR DECISIONS (admin/dev view) — the Director's full trail:
+ *  every sensor it consulted, every per-story choice with the model's own
+ *  WHY, the self-review findings and whether the revision was adopted.
+ *  Reads director_trace.json via /v4/jobs/{id}/director-trace. */
+export function DirectorDecisions({ jobId, startOpen = false }) {
+  const [open, setOpen] = useState(!!startOpen);
+  const [trace, setTrace] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    setBusy(true); setErr("");
+    try { setTrace(await api.v4DirectorTrace(jobId)); }
+    catch (e) { setErr(e?.message || "No Director trace for this job yet."); }
+    finally { setBusy(false); }
+  }
+
+  // The desktop job page mounts this EXPANDED (startOpen) — the operator
+  // wants the feature trail visible by default, never hidden.
+  useEffect(() => {
+    if (startOpen) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && !trace && !busy) await load();
+  }
+
+  const dec = trace?.decisions || {};
+  const meta = trace?.stories || {};
+  const sensors = trace?.sensors || {};
+  const chip = "inline-flex items-center px-2 py-0.5 rounded-full border border-gray-700 text-[10px] text-gray-300";
+
+  // Every DISTINCT feature id the Director actually used across all
+  // stories — the at-a-glance answer to "is it using the vocabulary?".
+  const featuresUsed = (() => {
+    const s = new Set();
+    for (const d of Object.values(dec)) {
+      if (d.mood) s.add(`mood:${d.mood}`);
+      if (d.transition_in) s.add(`transition:${d.transition_in}`);
+      if (d.layout) s.add(`layout:${d.layout}`);
+      if (d.grade) s.add(`grade:${d.grade}`);
+      if (d.sting) s.add(`sting:${d.sting}`);
+      if (d.ui_sound) s.add(`ui:${d.ui_sound}`);
+      if (d.captions && d.captions !== "none") s.add(`captions:${d.captions}`);
+      for (const f of d.fx || []) s.add(`fx:${f}`);
+      for (const o of d.overlays || []) s.add(`overlay:${(o && o.id) || o}`);
+      for (const mm of d.layout_moments || []) s.add(`moment:${mm.layout}`);
+      if ((d.emphasis || []).length) s.add("emphasis:punch-in");
+    }
+    return Array.from(s).sort();
+  })();
+
+  return (
+    <div className="card p-4 mb-6 border-purple-900/60">
+      <button type="button" onClick={toggle}
+        className="w-full flex items-center justify-between text-left">
+        <span className="text-sm font-semibold text-purple-300">
+          🎬 AI Director decisions {trace?.mode === "formula" ? "· formula fallback" : ""}
+        </span>
+        <span className="text-xs text-gray-500">{open ? "hide ▲" : "show ▼"}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          {busy && <div className="text-xs text-gray-400">Loading the Director's trail…</div>}
+          {err && <div className="text-xs text-amber-300">{err}</div>}
+          {trace && (
+            <>
+              {/* run summary */}
+              <div className="flex flex-wrap gap-2 mb-3">
+                <span className={chip}>mode: {trace.mode}</span>
+                {trace.model && <span className={chip}>model: {trace.model}</span>}
+                {trace.summary && <span className={chip}>{trace.summary}</span>}
+                {"review_revision_adopted" in trace && (
+                  <span className={chip}>
+                    self-review: {trace.review_revision_adopted ? "revision adopted" : "first plan kept"}
+                  </span>
+                )}
+                {trace.written_at && <span className={chip}>{trace.written_at}</span>}
+                {featuresUsed.length > 0 && (
+                  <span className={`${chip} border-purple-700 text-purple-200`}>
+                    features used: {featuresUsed.length} distinct
+                  </span>
+                )}
+              </div>
+
+              {/* EVERY feature used in this render — the complete flat list,
+                  so nothing the Director did is invisible. */}
+              {featuresUsed.length > 0 && (
+                <div className="mb-3 p-2 rounded border border-gray-800 bg-black/30">
+                  <div className="text-[11px] font-semibold text-gray-300 mb-1">
+                    Every editing feature used ({featuresUsed.length} distinct)
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {featuresUsed.map((f) => <span key={f} className={chip}>{f}</span>)}
+                  </div>
+                </div>
+              )}
+
+              {/* what the Director did, step by step */}
+              {(trace.steps || []).length > 0 && (
+                <ol className="mb-3 list-decimal list-inside text-[11px] text-gray-400 space-y-0.5">
+                  {trace.steps.map((s, i) => <li key={i}>{s}</li>)}
+                </ol>
+              )}
+
+              {/* supervising-editor complaints */}
+              {(trace.review_issues || []).length > 0 && (
+                <div className="mb-3 p-2 rounded border border-amber-700/40 bg-amber-500/5">
+                  <div className="text-[11px] font-semibold text-amber-300 mb-1">
+                    Self-review found:
+                  </div>
+                  {trace.review_issues.map((s, i) => (
+                    <div key={i} className="text-[11px] text-amber-200/80">• {s}</div>
+                  ))}
+                </div>
+              )}
+              {trace.error && (
+                <div className="mb-3 text-[11px] text-red-300">LLM error: {trace.error}</div>
+              )}
+
+              {/* per-story decision cards */}
+              <div className="grid gap-2 md:grid-cols-2">
+                {Object.keys(dec).sort((a, b) => Number(a) - Number(b)).map((k) => {
+                  const d = dec[k];
+                  const m = meta[k] || {};
+                  const pace = (sensors.pacing_per_story || {})[k];
+                  const vis = (sensors.visual_per_story || {})[k];
+                  const tone = (sensors.voice_tone_per_story || {})[k];
+                  return (
+                    <div key={k} className="p-2.5 rounded border border-gray-800 bg-black/30">
+                      <div className="text-xs font-semibold text-gray-200 mb-1">
+                        Story {k}{m.duration_s ? ` · ${m.duration_s}s` : ""}
+                        {m.title ? ` — ${m.title}` : ""}
+                      </div>
+                      {d.why && (
+                        <div className="text-[11px] text-purple-200/90 italic mb-1.5">
+                          “{d.why}”
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1 mb-1">
+                        <span className={chip}>mood: {d.mood || "—"}</span>
+                        <span className={chip}>cut-in: {d.transition_in || "—"}</span>
+                        {d.layout && <span className={chip}>layout: {d.layout}</span>}
+                        {d.grade && <span className={chip}>grade: {d.grade}</span>}
+                        {d.sting && <span className={chip}>sting: {d.sting}</span>}
+                        {d.ui_sound && <span className={chip}>ui: {d.ui_sound}</span>}
+                        {d.captions && d.captions !== "none" && (
+                          <span className={chip}>captions: {d.captions}</span>
+                        )}
+                        {d.bed_on === false && <span className={chip}>music bed: OFF</span>}
+                        {(d.fx || []).map((f) => <span key={f} className={chip}>fx: {f}</span>)}
+                      </div>
+                      {(d.layout_moments || []).length > 0 && (
+                        <div className="text-[10px] text-gray-500">
+                          moments: {d.layout_moments.map((mm) =>
+                            `${mm.layout}@${mm.t}s×${mm.dur}s`).join(" · ")}
+                        </div>
+                      )}
+                      {(d.emphasis || []).length > 0 && (
+                        <div className="text-[10px] text-gray-500">
+                          punch-ins at {d.emphasis.join("s, ")}s
+                        </div>
+                      )}
+                      {(d.overlays || []).length > 0 && (
+                        <div className="text-[10px] text-gray-500">
+                          graphics: {d.overlays.map((o) => `${o.id}@${o.t}s`).join(" · ")}
+                        </div>
+                      )}
+                      {(pace || vis || tone) && (
+                        <div className="mt-1 text-[10px] text-gray-600">
+                          {pace ? `heard: ${pace.wpm}wpm, ${(pace.hot_moments || []).length} hot moments. ` : ""}
+                          {vis ? `saw: ${vis.shot}, ${vis.people} people, ${vis.setting}. ` : ""}
+                          {tone ? `tone: ${tone.tone} (energy ${tone.arousal}).` : ""}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

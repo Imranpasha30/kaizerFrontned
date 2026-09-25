@@ -190,7 +190,11 @@ export default function LiveStudio() {
     setVideos((prev) => prev.map((v) => {
       if (v.tmpId !== tmpId) return v;
       const s = new Set(v.channelIds);
-      s.has(channelId) ? s.delete(channelId) : s.add(channelId);
+      if (s.has(channelId)) {
+        s.delete(channelId);
+      } else {
+        s.add(channelId);
+      }
       return { ...v, channelIds: s };
     }));
   }
@@ -223,6 +227,10 @@ export default function LiveStudio() {
           size_bytes:     v.file ? v.file.size : 0,
           duration_hours: Number(v.hours) || 1,
           channel_ids:    [...v.channelIds],
+          // Always empty: Live Studio on the web streams the file as it is.
+          // The field stays because the server reads it -- dropping it would
+          // be a contract change rather than a UI one.
+          brand_channel_ids: [],
           seo_source:     v.seoSource,
           source_url:     v.sourceUrl || null,
           seo: {
@@ -288,33 +296,41 @@ export default function LiveStudio() {
         }
       }
 
-      const inFlight = new Set();
-      for (const p of pairs) {
-        const task = (async () => {
-          try {
-            if (p.sourceUrl) {
-              // Server is fetching this one via yt-dlp — poll the
-              // stream until upload_done flips true (or it fails),
-              // then /start.
-              await waitForUrlIngest(p.streamId);
-            } else {
-              await uploadFileToStream(p.file, p.streamId);
+      // Fire-and-forget: the chunk uploads + per-stream /start run in
+      // the BACKGROUND so the builder frees up immediately — the
+      // operator can compose and submit ANOTHER live batch while this
+      // one is still uploading. Per-stream failures surface on the
+      // status board (the poller flips rows to "failed"), so the outer
+      // await added nothing but a multi-hour lock on the submit button.
+      void (async () => {
+        const inFlight = new Set();
+        for (const p of pairs) {
+          const task = (async () => {
+            try {
+              if (p.sourceUrl) {
+                // Server is fetching this one via yt-dlp — poll the
+                // stream until upload_done flips true (or it fails),
+                // then /start.
+                await waitForUrlIngest(p.streamId);
+              } else {
+                await uploadFileToStream(p.file, p.streamId);
+              }
+              await api.liveStartStream(p.streamId);
+            } catch (e) {
+              console.warn(`stream ${p.streamId} failed:`, e.message);
             }
-            await api.liveStartStream(p.streamId);
-          } catch (e) {
-            console.warn(`stream ${p.streamId} failed:`, e.message);
+          })();
+          inFlight.add(task);
+          task.finally(() => inFlight.delete(task));
+          if (inFlight.size >= MAX_PARALLEL_STREAMS) {
+            await Promise.race(inFlight);
           }
-        })();
-        inFlight.add(task);
-        task.finally(() => inFlight.delete(task));
-        if (inFlight.size >= MAX_PARALLEL_STREAMS) {
-          await Promise.race(inFlight);
         }
-      }
-      await Promise.all(inFlight);
+        await Promise.all(inFlight);
+      })();
 
       setSubmitting(false);
-      // Clear the builder so the user sees the batch board only.
+      // Clear the builder so it's ready for the next batch.
       setVideos([]);
     } catch (e) {
       setSubmitErr(e.message || "submit failed");
@@ -606,11 +622,15 @@ export default function LiveStudio() {
         </section>
       )}
 
-      {/* ── Builder ─────────────────────────────────────────── */}
-      {!batch && (
+      {/* ── Builder — ALWAYS available, even while a batch is in
+          flight, so the operator can queue another live meanwhile
+          (uploads run in the background; the board above + Recent
+          batches below keep tracking the earlier one). */}
+      {(
         <section className="card p-5 mb-5">
           <h2 className="text-sm font-semibold text-gray-100 mb-3 flex items-center gap-1.5">
-            <Plus size={14} className="text-accent2" /> 1. Add videos to broadcast
+            <Plus size={14} className="text-accent2" />{" "}
+            {batch ? "Start another live broadcast" : "1. Add videos to broadcast"}
           </h2>
           <label className="block border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-gray-500">
             <input
@@ -707,6 +727,9 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
   const [showBrief, setShowBrief]   = useState(false);
 
   const [genStats, setGenStats] = useState(null);  // {attempts, best_score, target_score}
+  // "" = Auto (user's stored SEO engine, then Gemini). A choice puts
+  // that brain first; Claude/ChatGPT fall back to Gemini on failure.
+  const [genBrain, setGenBrain] = useState("");
 
   async function generateSeo() {
     if (!briefDraft.trim()) {
@@ -721,6 +744,7 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
         channel_id: firstCh,
         language:   "te",
         privacy:    video.seo.privacy,
+        provider:   genBrain || null,
       });
       const s = r.seo;
       onPatchSeo({
@@ -729,10 +753,17 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
         tags:        (s.tags || []).join(", "),
       });
       onPatch({ seoSource: "ai" });
+      // attempts_log carries, per attempt, the verifier rules it failed.
+      // Keep the ones from the attempt that scored best -- those are the
+      // rules the SEO you have just been given still breaks.
+      const log = Array.isArray(r.attempts_log) ? r.attempts_log : [];
+      const bestAttempt = log.reduce(
+        (a, b) => ((b?.score ?? -1) > (a?.score ?? -1) ? b : a), null);
       setGenStats({
         attempts:      r.attempts || 1,
         best_score:    r.best_score || 0,
         target_score:  r.target_score || 95,
+        reasons:       (bestAttempt?.reasons || []).slice(0, 6),
       });
       setShowBrief(false);
       setBriefDraft("");
@@ -819,26 +850,32 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
 
       {/* Channels */}
       <div className="mb-2">
-        <div className="text-[10px] text-gray-400 mb-1">Channels ({video.channelIds.size} selected)</div>
+        <div className="text-[10px] text-gray-400 mb-1">
+          Channels ({video.channelIds.size} selected)
+        </div>
         <div className="flex flex-wrap gap-1">
           {channels.map((c) => {
             const on = video.channelIds.has(c.id);
             return (
-              <button
+              <span
                 key={c.id}
-                type="button"
-                onClick={() => onToggleChannel(c.id)}
-                className={`text-[11px] px-1.5 py-1 rounded border flex items-center gap-1.5 ${
+                className={`text-[11px] rounded border flex items-center ${
                   on ? "border-accent2 bg-accent2/10 text-white" :
-                       "border-border bg-black/40 text-gray-400 hover:text-white"
+                       "border-border bg-black/40 text-gray-400"
                 }`}
-                title={c.handle ? `${c.handle} · ${(c.subscriber_count || 0).toLocaleString()} subs` : ""}
               >
-                {c.avatar_url
-                  ? <img src={c.avatar_url} alt="" className="w-4 h-4 rounded-full flex-shrink-0" />
-                  : <Tv size={10} className="flex-shrink-0" />}
-                <span className="truncate max-w-[140px]">{c.name}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleChannel(c.id)}
+                  className="px-1.5 py-1 flex items-center gap-1.5 hover:text-white"
+                  title={c.handle ? `${c.handle} · ${(c.subscriber_count || 0).toLocaleString()} subs` : ""}
+                >
+                  {c.avatar_url
+                    ? <img src={c.avatar_url} alt="" className="w-4 h-4 rounded-full flex-shrink-0" />
+                    : <Tv size={10} className="flex-shrink-0" />}
+                  <span className="truncate max-w-[140px]">{c.name}</span>
+                </button>
+              </span>
             );
           })}
           {channels.length === 0 && (
@@ -913,6 +950,20 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
             </span>
           )}
         </div>
+        {genStats && genStats.best_score < genStats.target_score
+          && (genStats.reasons || []).length > 0 && (
+          <div className="basis-full text-[10px] text-gray-500 leading-snug mt-1">
+            <span className="text-gray-400">
+              Below target because{genStats.reasons.length === 1 ? "" : " of"}:
+            </span>{" "}
+            {genStats.reasons.join(" · ")}
+            <div className="text-gray-600 mt-0.5">
+              The text above is still usable and publishable — this is the
+              verifier's quality bar ({genStats.target_score}/100), not an error.
+              Editing the brief and regenerating usually moves it.
+            </div>
+          </div>
+        )}
         {!showBrief
           ? <button
               type="button"
@@ -933,7 +984,7 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
       {showBrief && (
         <div className="mb-2 p-2 rounded bg-accent2/5 border border-accent2/30">
           <div className="text-[10px] text-accent2 mb-1">
-            1-3 sentences describing this video — Gemini will write title + description + tags + validate against YouTube's hard limits.
+            1-3 sentences describing this video — the AI writes title + description + tags + validates against YouTube's hard limits.
           </div>
           <textarea
             rows={2}
@@ -950,9 +1001,21 @@ function VideoCard({ index, video, channels, onToggleChannel, onPatch, onPatchSe
           <div className="mt-1.5 flex items-center justify-between gap-2">
             <div className="text-[9px] text-gray-500 flex-1">
               {genBusy
-                ? "Gemini → verifier loop, retrying up to 5 times until score ≥ 95…"
-                : "Same engine as the editor — Gemini writes SEO, verifier scores it, retries with feedback until target."}
+                ? "AI → verifier loop, retrying up to 5 times until score ≥ 95…"
+                : "Same engine as the editor — the AI writes SEO, verifier scores it, retries with feedback until target."}
             </div>
+            <select
+              value={genBrain}
+              onChange={(e) => setGenBrain(e.target.value)}
+              disabled={genBusy}
+              className="text-[11px] bg-black border border-border rounded px-1.5 py-1 text-white flex-shrink-0"
+              title="Which AI writes the SEO — Auto uses your SEO-engine setting, then Gemini; Claude/ChatGPT fall back to Gemini"
+            >
+              <option value="">Brain: Auto</option>
+              <option value="gemini">Gemini</option>
+              <option value="claude">Claude</option>
+              <option value="openai">ChatGPT</option>
+            </select>
             <button
               type="button"
               onClick={generateSeo}

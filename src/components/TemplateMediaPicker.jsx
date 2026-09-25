@@ -37,7 +37,10 @@ function imageLabel(key, i) {
   return named ? `Image ${i + 1} — ${named}` : `Image ${i + 1}`;
 }
 
-export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, onChange }) {
+// `engine` = the wizard's image-engine pick ("auto" | "gemini" | "openai") —
+// forwarded to the generate endpoints so slot images use the same engine
+// the render will ("auto"/"" lets the backend default apply).
+export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, onChange, engine = "" }) {
   const mediaSlots = useMemo(
     () => slots.filter(s => ["video", "background", "intro", "image"].includes(s.kind)),
     [slots]
@@ -50,6 +53,12 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
   const [media, setMedia] = useState({});
   const [mainSlot, setMainSlot] = useState(clipSlots[0]?.key || "");
   const inputs = useRef({});
+  // Subject label per image slot ("name-tag contract") — lets the
+  // image↔speech sync show the picture exactly when its subject is spoken.
+  const [labels, setLabels] = useState({});
+  // Optional per-slot guidance for AI generation — the user's words steer THIS image;
+  // blank = the AI decides from the story / the video after transcription.
+  const [notes, setNotes] = useState({});
 
   // ── AI story-image generation ──
   const [story, setStory] = useState("");           // the shared story/topic — drives EVERY image
@@ -101,10 +110,22 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
       fd.append("file", file);
       fd.append("kind", slot.kind === "image" ? "image" : "video");
       fd.append("folder_path", "custom_template_media");
+      if (slot.kind === "image" && (labels[slot.key] || "").trim()) {
+        fd.append("description", labels[slot.key].trim());
+      }
       const asset = await api.uploadAsset(fd);
       setMedia(m => ({ ...m, [slot.key]: { kind: slot.kind, file, assetId: asset.id, uploading: false } }));
     } catch (e) {
       setMedia(m => ({ ...m, [slot.key]: { kind: slot.kind, file, assetId: 0, uploading: false, err: e.message || "upload failed" } }));
+    }
+  }
+
+  // Label typed AFTER the upload finished → patch it onto the saved asset.
+  function saveLabel(slot) {
+    const v = (labels[slot.key] || "").trim();
+    const m = media[slot.key];
+    if (m?.assetId && v) {
+      api.patchAsset(m.assetId, { description: v }).catch(() => {});
     }
   }
 
@@ -121,10 +142,11 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
 
   // Generate story-relevant media for ONE image slot, per its single/slideshow mode.
   async function genForSlot(s, theStory) {
+    const note = (notes[s.key] || "").trim() || undefined;   // omit when blank (JSON drops undefined)
     if (isSlide(s.key)) {
       const raw = slideCount[s.key];
       const cnt = raw ? Math.max(1, Math.min(parseInt(raw, 10) || 0, 12)) : null;  // null = Auto
-      const res = await api.aiGenerateBatch({ story: theStory, count: cnt });
+      const res = await api.aiGenerateBatch({ story: theStory, count: cnt, note, engine });
       const frames = (res.assets || []).map(a => ({
         id: a.id, duration_s: 3, effect: "fade", effect_duration: 0.4 }));
       if (!frames.length) throw new Error("no images generated");
@@ -132,7 +154,7 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
         kind: "image", file: { name: `AI slideshow · ${frames.length} images` },
         carousel: frames, fit: "cover" } }));
     } else {
-      const a = await api.aiGenerateAsset({ story: theStory });
+      const a = await api.aiGenerateAsset({ story: theStory, note, engine });
       setMedia(m => ({ ...m, [s.key]: {
         kind: "image", file: { name: "AI · " + theStory.slice(0, 40) }, assetId: a.id } }));
     }
@@ -158,22 +180,27 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
     try {
       const singles = imageSlots.filter(s => !isSlide(s.key));
       const slides  = imageSlots.filter(s => isSlide(s.key));
-      if (singles.length === 1) {
-        await genForSlot(singles[0], t);
-      } else if (singles.length > 1) {
-        const res = await api.aiGenerateBatch({ story: t, count: singles.length });
+      // The batch endpoint takes ONE note, so noted slots must generate individually
+      // (each guided by its own words); only noteless slots share the distinct-beats batch.
+      const noted   = singles.filter(s => (notes[s.key] || "").trim());
+      const plain   = singles.filter(s => !(notes[s.key] || "").trim());
+      if (plain.length === 1) {
+        await genForSlot(plain[0], t);
+      } else if (plain.length > 1) {
+        const res = await api.aiGenerateBatch({ story: t, count: plain.length, engine });
         const got = res.assets || [];
-        singles.forEach((s, i) => {
+        plain.forEach((s, i) => {
           const a = got[i];                       // distinct image per slot — never reuse (no dupes)
           if (a) setMedia(m => ({ ...m, [s.key]: {
             kind: "image", file: { name: "AI · " + t.slice(0, 40) }, assetId: a.id } }));
         });
-        if (got.length < singles.length) {        // some image gens failed — say so, don't duplicate
-          const miss = singles.length - got.length;
-          setAutoErr(`Generated ${got.length} of ${singles.length} images — ${miss} slot${miss > 1 ? "s" : ""} kept the template default. Click Generate again to fill ${miss > 1 ? "them" : "it"}.`);
+        if (got.length < plain.length) {          // some image gens failed — say so, don't duplicate
+          const miss = plain.length - got.length;
+          setAutoErr(`Generated ${got.length} of ${plain.length} images — ${miss} slot${miss > 1 ? "s" : ""} kept the template default. Click Generate again to fill ${miss > 1 ? "them" : "it"}.`);
         }
       }
-      for (const s of slides) { await genForSlot(s, t); }  // sequential — avoids rate-limit bursts
+      for (const s of noted)  { await genForSlot(s, t); }  // sequential — avoids rate-limit bursts
+      for (const s of slides) { await genForSlot(s, t); }  // (note flows via genForSlot)
     } catch (e) {
       setAutoErr(e.message || "generation failed");
     } finally { setAutoBusy(false); }
@@ -183,11 +210,12 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
     return <p className="text-gray-500 text-sm">This template has no media slots.</p>;
   }
 
-  const stateLine = (m) =>
+  const stateLine = (m, isImage) =>
     m?.uploading ? "uploading…"
       : m?.err ? <span className="text-red-400">{m.err}</span>
       : Array.isArray(m?.carousel) && m.carousel.length ? <span className="text-fuchsia-300">slideshow · {m.carousel.length} images</span>
       : m?.file ? <span className="text-teal-300">{m.file.name}</span>
+      : isImage ? <span className="italic">AI will pick this image from the video after transcription</span>
       : "no file — uses the template default";
 
   const row = (s, label, { isImage = false } = {}) => {
@@ -208,7 +236,7 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
           )}
           <div className="flex-1 min-w-0">
             <div className="text-sm text-white font-medium">{label}</div>
-            <div className="text-[11px] text-gray-500">{stateLine(m)}</div>
+            <div className="text-[11px] text-gray-500">{stateLine(m, isImage)}</div>
           </div>
           {isImage && (
             <>
@@ -243,6 +271,23 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
           <input ref={el => (inputs.current[s.key] = el)} type="file" className="hidden"
             accept={accept} onChange={(e) => pick(s, e.target.files?.[0] || null)} />
         </div>
+        {isImage && (
+          <input
+            value={notes[s.key] || ""}
+            onChange={(e) => setNotes(n => ({ ...n, [s.key]: e.target.value }))}
+            placeholder="✦ Describe this image (optional) — your words guide it; blank = AI decides from the video"
+            className="w-full bg-black border border-fuchsia-500/25 rounded px-2 py-1.5 text-white text-[11px] placeholder-gray-600"
+          />
+        )}
+        {isImage && !slideOn && (
+          <input
+            value={labels[s.key] || ""}
+            onChange={(e) => setLabels(l => ({ ...l, [s.key]: e.target.value }))}
+            onBlur={() => saveLabel(s)}
+            placeholder="What does this image show? e.g. 'CM at press meet' — helps sync it to the right spoken words"
+            className="w-full bg-black border border-gray-700 rounded px-2 py-1.5 text-white text-[11px] placeholder-gray-600"
+          />
+        )}
       </div>
     );
   };
@@ -293,7 +338,7 @@ export default function TemplateMediaPicker({ slots = [], mainFile, onMainFile, 
 
           <p className="text-[11px] text-gray-500">
             <b className="text-gray-300">{imageSlots.length}</b> image slot{imageSlots.length > 1 ? "s" : ""} —
-            generate from your story, upload your own, or leave blank to use the template&apos;s default.
+            generate from your story, upload your own, or leave blank — AI picks it from the video after transcription.
           </p>
           {imageSlots.map((s, i) => row(s, imageLabel(s.key, i), { isImage: true }))}
         </div>

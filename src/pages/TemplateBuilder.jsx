@@ -391,6 +391,13 @@ export default function TemplateBuilder({
     setBusy(true); setErr("");
     histRef.current = { stack: [], idx: -1 };
     api.getTemplate(tid).then((t) => {
+      if (t.format === "svg") {
+        // The entry HTML of an SVG template is generated from the SVG —
+        // builder edits would corrupt it (deep-linkable route, so gate here
+        // too, not just the hidden Edit chip; backend PUT also refuses).
+        setErr("This is an SVG layout template — it can't be edited in the visual builder. Re-upload a new .svg to change it.");
+        return;
+      }
       setTpl(t); setName(t.name || ""); setVisibility(t.visibility || "private");
       setEditable(!!t.editable); setBuiltOn(t.built_on || null);
       setCanvas(Array.isArray(t.canvas) ? t.canvas : [1080, 1920]);
@@ -785,6 +792,7 @@ export default function TemplateBuilder({
   };
 
   async function save({ fork = false } = {}) {
+    if (!embedded && !tpl) return;   // nothing loaded (e.g. SVG deep-link refusal)
     setBusy(true); setErr(""); setMsg(""); setWarnings([]);
     try {
       const html = mode === "code" ? codeText : serialize();

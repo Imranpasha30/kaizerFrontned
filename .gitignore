@@ -1,8 +1,18 @@
 node_modules/
 dist/
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 
 # Large demo asset — too big for GitHub (>100 MB hard limit). Keep on disk only.
 public/demo/kaizer-demo.mp4
+
+# Promote/premix leaves timestamped copies of main.py and models.py
+# beside the originals every time it runs. Backups, not source.
+*.promotebak-*
+*.premixbak-*
+
+# Bundler output accidentally written to the Windows null device.
+NUL.css
+nul.css

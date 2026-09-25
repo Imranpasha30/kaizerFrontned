@@ -22,7 +22,10 @@ import Performance from "./pages/Performance";
 import Trending from "./pages/Trending";
 import QuickPublish from "./pages/QuickPublish";
 import LiveStudio   from "./pages/LiveStudio";
+import AnchorStudio from "./pages/AnchorStudio";
+import PodcastStudio from "./pages/PodcastStudio";
 import Assets from "./pages/Assets";
+import VideoCompressor from "./pages/VideoCompressor";
 import Settings from "./pages/Settings";
 import MetaSettings from "./pages/MetaSettings";
 import Billing  from "./pages/Billing";
@@ -36,12 +39,16 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword  from "./pages/ResetPassword";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
+import DesktopDownload from "./pages/DesktopDownload";
+import DesktopEula from "./pages/DesktopEula";
+import DesktopSettings from "./pages/DesktopSettings";
 import AuthProvider from "./auth/AuthProvider";
 import ProtectedRoute from "./auth/ProtectedRoute";
 import AdminRoute from "./auth/AdminRoute";
 import Admin from "./pages/Admin";
 import { CursorLayer } from "./components/ui";
 import { ThemeProvider } from "./theme/ThemeProvider";
+import { isDesktop } from "./api/client";
 
 /**
  * NavBar is hidden on the auth pages for a full-bleed login experience,
@@ -57,6 +64,8 @@ function Shell({ children }) {
     loc.pathname === "/" ||
     loc.pathname === "/privacy" ||
     loc.pathname === "/terms" ||
+    loc.pathname === "/desktop" ||
+    loc.pathname === "/desktop/eula" ||
     loc.pathname.startsWith("/phone/") ||
     loc.pathname.startsWith("/program/") ||
     loc.pathname.startsWith("/admin");
@@ -85,7 +94,9 @@ function GlobalCursor() {
     loc.pathname === "/forgot-password" ||
     loc.pathname === "/reset-password" ||
     loc.pathname === "/privacy" ||
-    loc.pathname === "/terms";
+    loc.pathname === "/terms" ||
+    loc.pathname === "/desktop" ||
+    loc.pathname === "/desktop/eula";
   if (hide) return null;
   return <CursorLayer />;
 }
@@ -98,16 +109,20 @@ function EditRedirect() {
 }
 
 export default function App() {
+  // Desktop shell: there is no marketing site or cloud login inside the app.
+  // The desktop identity is the local single user (cloud login already
+  // happened in the shell), so "/", /login and /register all land on /app.
+  const desktop = isDesktop();
   return (
     <ThemeProvider>
       <AuthProvider>
         <GlobalCursor />
         <Shell>
         <Routes>
-          {/* Public marketing + auth routes */}
-          <Route path="/"                 element={<Landing />} />
-          <Route path="/login"            element={<Login />} />
-          <Route path="/register"         element={<Register />} />
+          {/* Public marketing + auth routes (desktop → straight into the app) */}
+          <Route path="/"                 element={desktop ? <Navigate to="/app" replace /> : <Landing />} />
+          <Route path="/login"            element={desktop ? <Navigate to="/app" replace /> : <Login />} />
+          <Route path="/register"         element={desktop ? <Navigate to="/app" replace /> : <Register />} />
           <Route path="/forgot-password"  element={<ForgotPassword />} />
           <Route path="/reset-password"   element={<ResetPassword />} />
 
@@ -116,6 +131,12 @@ export default function App() {
               so the reviewer can verify them. */}
           <Route path="/privacy"  element={<PrivacyPolicy />} />
           <Route path="/terms"    element={<TermsOfService />} />
+
+          {/* Public Kaizer X Desktop pages — product/download page + EULA.
+              Reachable without authentication (linked from the installer
+              and marketing). */}
+          <Route path="/desktop"       element={<DesktopDownload />} />
+          <Route path="/desktop/eula"  element={<DesktopEula />} />
 
           {/* Phase 9 — phone-as-camera public route (scanned via QR). No auth;
               the token in the URL authorises the ingest WebSocket. */}
@@ -128,11 +149,21 @@ export default function App() {
           <Route path="/library/categories"            element={<ProtectedRoute><LibraryCategories /></ProtectedRoute>} />
           <Route path="/library/creator/:creatorId"    element={<ProtectedRoute><LibraryCreator /></ProtectedRoute>} />
           <Route path="/new"                           element={<ProtectedRoute><NewJob /></ProtectedRoute>} />
+          {/* News-Anchor studio (AI presenter) — entered from the NewJob
+              format tiles; generates through /api/avatar, not create_job. */}
+          <Route path="/anchor"                        element={<ProtectedRoute><AnchorStudio /></ProtectedRoute>} />
+          {/* Podcast editor (AI multi-cam) — entered from the NewJob format
+              tiles; runs through /api/podcast, not create_job. */}
+          <Route path="/podcast-studio"                element={<ProtectedRoute><PodcastStudio /></ProtectedRoute>} />
           <Route path="/quick-publish"                 element={<ProtectedRoute><QuickPublish /></ProtectedRoute>} />
           <Route path="/live-studio"                   element={<ProtectedRoute><LiveStudio /></ProtectedRoute>} />
           <Route path="/assets"                        element={<ProtectedRoute><Assets /></ProtectedRoute>} />
+          <Route path="/tools/compress"                element={<ProtectedRoute><VideoCompressor /></ProtectedRoute>} />
           <Route path="/settings"                      element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/settings/meta"                 element={<ProtectedRoute><MetaSettings /></ProtectedRoute>} />
+          {/* Desktop app only — AI provider keys panel. The page itself
+              redirects to / when not running inside the desktop shell. */}
+          <Route path="/desktop-settings"              element={<ProtectedRoute><DesktopSettings /></ProtectedRoute>} />
           <Route path="/jobs/:jobId"                   element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
           {/* Legacy editor routes redirect to the canvas editor (old links
               + bookmarks keep working; the :clipId form drops to job level). */}

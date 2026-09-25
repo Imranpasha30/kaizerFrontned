@@ -5,7 +5,7 @@ import {
   ImagePlus, AlertCircle, CheckCircle2, Plus, Play, ArrowLeft,
   ChevronDown, ChevronRight, FileText, Sparkles,
 } from "lucide-react";
-import { api, getToken } from "../api/client";
+import { api, getToken, isDesktop } from "../api/client";
 import PublishModal from "../components/PublishModal";
 import CustomTemplateEditor from "../components/CustomTemplateEditor";
 import LiveCompositor from "../components/LiveCompositor";
@@ -104,6 +104,7 @@ export default function V4Editor() {
   const [dirty, setDirty]       = useState(false);
   const [saving, setSaving]     = useState(false);
   const [renderState, setRenderState] = useState({ state: "idle", msg: "", target: "" });
+  const [overlayCatalog, setOverlayCatalog] = useState([]);   // broadcast graphics + their editable text fields
   const [deferred, setDeferred] = useState(false);   // Stage 2/3: pipeline produced the scene but skipped the up-front render
   const [bulletinUrl, setBulletinUrl] = useState("");
   const [trimmedUrl,  setTrimmedUrl]  = useState("");
@@ -162,12 +163,26 @@ export default function V4Editor() {
         msg:   r.render_msg   || "",
         target: r.render_target || "",
       });
-      setBulletinUrl(r.bulletin_url || "");
-      setTrimmedUrl(r.trimmed_url || "");
+      // Cache-bust the rendered-media URLs: a re-render writes the SAME
+      // file path, so a bare URL left the <video key={url}> mounted on the
+      // browser-cached OLD render — edits (overlay text, images, layouts)
+      // looked ignored even though the file on disk was correct. A
+      // per-fetch version forces a remount + fresh bytes after every
+      // completed render / manual refresh. Local API urls get a query
+      // param (bypasses HTTP cache); absolute urls only a fragment (never
+      // corrupts a presigned signature).
+      const _ver = Date.now();
+      const _bust = (u) => {
+        if (!u) return u;
+        if (u.startsWith("/")) return `${u}${u.includes("?") ? "&" : "?"}v=${_ver}`;
+        return `${u}#v=${_ver}`;
+      };
+      setBulletinUrl(_bust(r.bulletin_url || ""));
+      setTrimmedUrl(_bust(r.trimmed_url || ""));
       setBulletinClipId(r.bulletin_clip_id ?? null);
       setShortsClipIds(r.shorts_clip_ids || []);
-      setShortsUrls(r.shorts_urls || []);
-      setTrimmedShortsUrls(r.trimmed_shorts_urls || []);
+      setShortsUrls((r.shorts_urls || []).map(_bust));
+      setTrimmedShortsUrls((r.trimmed_shorts_urls || []).map(_bust));
       setDeferred(r.current_stage === "render_deferred");
       setErr("");
     } catch (e) {
@@ -178,6 +193,16 @@ export default function V4Editor() {
   }, [jobId]);
 
   useEffect(() => { fetchCanvas(); }, [fetchCanvas]);
+
+  // Load the broadcast-graphics catalog once (for the per-story "News graphics"
+  // editor: add a graphic / change which one / know its editable text fields).
+  useEffect(() => {
+    let alive = true;
+    api.v4OverlayCatalog()
+      .then((r) => { if (alive) setOverlayCatalog(r?.overlays || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Snap the selection to a section that EXISTS for this output format:
   // shorts-only jobs have no Full Video, full-only jobs have no shorts. Keeps
@@ -353,18 +378,33 @@ export default function V4Editor() {
     setDirty(true);
   }
 
-  function addImageToStory(storyIdx, poolFilename) {
+  // `focal` = a pool-route response carrying the server's face-detected
+  // offset_x/y_pct hint — copied onto the fresh CanvasImage so cover-crops
+  // keep heads in frame. Only stamped when non-centered (50/50 is the
+  // schema default anyway); the 9-point focal grid still overrides.
+  function applyFocalHint(img, focal) {
+    const fx = Number(focal?.offset_x_pct);
+    const fy = Number(focal?.offset_y_pct);
+    if (Number.isFinite(fx) && Number.isFinite(fy) && (fx !== 50 || fy !== 50)) {
+      img.offset_x_pct = fx;
+      img.offset_y_pct = fy;
+    }
+  }
+
+  function addImageToStory(storyIdx, poolFilename, focal) {
     setStory(storyIdx, (s) => {
       const lastEnd = s.images.length ? s.images[s.images.length - 1].t_end : 0;
       const storyDur = (s.video_t_end || 0) - (s.video_t_start || 0);
       const t_start = Math.min(lastEnd, Math.max(0, storyDur - 1));
       const t_end   = Math.min(storyDur, t_start + 4.0);
-      s.images.push({
+      const entry = {
         src: poolFilename,
         t_start, t_end,
         source: "user",
         label: null,
-      });
+      };
+      applyFocalHint(entry, focal);
+      s.images.push(entry);
     });
   }
 
@@ -417,6 +457,22 @@ export default function V4Editor() {
 
   function setImageFit(storyIdx, imgIdx, fit) {
     setStory(storyIdx, (s) => { s.images[imgIdx].fit = fit; });
+  }
+
+  // ─── Image↔speech sync fields ───
+  function setImageLabel(storyIdx, imgIdx, label) {
+    setStory(storyIdx, (s) => { s.images[imgIdx].label = (label || "").trim() || null; });
+  }
+
+  function setImageTimingMode(storyIdx, imgIdx, mode) {
+    // "pinned" = the operator fixed this window by hand; every re-sync
+    // keeps it verbatim. "content" = the timing AI may re-place it.
+    setStory(storyIdx, (s) => { s.images[imgIdx].timing_mode = mode; });
+  }
+
+  function setImageSpotlight(storyIdx, imgIdx, value) {
+    // null = auto (engine decides from importance) / off / fullscreen / pip
+    setStory(storyIdx, (s) => { s.images[imgIdx].spotlight = value || null; });
   }
 
   function setImageOffset(storyIdx, imgIdx, x_pct, y_pct) {
@@ -698,6 +754,20 @@ export default function V4Editor() {
 
       {/* Stage 2/3: deferred render — the scene is ready but the MP4 hasn't been rendered yet
           for the section being viewed. Edit freely, then Export on demand. */}
+      {/* Full video missing though the job was NOT deferred: the pipeline's
+          up-front render FAILED (job 600: out-of-memory). Say so plainly and
+          point at Render — a silent dead player reads as data loss. */}
+      {!deferred && selected.kind === "bulletin" && !bulletinUrl
+        && !["queued", "running"].includes(renderState.state) && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-red-600/40 bg-red-500/10 px-4 py-2.5">
+          <span className="text-red-200 text-sm">
+            ⚠ The full video has not rendered — the pipeline&apos;s render failed.
+            Your edits, trimmed footage and shorts are safe. Press <b>Render</b> to
+            build the full video now.
+          </span>
+        </div>
+      )}
+
       {deferred
         && (selected.kind === "short" ? !shortsUrls[selected.index || 0] : !bulletinUrl)
         && !["queued", "running"].includes(renderState.state) && (
@@ -743,8 +813,9 @@ export default function V4Editor() {
       {/* Auto-publish consent banner — only shown when the user has
           auto_publish + require_consent enabled in their V4 defaults,
           the canvas is rendered, and nothing's been queued yet. One
-          click fans out every clip to every default channel. */}
-      {defaults?.auto_publish && defaults?.require_consent && !consentDone && bulletinUrl && (
+          click fans out every clip to every default channel.
+          Publishing — never shown in the desktop app. */}
+      {!isDesktop() && defaults?.auto_publish && defaults?.require_consent && !consentDone && bulletinUrl && (
         <div className="my-2 p-3 rounded border border-amber-500/40 bg-amber-500/5 flex items-center gap-3">
           <div className="text-amber-300 text-lg flex-shrink-0">⚡</div>
           <div className="flex-1 text-xs">
@@ -771,7 +842,11 @@ export default function V4Editor() {
           (bg-panel #0e0e0e, border-border #1a1a1a, text-ink-* ramp)
           which were tuned for ≥7:1 contrast on this background, then
           adds the accent + focus polish on top. */}
-      <div className="grid grid-cols-[240px,1fr,380px] gap-3 mt-3 min-h-[78vh]">
+      {/* Tailwind arbitrary values separate tracks with UNDERSCORES — the
+          previous comma form emitted `grid-template-columns:240px,1fr,380px`
+          (invalid CSS), the browser dropped it, and the whole 3-pane editor
+          collapsed into one stacked column. */}
+      <div className="grid grid-cols-[240px_1fr_380px] gap-3 mt-3 min-h-[78vh]">
         {/* LEFT NAVIGATION — Bulletin + Shorts + Library */}
         <aside className="rounded-lg border border-border bg-panel p-2 overflow-y-auto shadow-card"
                style={{ maxHeight: "78vh" }}>
@@ -957,6 +1032,23 @@ export default function V4Editor() {
                       onReplaceImageSrc={(idx, fn) => setStory(i, (s) => { s.images[idx].src = fn; })}
                       onSetImageFit={(idx, fit) => setImageFit(i, idx, fit)}
                       onSetImageOffset={(idx, x, y) => setImageOffset(i, idx, x, y)}
+                      onSetImageLabel={(idx, v) => setImageLabel(i, idx, v)}
+                      onSetImageTimingMode={(idx, m) => setImageTimingMode(i, idx, m)}
+                      onSetImageSpotlight={(idx, v) => setImageSpotlight(i, idx, v)}
+                      onResyncTimings={async () => {
+                        try {
+                          const r = await api.v4ResyncImageTimings(jobId, i);
+                          const imgs = r.images_by_story?.[String(story.story_index ?? i)];
+                          if (imgs) {
+                            // Server wrote the canvas; mirror the new
+                            // timings locally so the UI updates instantly.
+                            setStory(i, (s) => { s.images = imgs; });
+                          } else if (r.skipped?.length) {
+                            setErr(`Sync skipped: ${r.skipped.map((k) => k.reason).join(", ")}`);
+                          }
+                          return r;
+                        } catch (e) { setErr(e?.message || "sync to speech failed"); return null; }
+                      }}
                       onMarkActive={(idx) => setActiveImage({ storyIdx: i, imgIdx: idx })}
                       isActiveImageRow={(idx) => activeImage?.storyIdx === i && activeImage?.imgIdx === idx}
                       onUploadReplaceImage={async (idx, file) => {
@@ -966,7 +1058,18 @@ export default function V4Editor() {
                             const filtered = p.filter((x) => x.filename !== r.filename);
                             return [...filtered, { filename: r.filename, size_bytes: r.size_bytes, url: r.url }];
                           });
-                          setStory(i, (s) => { s.images[idx].src = r.filename; });
+                          setStory(i, (s) => {
+                            // New picture ⇒ the old framing no longer applies;
+                            // adopt the server's detected focal point when it
+                            // found a face (the 9-point grid can still refine).
+                            s.images[idx].src = r.filename;
+                            // New picture ⇒ wipe the old framing FIRST —
+                            // applyFocalHint only stamps non-centered hints,
+                            // so a face-less replacement kept STALE offsets.
+                            s.images[idx].offset_x_pct = 50;
+                            s.images[idx].offset_y_pct = 50;
+                            applyFocalHint(s.images[idx], r);
+                          });
                           return r;
                         } catch (e) { setErr(e?.message || "upload failed"); return null; }
                       }}
@@ -983,8 +1086,17 @@ export default function V4Editor() {
                             const filtered = p.filter((x) => x.filename !== r.filename);
                             return [...filtered, { filename: r.filename, size_bytes: r.size_bytes, url: r.url }];
                           });
-                          // Swap src in place — timing/effect preserved.
-                          setStory(i, (s) => { s.images[idx].src = r.filename; });
+                          // Swap src in place — timing/effect preserved;
+                          // framing follows the NEW picture's detected face.
+                          setStory(i, (s) => {
+                            s.images[idx].src = r.filename;
+                            // New picture ⇒ wipe the old framing FIRST —
+                            // applyFocalHint only stamps non-centered hints,
+                            // so a face-less replacement kept STALE offsets.
+                            s.images[idx].offset_x_pct = 50;
+                            s.images[idx].offset_y_pct = 50;
+                            applyFocalHint(s.images[idx], r);
+                          });
                           return r;
                         } catch (e) { setErr(e?.message || "auto-fetch failed"); return null; }
                       }}
@@ -1001,11 +1113,22 @@ export default function V4Editor() {
                             const filtered = p.filter((x) => x.filename !== r.filename);
                             return [...filtered, { filename: r.filename, size_bytes: r.size_bytes, url: r.url }];
                           });
-                          setStory(i, (s) => { s.images[idx].src = r.filename; });
+                          setStory(i, (s) => {
+                            // Regenerated picture ⇒ re-frame on its face.
+                            s.images[idx].src = r.filename;
+                            // New picture ⇒ wipe the old framing FIRST —
+                            // applyFocalHint only stamps non-centered hints,
+                            // so a face-less replacement kept STALE offsets.
+                            s.images[idx].offset_x_pct = 50;
+                            s.images[idx].offset_y_pct = 50;
+                            applyFocalHint(s.images[idx], r);
+                          });
                           return r;
                         } catch (e) { setErr(e?.message || "AI generation failed"); return null; }
                       }}
                       onSetTextBlock={(idx, m) => setTextBlock(i, idx, m)}
+                      overlayCatalog={overlayCatalog}
+                      onSetOverlays={(m) => setStory(i, (s) => { if (!s.overlays) s.overlays = []; m(s.overlays); })}
                       onAutoDistribute={async () => {
                         try {
                           const r = await api.v4AutoDistribute(jobId, {
@@ -1031,7 +1154,7 @@ export default function V4Editor() {
                             prefer_real_photo: true,
                           });
                           setPool((p) => [...p, { filename: r.filename, size_bytes: r.size_bytes, url: r.url }]);
-                          addImageToStory(i, r.filename);
+                          addImageToStory(i, r.filename, r);
                           return r;
                         } catch (e) { setErr(e?.message || "auto-fetch failed"); return null; }
                       }}
@@ -1051,7 +1174,7 @@ export default function V4Editor() {
                             const filtered = p.filter((x) => x.filename !== r.filename);
                             return [...filtered, { filename: r.filename, size_bytes: r.size_bytes, url: r.url }];
                           });
-                          addImageToStory(i, r.filename);
+                          addImageToStory(i, r.filename, r);
                           return r;
                         } catch (e) { setErr(e?.message || "AI generation failed"); return null; }
                       }}
@@ -1064,6 +1187,10 @@ export default function V4Editor() {
                   )}
                 </div>
               </details>
+
+              {/* Movie-style trailer of this job — dramatic moments,
+                  fast transitions, cards + sound design, 16:9 or 9:16. */}
+              <TrailerPanel jobId={jobId} />
 
               {canvas.bulletin.layout && (
                 <LayoutPanel layout={canvas.bulletin.layout} onSet={setLayout} />
@@ -1330,17 +1457,21 @@ function StoryCard({
   onAddImage, onRemoveImage, onMoveImage,
   onSetImageDuration, onSetImageStart, onSetImageEffect, onSetImageEffectDuration,
   onSetImageFit, onSetImageOffset,
+  onSetImageLabel, onSetImageTimingMode, onSetImageSpotlight, onResyncTimings,
   onReplaceImageSrc, onAiReplaceImage, onAutoFetchReplaceImage, onUploadReplaceImage,
-  onSetTextBlock,
+  onSetTextBlock, onSetOverlays, overlayCatalog,
   onAutoFetchImage, onAiGenerateImage, onAutoDistribute,
   onMarkActive, isActiveImageRow,
 }) {
   const [showPoolPicker, setShowPoolPicker] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [overlaysOpen, setOverlaysOpen] = useState(false);
+  const [graphicsOpen, setGraphicsOpen] = useState(false);
+  const [addGraphicId, setAddGraphicId] = useState("");
   const [fetching, setFetching] = useState(false);
   const [aiGenning, setAiGenning] = useState(false);
   const [distributing, setDistributing] = useState(false);
+  const [syncing, setSyncing] = useState(false);          // "Sync to speech" in flight
   const [replaceIdx, setReplaceIdx] = useState(null);     // which row's mini picker is open
   const [replaceBusy, setReplaceBusy] = useState(null);   // "ai" | "auto" | "upload" | null
   const [framingIdx, setFramingIdx] = useState(null);     // which row's fit/focal popover is open
@@ -1351,6 +1482,7 @@ function StoryCard({
   const duration = Math.max(0, (story.video_t_end || 0) - (story.video_t_start || 0));
   const imageCount = (story.images || []).length;
   const overlayCount = (story.text_blocks || []).length;
+  const graphicOverlays = story.overlays || [];
 
   return (
     <div className="border border-border rounded bg-black/20 p-2.5 space-y-2">
@@ -1408,6 +1540,62 @@ function StoryCard({
           </div>
         </details>
       )}
+
+      {/* News graphics (overlays / HUD) — banners, bugs, stamps, locators
+          the AI Director placed, with EDITABLE text. Change the text, timing
+          or which graphic; add or remove; then re-render. */}
+      <details open={graphicsOpen} onToggle={(e) => setGraphicsOpen(e.target.open)}
+               className="border border-border/60 rounded">
+        <summary className="cursor-pointer px-2 py-1 text-[10px] uppercase tracking-wider text-gray-400">
+          News graphics ({graphicOverlays.length})
+        </summary>
+        <div className="p-2 space-y-1.5 border-t border-border/60">
+          {graphicOverlays.length === 0 && (
+            <div className="text-[10px] text-gray-500 italic px-0.5">
+              No on-screen graphic on this story. Add a banner / bug / stamp below.
+            </div>
+          )}
+          {graphicOverlays.map((ov, j) => (
+            <GraphicOverlayEditor
+              key={j}
+              overlay={ov}
+              catalog={overlayCatalog}
+              onPatch={(m) => onSetOverlays((arr) => m(arr[j]))}
+              onChangeId={(newId) => onSetOverlays((arr) => {
+                const def = (overlayCatalog.find((c) => c.id === newId) || {}).fields || {};
+                arr[j] = { ...arr[j], id: newId, fields: { ...def } };
+              })}
+              onRemove={() => onSetOverlays((arr) => { arr.splice(j, 1); })}
+            />
+          ))}
+          <div className="flex items-center gap-1.5 pt-1">
+            <select
+              value={addGraphicId}
+              onChange={(e) => setAddGraphicId(e.target.value)}
+              className="flex-1 min-w-0 bg-black border border-border rounded px-2 py-1 text-[11px] text-white"
+            >
+              <option value="">+ Add a graphic…</option>
+              {overlayCatalog.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!addGraphicId}
+              onClick={() => {
+                const c = overlayCatalog.find((x) => x.id === addGraphicId);
+                if (!c) return;
+                onSetOverlays((arr) => {
+                  arr.push({ id: c.id, t: 1.0, dur: 4.5, fields: { ...(c.fields || {}) } });
+                });
+                setAddGraphicId("");
+                setGraphicsOpen(true);
+              }}
+              className="px-2.5 py-1 rounded text-[11px] font-semibold bg-accent/80 text-white hover:bg-accent disabled:opacity-40"
+            >Add</button>
+          </div>
+        </div>
+      </details>
 
       {/* Carousel images — collapsed by default (73 rows would otherwise
           fill the entire inspector). Header shows count + auto-fetch
@@ -1470,6 +1658,21 @@ function StoryCard({
                 title="Spread the current images evenly across this story's duration and stamp fades"
               >
                 {distributing ? (<><Loader2 size={9} className="animate-spin" /> dist…</>) : "↹ Auto"}
+              </button>
+            )}
+            {onResyncTimings && (story.images || []).length >= 1 && (
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  setSyncing(true);
+                  try { await onResyncTimings(); }
+                  finally { setSyncing(false); }
+                }}
+                disabled={syncing || distributing}
+                className="text-emerald-300 hover:text-white normal-case text-[10px] flex items-center gap-1 disabled:opacity-40"
+                title="AI places each image on the exact spoken words (by its label). Pinned images keep their timing; stretches with no matching image show the main video full-screen."
+              >
+                {syncing ? (<><Loader2 size={9} className="animate-spin" /> sync…</>) : "🗣 Sync to speech"}
               </button>
             )}
           </div>
@@ -1702,6 +1905,63 @@ function StoryCard({
                       <span className="text-[9px] text-gray-500">s</span>
                     </div>
                   )}
+                  {/* Speech-sync row — the label is WHAT the picture shows
+                      (the sync AI matches it to the spoken words); pin
+                      freezes this window across re-syncs; spotlight pops
+                      the image full-screen / PiP at its moment. */}
+                  {(onSetImageLabel || onSetImageTimingMode || onSetImageSpotlight) && (
+                    <div className="flex items-center gap-1 mt-1">
+                      {onSetImageLabel && (
+                        <input
+                          value={img.label || ""}
+                          onChange={(e) => onSetImageLabel(j, e.target.value)}
+                          placeholder="what's in this image? (drives sync)"
+                          className="flex-1 min-w-0 bg-black border border-border rounded px-1 py-0.5 text-gray-200 text-[10px] placeholder-gray-600"
+                          title="Subject label — the sync AI shows this image exactly when its subject is spoken"
+                        />
+                      )}
+                      {onSetImageTimingMode && (
+                        <button
+                          type="button"
+                          onClick={() => onSetImageTimingMode(j, (img.timing_mode || "content") === "pinned" ? "content" : "pinned")}
+                          className={`px-1 py-0.5 rounded border text-[10px] flex-shrink-0 ${
+                            (img.timing_mode || "content") === "pinned"
+                              ? "border-amber-300 text-amber-300"
+                              : "border-border text-gray-500 hover:text-white"
+                          }`}
+                          title={(img.timing_mode || "content") === "pinned"
+                            ? "Pinned — Sync to speech keeps this window exactly as set"
+                            : "Content-driven — Sync to speech may re-place this image on the spoken words"}
+                        >📌</button>
+                      )}
+                      {onSetImageSpotlight && (
+                        <select
+                          value={img.spotlight ?? ""}
+                          onChange={(e) => onSetImageSpotlight(j, e.target.value)}
+                          className="bg-black border border-border rounded px-1 py-0.5 text-gray-200 text-[10px] flex-shrink-0"
+                          title="Spotlight: pop this image full-screen (or PiP) during its window. Auto = the AI decides from importance."
+                        >
+                          <option value="">✨ auto</option>
+                          <option value="off">off</option>
+                          <option value="fullscreen">fullscreen</option>
+                          <option value="pip">PiP</option>
+                        </select>
+                      )}
+                      {typeof img.confidence === "number" && (
+                        <span
+                          className={`px-1 py-0.5 rounded text-[9px] flex-shrink-0 tabular-nums ${
+                            img.confidence >= 0.75 ? "bg-emerald-500/15 text-emerald-300"
+                            : "bg-amber-500/15 text-amber-300"
+                          }`}
+                          title={img.matched_text
+                            ? `Matched spoken words: ${img.matched_text}`
+                            : "Sync confidence"}
+                        >
+                          {Math.round(img.confidence * 100)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {/* Replace picker — opens when the user clicks the
                       thumbnail. Pool grid + AI/Auto buttons that all
                       swap the current src in place without disturbing
@@ -1907,6 +2167,66 @@ function PoolPanel({ pool, onUpload, onDelete, jobId }) {
 }
 
 
+/* ─── Per-graphic (overlay / HUD) editor ───────────────────────── */
+/* One broadcast graphic on a story: change its TEXT (per editable field),
+   which graphic it is, its timing, or remove it. Empty text falls back to the
+   graphic's built-in default at render time. */
+const _OVL_FIELD_LABEL = { text: "Text", sub: "Subtitle", city: "City", title: "Title", label: "Label" };
+function GraphicOverlayEditor({ overlay, catalog, onPatch, onChangeId, onRemove }) {
+  const meta = (catalog || []).find((c) => c.id === overlay.id);
+  const fieldKeys = Array.from(new Set([
+    ...Object.keys(meta?.fields || {}),
+    ...Object.keys(overlay.fields || {}),
+  ]));
+  const setField = (k, v) => onPatch((o) => { if (!o.fields) o.fields = {}; o.fields[k] = v; });
+  return (
+    <div className="border border-border/50 rounded p-2 space-y-1.5 bg-black/20">
+      <div className="flex items-center gap-1.5">
+        <select
+          value={overlay.id}
+          onChange={(e) => onChangeId(e.target.value)}
+          className="flex-1 min-w-0 bg-black border border-border rounded px-1.5 py-1 text-[11px] text-white"
+          title="Change which graphic"
+        >
+          {(catalog || []).map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+        </select>
+        <button type="button" onClick={onRemove}
+          className="p-1 text-gray-500 hover:text-red-400" title="Remove graphic">
+          <Trash2 size={12} />
+        </button>
+      </div>
+      {fieldKeys.length === 0 && (
+        <div className="text-[10px] text-gray-500 italic">This graphic has no editable text.</div>
+      )}
+      {fieldKeys.map((k) => (
+        <div key={k} className="flex items-center gap-1.5">
+          <span className="text-[9px] uppercase tracking-wider text-gray-500 w-14 shrink-0">
+            {_OVL_FIELD_LABEL[k] || k}
+          </span>
+          <input
+            type="text"
+            value={(overlay.fields && overlay.fields[k] != null) ? overlay.fields[k] : ""}
+            onChange={(e) => setField(k, e.target.value)}
+            placeholder={(meta?.fields || {})[k] || ""}
+            className="flex-1 min-w-0 bg-black border border-border rounded px-2 py-1 text-[11px] text-white"
+          />
+        </div>
+      ))}
+      <div className="flex items-center gap-1.5 pt-0.5">
+        <span className="text-[9px] uppercase tracking-wider text-gray-500">At</span>
+        <input type="number" step="0.1" min="0" value={overlay.t ?? 0}
+          onChange={(e) => onPatch((o) => { o.t = parseFloat(e.target.value) || 0; })}
+          className="w-14 bg-black border border-border rounded px-1.5 py-0.5 text-[11px] text-white" />
+        <span className="text-[9px] text-gray-600">s, for</span>
+        <input type="number" step="0.5" min="0.5" value={overlay.dur ?? 4.5}
+          onChange={(e) => onPatch((o) => { o.dur = parseFloat(e.target.value) || 4.5; })}
+          className="w-14 bg-black border border-border rounded px-1.5 py-0.5 text-[11px] text-white" />
+        <span className="text-[9px] text-gray-600">s</span>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Per-text-block editor ────────────────────────────────────── */
 /* Exposes text + foreground/background color + position + font size
    for one text overlay. Null/empty values fall back to the kind's
@@ -2080,6 +2400,197 @@ function TextBlockEditor({ block, onPatch }) {
 /* ─── Canvas-layout panel ─────────────────────────────────────── */
 /* Lets the operator change where the video and image regions sit on
    the canvas. Drag the numbers; the next re-render reflects them. */
+/* ─── Trailer panel — cut a movie-style teaser of the job ───────── */
+function TrailerPanel({ jobId }) {
+  const [aspect, setAspect] = useState("16:9");
+  const [style, setStyle] = useState("auto");
+  const [structure, setStructure] = useState("classic");
+  const [styles, setStyles] = useState([]);      // 30-category pack catalog
+  const [structures, setStructures] = useState([]);
+  const [myPacks, setMyPacks] = useState([]);    // the user's OWN mixes
+  const [mixOpen, setMixOpen] = useState(false);
+  const [mix, setMix] = useState({ name: "", look: "news", motion: "news",
+                                   sound: "news", cards: "news" });
+  const [mixBusy, setMixBusy] = useState(false);
+  const [state, setState] = useState({ state: "idle" });
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    api.v4TrailerState(jobId).then(setState).catch(() => {});
+    api.v4TrailerStyles().then((r) => {
+      setStyles(r.styles || []);
+      setStructures(r.structures || []);
+    }).catch(() => {});
+    api.listStylePacks().then(setMyPacks).catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [jobId]);
+
+  async function saveMix() {
+    if (!mix.name.trim()) { alert("Give your style a name."); return; }
+    setMixBusy(true);
+    try {
+      const row = await api.createStylePack(mix);
+      setMyPacks((p) => [row, ...p]);
+      setStyle(row.key);            // select the new mix right away
+      setMixOpen(false);
+    } catch (e) {
+      alert(e?.message || "Could not save the style.");
+    } finally {
+      setMixBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (state.state !== "running") {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+    pollRef.current = setInterval(() => {
+      api.v4TrailerState(jobId).then(setState).catch(() => {});
+    }, 4000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [state.state, jobId]);
+
+  async function start() {
+    try {
+      await api.v4CreateTrailer(jobId, aspect, style, structure);
+      setState({ state: "running", aspect });
+    } catch (e) {
+      setState({ state: "failed", msg: e?.message || "failed to start" });
+    }
+  }
+
+  const busy = state.state === "running";
+  return (
+    <div className="border border-border rounded bg-black/20 p-2.5 mt-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-accent">
+            🎬 Trailer
+          </div>
+          <p className="text-[10px] text-gray-500 mt-0.5">
+            Movie-style teaser: the most dramatic moments, fast transitions,
+            title cards + sound design. Rendered from this job automatically.
+          </p>
+        </div>
+        <select
+          value={style}
+          onChange={(e) => setStyle(e.target.value)}
+          disabled={busy}
+          title="Style pack — drives the whole look and sound design (crime = dark + tense, festival = bright + celebratory…). Auto = the AI reads the content and picks."
+          className="bg-black border border-border rounded px-1.5 py-1 text-gray-200 text-[11px] max-w-[150px]"
+        >
+          <option value="auto">✨ Auto style</option>
+          {myPacks.length > 0 && (
+            <optgroup label="My styles">
+              {myPacks.map((p) => (
+                <option key={p.key} value={p.key}>🎨 {p.name}</option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="Built-in packs">
+            {styles.map((s) => (
+              <option key={s.key} value={s.key}>{s.label}</option>
+            ))}
+          </optgroup>
+        </select>
+        <select
+          value={structure}
+          onChange={(e) => setStructure(e.target.value)}
+          disabled={busy}
+          title="How the teaser is BUILT — cold open, crescendo, flash-forward stingers, countdown cards…"
+          className="bg-black border border-border rounded px-1.5 py-1 text-gray-200 text-[11px] max-w-[130px]"
+        >
+          {(structures.length ? structures
+            : [{ key: "classic", label: "Classic tease" }]).map((s) => (
+            <option key={s.key} value={s.key}>{s.label}</option>
+          ))}
+        </select>
+        <select
+          value={aspect}
+          onChange={(e) => setAspect(e.target.value)}
+          disabled={busy}
+          className="bg-black border border-border rounded px-1.5 py-1 text-gray-200 text-[11px]"
+        >
+          <option value="16:9">16:9 (YouTube)</option>
+          <option value="9:16">9:16 (Shorts/Reels)</option>
+        </select>
+        <button
+          type="button"
+          onClick={start}
+          disabled={busy}
+          className="btn btn-secondary text-[11px] px-3 py-1.5 disabled:opacity-40"
+        >
+          {busy ? (<><Loader2 size={12} className="animate-spin inline mr-1" />cutting…</>)
+                : "✂ Cut trailer"}
+        </button>
+      </div>
+      {/* 🎨 Style mixer: compose YOUR OWN pack from the built-ins —
+          look of one, motion of another, sound of a third, cards of a
+          fourth — saved privately, reusable on every future job. */}
+      <button
+        type="button"
+        onClick={() => setMixOpen((o) => !o)}
+        className="mt-2 text-[10px] text-teal-300 hover:text-teal-200 underline"
+      >
+        {mixOpen ? "− Close style mixer" : "🎨 Mix your own style (save & reuse)"}
+      </button>
+      {mixOpen && (
+        <div className="mt-2 p-2 rounded border border-teal-500/30 bg-teal-500/5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[["look", "Look (color & texture)"], ["motion", "Motion (cuts & pace)"],
+              ["sound", "Sound (booms & bed)"], ["cards", "Cards (title design)"]].map(
+              ([k, lbl]) => (
+                <label key={k} className="flex flex-col gap-1">
+                  <span className="text-[9px] uppercase tracking-wider text-gray-400">{lbl}</span>
+                  <select
+                    value={mix[k]}
+                    onChange={(e) => setMix((m) => ({ ...m, [k]: e.target.value }))}
+                    className="bg-black border border-border rounded px-1.5 py-1 text-gray-200 text-[11px]"
+                  >
+                    {styles.map((s) => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <input
+              value={mix.name}
+              onChange={(e) => setMix((m) => ({ ...m, name: e.target.value }))}
+              placeholder="Name your style (e.g. 'Horror look, action cuts')"
+              maxLength={80}
+              className="flex-1 bg-black border border-border rounded px-2 py-1 text-[11px] text-gray-200"
+            />
+            <button type="button" onClick={saveMix} disabled={mixBusy}
+                    className="btn btn-secondary text-[11px] px-3 py-1 disabled:opacity-40">
+              {mixBusy ? "Saving…" : "Save style"}
+            </button>
+          </div>
+          <p className="text-[9px] text-gray-500 mt-1.5">
+            Private to you — only admins can see user creations. Saved styles appear
+            under “My styles” in the picker, on every job.
+          </p>
+        </div>
+      )}
+      {state.state === "done" && state.url && (
+        <div className="mt-2 text-[11px] text-emerald-300 flex items-center gap-2">
+          Trailer ready ({state.aspect}).
+          <a href={withAuth(state.url)} target="_blank" rel="noreferrer"
+             className="underline text-emerald-200 hover:text-white">
+            Open / download
+          </a>
+        </div>
+      )}
+      {state.state === "failed" && (
+        <div className="mt-2 text-[11px] text-red-300">Trailer failed: {state.msg}</div>
+      )}
+    </div>
+  );
+}
+
+
 function LayoutPanel({ layout, onSet }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -2482,6 +2993,10 @@ function ShortCard({ jobId, index, canvasShort, url, pool, renderBusy, onRender,
           >
             Re-render
           </button>
+          {/* Publish works on desktop too: the engine mounts the native
+              YouTube publish stack (youtube_oauth/upload + publish_tasks)
+              in desktop mode — the old !isDesktop() gate was stale v1 text
+              from when the desktop only rendered locally. */}
           {clipId && url && (
             <button
               onClick={onPublish}
@@ -2533,7 +3048,10 @@ function ShortCard({ jobId, index, canvasShort, url, pool, renderBusy, onRender,
       {/* V1 controls — collapsed by default */}
       {open && (
         <div className="mt-2 pt-2 border-t border-border space-y-2 text-[11px]">
-          {/* Layout switcher (always visible) */}
+          {/* Layout switcher (always visible). A custom-template short
+              (layout "custom:<id>") is NOT in the built-in options — without
+              its own option the <select> silently DISPLAYED "Torn Card"
+              (operator-reported), and any touch overwrote the template. */}
           <div className="flex items-center gap-2">
             <span className="text-gray-500 w-20 flex-shrink-0">Layout</span>
             <select
@@ -2541,6 +3059,9 @@ function ShortCard({ jobId, index, canvasShort, url, pool, renderBusy, onRender,
               onChange={(e) => onConfig((c) => { c.layout = e.target.value; })}
               className="flex-1 bg-black/60 border border-border rounded px-1.5 py-1 text-gray-200"
             >
+              {layout.startsWith("custom:") && (
+                <option value={layout}>Custom template (this short&apos;s design)</option>
+              )}
               {V4_SHORT_LAYOUTS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
@@ -3054,11 +3575,24 @@ function ThumbnailPanel({ jobId, target, index = 0 }) {
             >
               Claude
             </button>
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setEngine("openai"); }}
+              className={`px-2.5 py-0.5 transition-colors border-l border-border ${
+                engine === "openai"
+                  ? "bg-emerald-500/20 text-emerald-200"
+                  : "text-gray-400 hover:text-white"
+              }`}
+              title="ChatGPT for both passes — ~$0.01 per thumbnail. Runs on your OpenAI key."
+            >
+              ChatGPT
+            </button>
           </div>
           <span className="text-[10px] text-ink-300 truncate">
             {engine === "gemini" && "$0.002 · cheap default"}
             {engine === "hybrid" && "$0.012 · Claude plans · recommended"}
             {engine === "claude" && "$0.025 · premium · for A/B testing"}
+            {engine === "openai" && "$0.01 · ChatGPT · BYO OpenAI key"}
           </span>
         </div>
 
@@ -4496,6 +5030,7 @@ function BulletinViewport({ jobId, canvas, bulletinUrl, trimmedUrl, bulletinClip
             onClose={() => setEditMode(false)}
             onRendered={onCustomRendered}
             onBuilderToggle={setCustomBuilderOpen}
+            engine={imageProvider || ""}
           />
         )}
         {editMode && !isCustomFull && (
@@ -4659,7 +5194,9 @@ function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSe
         />
       )}
 
-      {/* Layout switcher */}
+      {/* Layout switcher. Custom-template shorts carry "custom:<id>" —
+          give it a real option so the select never mis-displays Torn Card
+          (and a stray click can't silently drop the template). */}
       <div className="flex items-center gap-2">
         <span className="text-gray-500 w-20 flex-shrink-0">Layout</span>
         <select
@@ -4667,6 +5204,9 @@ function ShortInspector({ jobId, index, canvasShort, pool, onConfig, onSeo, onSe
           onChange={(e) => onConfig((c) => { c.layout = e.target.value; })}
           className="flex-1 bg-black/60 border border-border rounded px-1.5 py-1 text-gray-200"
         >
+          {layout.startsWith("custom:") && (
+            <option value={layout}>Custom template (this short&apos;s design)</option>
+          )}
           {V4_SHORT_LAYOUTS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
@@ -5530,6 +6070,36 @@ function ShortLivePreview({ layout, text, fontFile, textColor, imagePool, imageF
     ? "serif"
     : "system-ui, sans-serif";
   const fg = textColor || "#FFFFFF";
+
+  // CUSTOM TEMPLATE: the real design is author-supplied HTML the backend
+  // renders — this SVG mockup can't reproduce it, and the old fall-through
+  // drew the torn-card default, which misled the operator into thinking the
+  // wrong template applied. Show an honest placeholder (the story image if
+  // we have one) pointing at the Rendered-output pane, which shows the
+  // TRUE design.
+  if (String(layout || "").toLowerCase().startsWith("custom:")) {
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full aspect-[9/16] rounded border border-border bg-black">
+        <rect x="0" y="0" width={W} height={H} fill="#0b0f17" />
+        {imgUrl && <image href={imgUrl} x="0" y="0" width={W} height={H}
+          preserveAspectRatio="xMidYMid slice" opacity="0.5" />}
+        <rect x="0" y="0" width={W} height={H} fill="#000" opacity="0.35" />
+        <foreignObject x="16" y={H / 2 - 60} width={W - 32} height="120">
+          <div style={{
+            color: "#dbe4f5", fontFamily, textAlign: "center",
+            display: "flex", flexDirection: "column", alignItems: "center",
+            justifyContent: "center", height: "100%", gap: 8,
+          }}>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>Custom template</div>
+            <div style={{ fontSize: 11, lineHeight: 1.35, opacity: 0.85 }}>
+              This short uses its own designed layout. The live mock can&apos;t
+              draw it — see <b>Rendered output</b> for the real design.
+            </div>
+          </div>
+        </foreignObject>
+      </svg>
+    );
+  }
 
   if (layout === "follow_bar") {
     const bg = followParams?.bg_color || "#1a0a2e";

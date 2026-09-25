@@ -107,6 +107,7 @@ export default function JobPipelineV4({
             stageFrac={parsed.stageFrac}
             failed={parsed.failed}
             counters={parsed.counters}
+            substeps={parsed.substeps}
           />
           <ActivityLog
             activity={parsed.activity}

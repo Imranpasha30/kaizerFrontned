@@ -17,7 +17,11 @@ export function useAuth() {
 
 export default function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null);
-  const [config,  setConfig]  = useState({ google_enabled: false, google_client_id: "", auth_required: false });
+  // code_login defaults to FALSE on purpose: a backend too old to send
+  // it cannot serve the emailed-code routes either, and defaulting the
+  // other way would offer a sign-in that fails after the person has
+  // typed their address and waited for mail that cannot arrive.
+  const [config,  setConfig]  = useState({ google_enabled: false, google_client_id: "", auth_required: false, code_login: false });
   const [loading, setLoading] = useState(true);
 
   const hydrate = useCallback(async () => {
@@ -56,6 +60,24 @@ export default function AuthProvider({ children }) {
     clearToken();
     setUser(null);
   }), []);
+
+  /* Sign in with a code emailed to the address. Same shape as
+   * loginEmail: the server returns { token, user } and the caller
+   * navigates. Kept beside it so both ways in are read together. */
+  /* Ask for a sign-in code. Lives here rather than being called as
+   * api.requestLoginCode from the page, because every other way in on
+   * this screen goes through the context -- and the one that did not was
+   * a page using `api` it had never imported. */
+  async function requestCode(email) {
+    return api.requestLoginCode(email);
+  }
+
+  async function loginWithCode(email, code) {
+    const res = await api.verifyLoginCode(email, code);
+    setToken(res.token);
+    setUser(res.user);
+    return res;
+  }
 
   async function loginEmail(email, password) {
     const res = await api.login({ email, password });
@@ -105,6 +127,8 @@ export default function AuthProvider({ children }) {
   }
 
   const value = {
+    loginWithCode,
+    requestCode,
     user,
     config,
     loading,

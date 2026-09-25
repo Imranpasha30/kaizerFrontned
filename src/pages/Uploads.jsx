@@ -853,7 +853,15 @@ export function formatBytes(n) {
 
 export function formatDateTime(iso) {
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    // TZ-defensive: a bare "YYYY-MM-DDTHH:mm:ss" (no Z/offset) is parsed
+    // by JS as LOCAL time, but the backend stores UTC — that mismatch
+    // silently shifts displayed publish times by +5:30 (IST). Treat
+    // suffix-less strings as UTC explicitly.
+    let s = String(iso || "");
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) {
+      s += "Z";
+    }
+    return new Date(s).toLocaleString(undefined, {
       month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
     });
   } catch { return iso; }
