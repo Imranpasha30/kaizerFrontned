@@ -234,7 +234,17 @@ export default function AdminOnboarding() {
                   </div>
                 </td>
                 <td className="px-3 py-2">
+                  {/* The channel's REAL name when YouTube confirmed it -- far
+                      more use to an operator than a URL. Absent means the
+                      check could not run (no key, quota, legacy /c/ URL),
+                      never that the channel is fake. */}
+                  {r.channel_title && (
+                    <div className="text-[13px] mb-0.5">{r.channel_title}</div>
+                  )}
                   <CopyLink url={r.channel_link} label="Open" />
+                  {!r.channel_title && r.channel_link && (
+                    <div className="text-[10.5px] opacity-45 mt-0.5">unverified</div>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   {r.website ? (
