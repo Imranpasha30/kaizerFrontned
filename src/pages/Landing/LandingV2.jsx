@@ -359,7 +359,7 @@ export default function LandingV2() {
           </div>
           <div className="foot-bot">
             <span>© 2026 Sharkify Technology Pvt Ltd</span>
-            <span>test.kaizerx.com · video production software</span>
+            <span>kaizerx.com · video production software</span>
           </div>
         </div>
       </footer>
