@@ -21,7 +21,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2, AlertCircle, User as UserIcon, Phone, Building2,
-  Mail, Globe, Link2, Check, LogOut,
+  Mail, Globe, Link2, Check, LogOut, Search, Users2, X,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { Input } from "../components/ui";
@@ -74,6 +74,13 @@ export default function Onboarding() {
   const [channel,  setChannel]  = useState("");
   const [langs,    setLangs]    = useState([]);
   const [busy,     setBusy]     = useState(false);
+  /* The channel finder. `picked` is what YouTube returned for the channel
+   * currently in the field -- when it is set, the person is looking at the
+   * real channel rather than trusting a string they typed. */
+  const [finding,  setFinding]  = useState(false);
+  const [found,    setFound]    = useState([]);     // candidates to choose from
+  const [picked,   setPicked]   = useState(null);   // the confirmed channel
+  const [findErr,  setFindErr]  = useState("");
   const [error,    setError]    = useState("");
 
   /* Prefill what the account already knows. Editable, because the address
@@ -83,6 +90,53 @@ export default function Onboarding() {
     setFullName((v) => v || (user.name || "").trim());
     setEmail((v) => v || (user.email || "").trim());
   }, [user]);
+
+  /* One button, two roads, because they cost very different amounts.
+   *
+   * A handle, id or URL resolves with channels.list -- 1 quota unit -- so it
+   * confirms straight away. A plain name needs search.list at 101 units
+   * against a 10,000/day budget, so that road returns several candidates:
+   * if we are going to spend it, it should buy a choice, not a guess. */
+  const looksResolvable = (v) => {
+    const t = String(v || "").trim();
+    return t.startsWith("@") || /youtube\.com\//i.test(t) || /^UC[\w-]{22}$/.test(t);
+  };
+
+  async function findChannel() {
+    const q = channel.trim();
+    if (q.length < 2) { setFindErr("Type your channel name or @handle first."); return; }
+    setFinding(true); setFindErr(""); setFound([]); setPicked(null);
+    try {
+      if (looksResolvable(q)) {
+        const one = await api.ytLookup(q);
+        choose(one);
+      } else {
+        const res = await api.ytLookupSearch(q, 5);
+        const list = Array.isArray(res) ? res : (res?.items || res?.results || []);
+        if (!list.length) setFindErr("No channel found with that name. Try your @handle.");
+        setFound(list);
+      }
+    } catch (e) {
+      // A lookup failure must never block the form -- it is a convenience.
+      // They can still type the URL, and the server checks it on submit.
+      setFindErr(e?.message || "Could not reach YouTube just now. You can type the link instead.");
+    } finally {
+      setFinding(false);
+    }
+  }
+
+  /* Store what YouTube returned, not what was typed. */
+  function choose(c) {
+    if (!c) return;
+    const handle = (c.handle || "").replace(/^@?/, "@");
+    const url = handle.length > 1
+      ? `https://www.youtube.com/${handle}`
+      : `https://www.youtube.com/channel/${c.google_channel_id}`;
+    setChannel(url);
+    setPicked(c);
+    setFound([]);
+    setFindErr("");
+  }
 
   function toggleLang(code) {
     setLangs((prev) =>
@@ -193,15 +247,90 @@ export default function Onboarding() {
             />
           </div>
 
-          <Input
-            label="YouTube channel link"
-            icon={<Link2 size={12} />}
-            required
-            value={channel}
-            onChange={(e) => setChannel(e.target.value)}
-            placeholder="https://youtube.com/@yourchannel"
-            hint="Your channel, not a video — @handle works too"
-          />
+          <div>
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Input
+                  label="YouTube channel"
+                  icon={<Link2 size={12} />}
+                  required
+                  value={channel}
+                  onChange={(e) => { setChannel(e.target.value); setPicked(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); findChannel(); }
+                  }}
+                  placeholder="Your channel name, @handle, or link"
+                  hint="Search by name, or paste your @handle or link"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={findChannel}
+                disabled={finding}
+                className="ui-btn-ghost inline-flex items-center gap-2 px-4 py-[11px] mb-[18px]
+                           text-[13px] whitespace-nowrap disabled:opacity-50"
+              >
+                {finding ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {finding ? "Finding…" : "Find"}
+              </button>
+            </div>
+
+            {findErr && <p className="kxauth-note mt-1">{findErr}</p>}
+
+            {/* Confirmed: this is the channel YouTube returned, not a string
+                somebody typed. */}
+            {picked && (
+              <div className="kxauth-picked mt-2">
+                {picked.thumbnail_url && (
+                  <img src={picked.thumbnail_url} alt="" className="kxauth-picked-img" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="kxauth-picked-name">
+                    <Check size={12} className="flame" /> {picked.name}
+                  </div>
+                  <div className="kxauth-note">
+                    {picked.handle || ""}
+                    {picked.subscriber_count
+                      ? ` · ${Number(picked.subscriber_count).toLocaleString()} subscribers`
+                      : ""}
+                  </div>
+                </div>
+                <button type="button" onClick={() => { setPicked(null); setChannel(""); }}
+                        className="kxauth-subtle" title="Choose a different channel">
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+
+            {/* Several matches for a name -- pick the right one. */}
+            {found.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                <p className="kxauth-note">Is this your channel?</p>
+                {found.map((c) => (
+                  <button
+                    key={c.google_channel_id}
+                    type="button"
+                    onClick={() => choose(c)}
+                    className="kxauth-picked w-full text-left hover:border-[color:var(--flame)]"
+                  >
+                    {c.thumbnail_url && (
+                      <img src={c.thumbnail_url} alt="" className="kxauth-picked-img" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="kxauth-picked-name">{c.name}</div>
+                      <div className="kxauth-note">
+                        {c.handle || ""}
+                        {c.subscriber_count
+                          ? ` · ${Number(c.subscriber_count).toLocaleString()} subscribers`
+                          : ""}
+                      </div>
+                    </div>
+                    <Users2 size={13} className="opacity-40" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <Input
             label="Website"

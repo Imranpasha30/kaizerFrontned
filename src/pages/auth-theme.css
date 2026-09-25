@@ -239,3 +239,20 @@
 .kxauth .kxauth-lang-native { font-weight: 600; }
 .kxauth .kxauth-lang-en { font-size: 11.5px; color: var(--ink-3); }
 .kxauth .kxauth-lang.is-on .kxauth-lang-en { color: #b3450b; }
+
+/* A channel the person has actually SEEN -- thumbnail, name, handle and
+   subscriber count -- rather than a URL they hope is right. Used both for the
+   confirmed choice and for the candidates to choose between. */
+.kxauth .kxauth-picked {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 12px;
+  background: var(--paper); border: 1px solid var(--rule-2);
+  transition: border-color .15s, background .15s;
+}
+.kxauth .kxauth-picked-img {
+  width: 34px; height: 34px; border-radius: 50%; flex: none; object-fit: cover;
+}
+.kxauth .kxauth-picked-name {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13.5px; font-weight: 600; color: var(--ink);
+}
