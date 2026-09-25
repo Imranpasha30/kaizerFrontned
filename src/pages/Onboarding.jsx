@@ -43,6 +43,25 @@ const LANGUAGES = [
   { code: "en", native: "English",  name: "English" },
 ];
 
+/* Mirrors the server's rule (routers/onboarding.normalise_channel_link) so
+ * the form can say what is wrong before a round trip. The server is still
+ * the authority; this only spares someone a submit to be told. */
+const YT_CHANNEL = new RegExp(
+  "^(https?://)?(www\\.|m\\.|music\\.)?youtube\\.com/" +
+    "(@[A-Za-z0-9._-]{3,30}" +
+    "|channel/UC[A-Za-z0-9_-]{22}" +
+    "|c/[A-Za-z0-9._-]{1,100}" +
+    "|user/[A-Za-z0-9._-]{1,100})/?($|\\?)",
+  "i",
+);
+
+function looksLikeYouTubeChannel(v) {
+  const t = String(v || "").trim();
+  if (!t) return false;
+  if (t.startsWith("@")) return /^@[A-Za-z0-9._-]{3,30}$/.test(t);
+  return YT_CHANNEL.test(t);
+}
+
 export default function Onboarding() {
   const { user, refresh, logout } = useAuth();
   const nav = useNavigate();
@@ -80,7 +99,10 @@ export default function Onboarding() {
     if (!/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email.trim()))
                                              return "Please enter a valid email address.";
     if (langs.length === 0)                  return "Please choose at least one language.";
-    if (channel.trim().length < 4)           return "Please enter your channel link.";
+    if (!channel.trim())                     return "Please enter your YouTube channel link.";
+    if (/youtu\.be\/|\/watch\?|\/playlist\?/i.test(channel))
+                                             return "That is a video or playlist link. Please paste your CHANNEL link.";
+    if (!looksLikeYouTubeChannel(channel))   return "Please paste a YouTube channel link, e.g. https://youtube.com/@yourchannel";
     return "";
   }, [fullName, mobile, company, email, langs, channel]);
 
@@ -172,12 +194,13 @@ export default function Onboarding() {
           </div>
 
           <Input
-            label="Channel link"
+            label="YouTube channel link"
             icon={<Link2 size={12} />}
             required
             value={channel}
             onChange={(e) => setChannel(e.target.value)}
             placeholder="https://youtube.com/@yourchannel"
+            hint="Your channel, not a video — @handle works too"
           />
 
           <Input

@@ -16,7 +16,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ClipboardList, Search, RefreshCw, ExternalLink, Users, CheckCircle2,
-  Clock, ShieldCheck, Globe,
+  Clock, ShieldCheck, Globe, Copy, Check, AlertTriangle,
 } from "lucide-react";
 import { adminApi } from "../../api/client";
 import {
@@ -27,6 +27,57 @@ const LANG_NAME = {
   te: "Telugu", hi: "Hindi", ta: "Tamil", kn: "Kannada", ml: "Malayalam",
   bn: "Bengali", mr: "Marathi", gu: "Gujarati", en: "English",
 };
+
+/* Open + Copy, side by side. An operator pasting a channel into a sheet or a
+ * message wants the text more often than a new tab, and copying it out of the
+ * address bar after opening it is two steps too many.
+ *
+ * It only LINKS a real YouTube channel. One row in the live database holds
+ * this product's own login page, saved before the field was validated --
+ * linking that is how a click on a customer row navigates the admin out of
+ * the admin panel. Anything else is shown as text, marked, so the operator
+ * can see what is stored instead of being sent to it. */
+const YT_CHANNEL = /^https?:\/\/(www\.|m\.|music\.)?youtube\.com\/(@|channel\/|c\/|user\/)/i;
+
+function CopyLink({ url, label = "Open" }) {
+  const [done, setDone] = React.useState(false);
+  if (!url) return <span className="opacity-40">—</span>;
+
+  if (!YT_CHANNEL.test(url)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[12px]"
+            title="Saved before the field required a YouTube channel">
+        <AlertTriangle size={11} className="text-[color:var(--adm-warning)]" />
+        <span className="opacity-70 break-all">{url}</span>
+      </span>
+    );
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setDone(true);
+      setTimeout(() => setDone(false), 1400);
+    } catch {
+      /* clipboard blocked (insecure origin, or the user said no) -- the link
+         beside this still works, so there is nothing useful to report */
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <a href={url} target="_blank" rel="noreferrer"
+         className="inline-flex items-center gap-1 text-[12.5px] hover:underline">
+        {label} <ExternalLink size={11} />
+      </a>
+      <button type="button" onClick={copy} title={url}
+              className="inline-flex items-center gap-1 text-[12px] opacity-70 hover:opacity-100">
+        {done ? <Check size={11} /> : <Copy size={11} />}
+        {done ? "Copied" : "Copy"}
+      </button>
+    </span>
+  );
+}
 
 export default function AdminOnboarding() {
   const [data, setData]   = useState(null);
@@ -183,19 +234,16 @@ export default function AdminOnboarding() {
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  {r.channel_link ? (
-                    <a href={r.channel_link} target="_blank" rel="noreferrer"
-                       className="inline-flex items-center gap-1 text-[12.5px] hover:underline">
-                      Open <ExternalLink size={11} />
-                    </a>
-                  ) : "—"}
+                  <CopyLink url={r.channel_link} label="Open" />
                 </td>
                 <td className="px-3 py-2">
                   {r.website ? (
-                    <a href={r.website} target="_blank" rel="noreferrer"
-                       className="inline-flex items-center gap-1 text-[12.5px] hover:underline">
-                      Visit <ExternalLink size={11} />
-                    </a>
+                    <span className="inline-flex items-center gap-2">
+                      <a href={r.website} target="_blank" rel="noreferrer"
+                         className="inline-flex items-center gap-1 text-[12.5px] hover:underline">
+                        Visit <ExternalLink size={11} />
+                      </a>
+                    </span>
                   ) : <span className="opacity-40">—</span>}
                 </td>
                 <td className="px-3 py-2 text-[12px] opacity-70 whitespace-nowrap">
