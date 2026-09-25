@@ -35,6 +35,35 @@ function _isSessionAuthPath(path) {
 }
 
 async function req(method, path, body, isForm = false) {
+  /* The admin console is a CLOUD surface. Inside the desktop shell the
+   * same-origin backend is the local engine, which does not even mount
+   * /api/admin (main.py withholds admin_router on desktop, on purpose), and
+   * whose SQLite knows nothing about accounts, licences or billing. So admin
+   * calls go over the shell's IPC bridge to the hosted API instead.
+   *
+   * The bridge carries the user's own JWT and the server enforces is_admin on
+   * every route, so this changes WHERE the request goes, never who may make
+   * it.
+   *
+   * It lives here rather than in adminApi's ~50 entries so that an endpoint
+   * added to the web works on the desktop the same day, without anyone
+   * remembering to wire it -- that per-endpoint bookkeeping is what let the
+   * two consoles drift to 14 pages against 4.
+   *
+   * On the web window.kaizerDesktop does not exist, so this branch is never
+   * taken and behaviour is unchanged. */
+  const _cloudAdmin =
+    typeof window !== "undefined" && window.kaizerDesktop && window.kaizerDesktop.cloudAdmin;
+  if (_cloudAdmin && !isForm && path.startsWith("/admin/")) {
+    const r = await _cloudAdmin(method, `/api${path}`, body === undefined ? null : body);
+    if (!r || r.ok !== true) {
+      const e = new Error((r && r.error && (r.error.message || r.error)) || "Admin request failed");
+      e.status = (r && r.error && r.error.status) || 0;
+      throw e;
+    }
+    return r.data;
+  }
+
   const opts = { method, headers: {} };
   const tok = getToken();
   if (tok) opts.headers["Authorization"] = `Bearer ${tok}`;
