@@ -293,12 +293,6 @@ export default function NavBar() {
             >
               <LogIn size={13} /> Sign in
             </Link>
-            <Link
-              to="/register"
-              className="flex items-center gap-2 px-3 py-2 rounded text-xs bg-accent hover:bg-accent2 text-white font-medium"
-            >
-              <UserPlus size={13} /> Sign up
-            </Link>
           </div>
         )}
       </div>

@@ -372,11 +372,12 @@ export default function Login() {
                 Sign in
               </Button>
 
+              {/* No "create an account" link. Signing in with a new address
+                  creates one: the emailed-code route makes the account on the
+                  first correct code. */}
               <div className="kxauth-note text-center pt-1">
-                Don&rsquo;t have an account?{" "}
-                <Link to="/register" className="kxauth-link">
-                  Create one
-                </Link>
+                New here? Use <span className="kxauth-link">Email me a code</span>
+                {" "}above &mdash; your account is created automatically.
               </div>
             </form>
             )}

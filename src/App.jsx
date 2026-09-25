@@ -123,7 +123,11 @@ export default function App() {
           {/* Public marketing + auth routes (desktop → straight into the app) */}
           <Route path="/"                 element={desktop ? <Navigate to="/app" replace /> : <Landing />} />
           <Route path="/login"            element={desktop ? <Navigate to="/app" replace /> : <Login />} />
-          <Route path="/register"         element={desktop ? <Navigate to="/app" replace /> : <Register />} />
+          {/* Sign-up is retired on the web: both ways in create the account,
+              and the emailed-code route creates it on the first correct code.
+              The path stays as a REDIRECT because the landing CTAs, the nav and
+              outside bookmarks all point here -- deleting it would 404 them. */}
+          <Route path="/register"         element={<Navigate to="/login" replace />} />
           <Route path="/forgot-password"  element={<ForgotPassword />} />
           <Route path="/reset-password"   element={<ResetPassword />} />
 

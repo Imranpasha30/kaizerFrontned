@@ -140,7 +140,7 @@ export default function LandingV2() {
               <a href="#anchor">AI anchor</a>
               <a href="#desktop" className="spark">Desktop app</a>
             </div>
-            <a href="/register" className="signin">Start free <span className="ar">→</span></a>
+            <a href="/login" className="signin">Start free <span className="ar">→</span></a>
           </nav>
         </div>
       </header>
@@ -158,7 +158,7 @@ export default function LandingV2() {
             <h1 className="rv in d1">The shortest path<span className="l2">from footage to <span className="flame">broadcast</span><span className="dot">.</span></span></h1>
             <p className="lede rv in d2">A raw clip on your desk. A bulletin due in an hour. Kaizer X transcribes it, splits it into stories, cuts the filler and returns a finished full-length video plus ready shorts — directed like a TV editor, in your language.</p>
             <div className="hero-cta rv in d3">
-              <a href="/register" className="btn-solid">Upload a clip <span className="ar">→</span></a>
+              <a href="/login" className="btn-solid">Upload a clip <span className="ar">→</span></a>
               <a href="#how" className="btn-text">See how it works <span className="ar">→</span></a>
             </div>
             <div className="hero-stats rv in d3">
@@ -337,8 +337,8 @@ export default function LandingV2() {
           <h2 className="rv">Stop editing.<span className="l2 flame">Start directing<span style={{color: 'var(--ink)'}}>.</span></span></h2>
           <p className="rv d1">Upload one raw video and let Kaizer X return a finished broadcast plus ready shorts — in your language, in your channel’s voice.</p>
           <div className="row rv d2">
-            <a href="/register" className="btn-solid">Start free <span className="ar">→</span></a>
-            <a href="/register" className="btn-text">Get the Windows app <span className="ar">→</span></a>
+            <a href="/login" className="btn-solid">Start free <span className="ar">→</span></a>
+            <a href="/login" className="btn-text">Get the Windows app <span className="ar">→</span></a>
           </div>
         </div>
       </section>
