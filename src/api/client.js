@@ -1299,6 +1299,9 @@ export const adminApi = {
   listUsers:    (q = "", limit = 50, offset = 0) =>
     req("GET", `/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
   getUser:      (id)                        => req("GET",  `/admin/users/${id}`),
+  // The one-time details form new accounts fill on first sign-in.
+  onboarding:   (q = "", limit = 200, offset = 0) =>
+    req("GET", `/admin/onboarding?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
   toggleAdmin:  (id)                        => req("POST", `/admin/users/${id}/toggle-admin`),
   // ── Super Admin: desktop account requests + managed key bundles ──
   accountRequests:      (status = "pending") => req("GET",  `/admin/account-requests?status=${status}`),

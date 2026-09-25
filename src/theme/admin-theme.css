@@ -11,46 +11,46 @@
 
 [data-admin-theme] {
   /* ── Palette ─────────────────────────────────────────────────── */
-  --adm-bg:           #0a0f1e;
-  --adm-bg-elev:      #0f172a;
-  --adm-surface:      #131a2e;
-  --adm-surface-2:    #192134;
-  --adm-card:         #1a233a;
-  --adm-card-hover:   #1f2942;
-  --adm-muted:        #171939;
-  --adm-rail:         #0d1426;
-  --adm-border:       rgba(148, 163, 184, 0.10);
-  --adm-border-hover: rgba(148, 163, 184, 0.22);
-  --adm-divider:      rgba(148, 163, 184, 0.06);
+  --adm-bg:           #0B0D10;
+  --adm-bg-elev:      #15181D;
+  --adm-surface:      #15181D;
+  --adm-surface-2:    #1E222A;
+  --adm-card:         #181C22;
+  --adm-card-hover:   #1E222A;
+  --adm-muted:        #181818;
+  --adm-rail:         #0B0D10;
+  --adm-border:       #2A2F38;
+  --adm-border-hover: #3A4150;
+  --adm-divider:      rgba(42, 47, 56, 0.55);
 
   /* Brand */
-  --adm-violet:       #7c3aed;
-  --adm-violet-2:     #a78bfa;
-  --adm-indigo:       #6366f1;
-  --adm-cyan:         #06b6d4;
-  --adm-cyan-2:       #67e8f9;
-  --adm-cyan-dim:     #0891b2;
+  --adm-violet:       #E0312B;
+  --adm-violet-2:     #FF4B45;
+  --adm-indigo:       #C42822;
+  --adm-cyan:         #FF4B45;
+  --adm-cyan-2:       #FF8A85;
+  --adm-cyan-dim:     #B02620;
 
   /* Status semantic */
-  --adm-success:      #22c55e;
-  --adm-warning:      #f59e0b;
-  --adm-danger:       #ef4444;
-  --adm-info:         #3b82f6;
+  --adm-success:      #22C55E;
+  --adm-warning:      #F5C518;
+  --adm-danger:       #EF4444;
+  --adm-info:         #3987E5;
 
   /* Text */
-  --adm-text:         #f1f5f9;
-  --adm-text-2:       #cbd5e1;
-  --adm-text-3:       #94a3b8;
-  --adm-text-4:       #64748b;
-  --adm-text-5:       #475569;
+  --adm-text:         #F4F5F7;
+  --adm-text-2:       #C6C6C6;
+  --adm-text-3:       #A2A2A2;
+  --adm-text-4:       #7E7E7E;
+  --adm-text-5:       #5C5C5C;
 
   /* Chart series — accessible at AA on dark; supplement with line styles */
-  --adm-series-1:     #7c3aed;   /* violet  */
-  --adm-series-2:     #06b6d4;   /* cyan    */
-  --adm-series-3:     #a78bfa;   /* light violet */
-  --adm-series-4:     #22c55e;   /* emerald */
-  --adm-series-5:     #f59e0b;   /* amber   */
-  --adm-series-6:     #ec4899;   /* pink    */
+  --adm-series-1:     #3987E5;   /* violet  */
+  --adm-series-2:     #D95926;   /* cyan    */
+  --adm-series-3:     #199E70;   /* light violet */
+  --adm-series-4:     #C98500;   /* emerald */
+  --adm-series-5:     #D55181;   /* amber   */
+  --adm-series-6:     #008300;   /* pink    */
 
   /* Elevation scale */
   --adm-shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.30);
@@ -58,8 +58,8 @@
                    0 0 0 1px rgba(124, 58, 237, 0.02);
   --adm-shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.55),
                    0 0 0 1px rgba(124, 58, 237, 0.04);
-  --adm-glow:      0 0 32px -4px rgba(124, 58, 237, 0.25);
-  --adm-glow-cyan: 0 0 32px -4px rgba(6, 182, 212, 0.30);
+  --adm-glow:      0 0 32px -4px rgba(224, 49, 43, 0.22);
+  --adm-glow-cyan: 0 0 32px -4px rgba(255, 75, 69, 0.24);
 
   /* Radii */
   --adm-r-sm: 6px;
@@ -68,8 +68,8 @@
   --adm-r-xl: 20px;
 
   /* Type */
-  --adm-font-body:    "Fira Sans", ui-sans-serif, system-ui, sans-serif;
-  --adm-font-mono:    "Fira Code", ui-monospace, "SF Mono", monospace;
+  --adm-font-body:    "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --adm-font-mono:    ui-monospace, "JetBrains Mono", "Cascadia Code", monospace;
 
   /* Motion */
   --adm-ease:     cubic-bezier(0.16, 1, 0.3, 1);
@@ -221,7 +221,7 @@ html.light [data-admin-theme] .text-gray-900 { color: var(--adm-text-4) !importa
 /* ── KPI rail tiles (cyan, reference-image style) ─────────────── */
 .adm-kpi {
   position: relative;
-  background: linear-gradient(160deg, #0e7490 0%, #0891b2 50%, #06b6d4 100%);
+  background: linear-gradient(160deg, #8E1E1A 0%, #C42822 50%, #E0312B 100%);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: var(--adm-r);
   padding: 14px 16px;
@@ -239,10 +239,10 @@ html.light [data-admin-theme] .text-gray-900 { color: var(--adm-text-4) !importa
   pointer-events: none;
 }
 .adm-kpi--violet {
-  background: linear-gradient(160deg, #4c1d95 0%, #6d28d9 50%, #7c3aed 100%);
+  background: linear-gradient(160deg, #7A1512 0%, #A81F1A 50%, #FF4B45 100%);
 }
 .adm-kpi--indigo {
-  background: linear-gradient(160deg, #312e81 0%, #4338ca 50%, #6366f1 100%);
+  background: linear-gradient(160deg, #1E222A 0%, #2A2F38 50%, #3A4150 100%);
 }
 .adm-kpi--emerald {
   background: linear-gradient(160deg, #064e3b 0%, #047857 50%, #10b981 100%);

@@ -56,6 +56,11 @@ export const ALLOWED = [
   "/library",       // finished videos -> the publish flow
   "/quick-publish", // per-channel SEO generated from the channel's catalogue
   "/performance",   // Insights & SEO -- build_channel_profile reading it back
+
+  // The admin console. AdminRoute already refuses non-admins with a 403
+  // and every endpoint behind it is Depends(auth.admin_required); the
+  // gate was simply refusing everybody, admins included.
+  "/admin",
 ];
 
 /* Where a signed-in tester lands, and where the logo goes.

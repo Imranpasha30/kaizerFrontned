@@ -5,8 +5,7 @@ import {
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
   BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
-  Gauge, Terminal, Star, Workflow, Brain, Layers, Clapperboard,
-} from "lucide-react";
+  Gauge, Terminal, Star, Workflow, Brain, Layers, Clapperboard, ClipboardList} from "lucide-react";
 import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -22,6 +21,7 @@ import AdminPlanTiers from "./AdminPlanTiers";
 import AdminDesktopLicenses from "./AdminDesktopLicenses";
 import AdminAccounts from "./AdminAccounts";
 import AdminEditingFeatures from "./admin/AdminEditingFeatures";
+import AdminOnboarding from "./admin/AdminOnboarding";
 import "../theme/admin-theme.css";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1707,6 +1707,7 @@ const TABS = [
   { path: "capacity", label: "Capacity",    icon: Gauge,       comp: AdminCapacity },
   { path: "logs",     label: "Logs",        icon: Terminal,    comp: AdminLogs     },
   { path: "users",    label: "Users",       icon: Users,       comp: UsersTab      },
+  { path: "signups",  label: "Signup details", icon: ClipboardList, comp: AdminOnboarding },
   { path: "jobs",     label: "Jobs",        icon: Briefcase,   comp: JobsTab       },
   { path: "usage",    label: "AI & quota",  icon: BarChart3,   comp: AdminUsage    },
   { path: "gemini",   label: "Gemini usage",icon: Sparkles,    comp: GeminiTab     },
