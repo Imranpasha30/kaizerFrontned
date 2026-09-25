@@ -68,10 +68,24 @@ export const HOME_PATH = PREVIEW_MODE ? "/channels" : "/app";
 
 /** Does this path survive the gate? Prefix-matched, so /uploads/42 rides
  *  in on /uploads and a sub-route never has to be listed twice. */
+/* Paths this gate must never block, whatever ALLOWED says.
+ *
+ * /onboarding is where an un-onboarded account is sent, and the only place
+ * the form can be submitted. If the preview gate ever refuses it the account
+ * is walled off with no way out: every path redirects here, this page is
+ * refused, and the refusal page's own link redirects back. No POST can be
+ * issued, so the state is permanent.
+ *
+ * It lives here rather than in ALLOWED deliberately. The header above tells
+ * people to trim ALLOWED, and one line too many would cause exactly that
+ * lockout. Editing a list must not be able to strand a user. */
+const NEVER_BLOCKED = ["/onboarding"];
+
 export function allowed(pathname) {
   if (!PREVIEW_MODE) return true;
   const p = String(pathname || "/").replace(/\/+$/, "") || "/";
   if (PUBLIC_PATHS.includes(p)) return true;
+  if (NEVER_BLOCKED.some((a) => p === a || p.startsWith(a + "/"))) return true;
   return ALLOWED.some((a) => p === a || p.startsWith(a + "/"));
 }
 

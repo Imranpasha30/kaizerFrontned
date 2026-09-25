@@ -27,6 +27,7 @@ import PodcastStudio from "./pages/PodcastStudio";
 import Assets from "./pages/Assets";
 import VideoCompressor from "./pages/VideoCompressor";
 import Settings from "./pages/Settings";
+import Onboarding from "./pages/Onboarding";
 import MetaSettings from "./pages/MetaSettings";
 import Billing  from "./pages/Billing";
 import LiveDirector from "./pages/LiveDirector";
@@ -160,6 +161,9 @@ export default function App() {
           <Route path="/assets"                        element={<ProtectedRoute><Assets /></ProtectedRoute>} />
           <Route path="/tools/compress"                element={<ProtectedRoute><VideoCompressor /></ProtectedRoute>} />
           <Route path="/settings"                      element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          {/* One-time details form. Protected, but excluded from its own
+              redirect inside ProtectedRoute so it cannot loop. */}
+          <Route path="/onboarding"                    element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
           <Route path="/settings/meta"                 element={<ProtectedRoute><MetaSettings /></ProtectedRoute>} />
           {/* Desktop app only — AI provider keys panel. The page itself
               redirects to / when not running inside the desktop shell. */}

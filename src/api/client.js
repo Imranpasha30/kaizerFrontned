@@ -87,6 +87,10 @@ export const api = {
   // used to find out who has an account.
   requestLoginCode: (email)        => req("POST", "/auth/login-code/request", { email }),
   verifyLoginCode:  (email, code)  => req("POST", "/auth/login-code/verify",  { email, code }),
+
+  // The one-time details form a new account fills on first sign-in.
+  getOnboarding:  ()     => req("GET",  "/onboarding/me"),
+  saveOnboarding: (body) => req("POST", "/onboarding", body),
   googleLogin:  (credential)    => req("POST", "/auth/google",   { credential }),
   me:           ()              => req("GET",  "/auth/me"),
   logout:       ()              => req("POST", "/auth/logout"),
