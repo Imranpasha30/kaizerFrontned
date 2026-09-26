@@ -597,6 +597,35 @@ export default function LiveStudio() {
                     </div>
                   )}
 
+                  {/* Failure detail (active panel) — the reason, where
+                      the operator is actually looking. Without this the
+                      panel showed only `message`, which after a failure
+                      still described the step before it: a failed row
+                      reading "queued — waiting for an available broadcast
+                      slot". Same friendlyError() map as the archive list,
+                      so one error never gets two different names. */}
+                  {s.status === "failed" && (s.error || s.message) && (
+                    <div className="px-2 pb-1.5">
+                      <div className="rounded border border-red-500/40 bg-red-500/5 p-2 text-[11px] text-red-200 space-y-1">
+                        <div className="flex items-start gap-1">
+                          <AlertCircle size={11} className="mt-0.5 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <div className="font-medium">{friendlyError(s.error || "").headline}</div>
+                            {friendlyError(s.error || "").fix && (
+                              <div className="text-red-200/80 mt-0.5">→ {friendlyError(s.error || "").fix}</div>
+                            )}
+                          </div>
+                        </div>
+                        {s.error && (
+                          <details className="text-[10px] text-red-300/70" open>
+                            <summary className="cursor-pointer hover:text-red-200">Raw error</summary>
+                            <pre className="whitespace-pre-wrap break-words mt-1 font-mono text-[10px]">{s.error}</pre>
+                          </details>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Live preview — only embed while actively streaming
                       (so we don't keep a 0-fps iframe alive for hours
                       after the broadcast ends). YouTube serves the
@@ -1283,6 +1312,40 @@ function friendlyError(raw) {
     return {
       headline: "OAuth token expired or revoked.",
       fix: "Reconnect this channel from Channels → My accounts → Reconnect.",
+    };
+  }
+  // ── Added after the 2026-09-26 live-from-URL work. These MUST stay
+  //    above the ffmpeg branch: each of these messages mentions ffmpeg,
+  //    and below it they would all be reported as "re-encode your source"
+  //    — advice that cannot help when there is no source file at all.
+  if (e.includes("nothing reached youtube")) {
+    return {
+      headline: "The broadcast was created, but no video ever reached YouTube.",
+      fix: "YouTube accepted the broadcast and issued a stream key, then nothing arrived at the ingest within 30s. The encoder is what failed — check the raw error for the yt-dlp or ffmpeg reason below.",
+    };
+  }
+  if (e.includes("could not be fetched") || e.includes("yt-dlp")) {
+    return {
+      headline: "The source URL could not be fetched.",
+      fix: "yt-dlp could not download the video. Common causes: the video is private, age-restricted, members-only, geo-blocked from the server, or it is a live stream that has already ended. The raw error below is yt-dlp's own words.",
+    };
+  }
+  if (e.includes("m3u8") || e.includes("ffmpeg could not be found")) {
+    return {
+      headline: "The server is missing ffmpeg for this source type.",
+      fix: "A YouTube LIVE url is delivered as HLS, which yt-dlp needs ffmpeg to fetch. Install ffmpeg on the server or set FFMPEG_BIN to its full path.",
+    };
+  }
+  if (e.includes("invalidtransition")) {
+    return {
+      headline: "YouTube refused the broadcast state change.",
+      fix: "Almost always means the broadcast never went live, so it could not be completed. Treat the encoder failure above it as the real cause.",
+    };
+  }
+  if (e.includes("oauth failed") || e.includes("no refresh token")) {
+    return {
+      headline: "Could not get YouTube credentials for this channel.",
+      fix: "Reconnect the channel from Channels → My accounts → Reconnect, then retry the broadcast.",
     };
   }
   if (e.includes("ffmpeg")) {
