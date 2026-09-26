@@ -4,6 +4,7 @@ import NavBar   from "./components/NavBar";
 import Home     from "./pages/Home";
 import NewJob   from "./pages/NewJob";
 import Library           from "./pages/Library";
+import Help from "./pages/Help";
 import LibraryUpload     from "./pages/LibraryUpload";
 import LibraryCreator    from "./pages/LibraryCreator";
 import LibraryCategories from "./pages/LibraryCategories";
@@ -150,6 +151,8 @@ export default function App() {
           {/* App routes — ProtectedRoute redirects to /login when auth is required */}
           <Route path="/app"                           element={<ProtectedRoute><Home /></ProtectedRoute>} />
           <Route path="/library"                       element={<ProtectedRoute><Library /></ProtectedRoute>} />
+          {/* Guides live in R2 and are fetched by URL — see routers/help.py */}
+          <Route path="/help"                          element={<ProtectedRoute><Help /></ProtectedRoute>} />
           <Route path="/library/upload"                element={<ProtectedRoute><LibraryUpload /></ProtectedRoute>} />
           <Route path="/library/categories"            element={<ProtectedRoute><LibraryCategories /></ProtectedRoute>} />
           <Route path="/library/creator/:creatorId"    element={<ProtectedRoute><LibraryCreator /></ProtectedRoute>} />

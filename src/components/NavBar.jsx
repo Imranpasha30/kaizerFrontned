@@ -6,8 +6,7 @@ import {
   Settings as SettingsIcon, CreditCard, Radio, Shield, Rocket, BarChart3,
   Library as LibraryIcon, FileVideo, KeyRound,
   Sparkles, Clapperboard, LayoutGrid, Briefcase, Users, Mic, Tv, Send,
-  Lock,
-} from "lucide-react";
+  Lock, LifeBuoy } from "lucide-react";
 import { isDesktop } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { navAllowed, HOME_PATH } from "../lib/previewGate";
@@ -98,6 +97,9 @@ export default function NavBar() {
       { to: "/trending",       icon: Compass,       label: "Trend Finder" },
     ]},
     { heading: "Account", items: [
+      // Documentation, so it sits with the account items rather than the
+      // work ones — reached when something is unclear, not as a step.
+      { to: "/help",           icon: LifeBuoy,      label: "Help Centre" },
       { to: "/desktop-settings", icon: KeyRound,    label: "AI Providers",
         when: (d) => d.desktop },
       // The admin console is server-side; its router is not mounted on desktop.

@@ -115,6 +115,11 @@ export const api = {
   // answers the same way whatever the address is, so nothing here can be
   // used to find out who has an account.
   requestLoginCode: (email)        => req("POST", "/auth/login-code/request", { email }),
+
+  // Help Centre. The catalogue is tiny and unauthenticated; the asset
+  // URLs it returns are absolute and point at the hosted API, which is
+  // the only side holding R2 credentials to sign them.
+  helpGuides:   ()              => req("GET",  "/help/guides"),
   verifyLoginCode:  (email, code)  => req("POST", "/auth/login-code/verify",  { email, code }),
 
   // The one-time details form a new account fills on first sign-in.

@@ -61,6 +61,7 @@ export const ALLOWED = [
   // and every endpoint behind it is Depends(auth.admin_required); the
   // gate was simply refusing everybody, admins included.
   "/admin",
+  "/help",
 ];
 
 /* Where a signed-in tester lands, and where the logo goes.
