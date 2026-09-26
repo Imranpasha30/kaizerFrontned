@@ -1324,6 +1324,17 @@ function friendlyError(raw) {
       fix: "YouTube accepted the broadcast and issued a stream key, then nothing arrived at the ingest within 30s. The encoder is what failed — check the raw error for the yt-dlp or ffmpeg reason below.",
     };
   }
+  // ── ABOVE the generic yt-dlp branch on purpose: the bot-check text
+  //    contains "yt-dlp" three times (its exit line and two wiki URLs), so
+  //    below it this would be reported as "the video is private / geo-blocked
+  //    / already ended" — none of which is true, and all of which send the
+  //    operator to inspect a video that is perfectly fine.
+  if (e.includes("not a bot") || e.includes("sign in to confirm")) {
+    return {
+      headline: "YouTube is blocking this server from fetching the video.",
+      fix: "Not a problem with the video or the channel — YouTube refuses anonymous downloads from datacenter IPs, which is every cloud server. Fix on the server: try YTDLP_PLAYER_CLIENT=tv first (no credentials needed), and if that still fails set YTDLP_COOKIES to the contents of a YouTube cookies.txt. Use a throwaway YouTube account for it, never the channel's main one.",
+    };
+  }
   if (e.includes("could not be fetched") || e.includes("yt-dlp")) {
     return {
       headline: "The source URL could not be fetched.",
