@@ -1349,6 +1349,13 @@ export const adminApi = {
   // polls it every two seconds and nine round trips at that rate is a
   // self-inflicted load problem.
   liveMap:            (events = 40)         => req("GET",  `/admin/live/map?events=${events}`),
+  // The live stack's OWN output — the three processes that are not web
+  // servers, mirrored into Redis by each of them. Reading it here is what
+  // removes "ask the server admin for the logs" from debugging a stream.
+  liveLogs: (limit = 300, proc = "", level = "") =>
+    req("GET", `/admin/live/logs?limit=${limit}` +
+               (proc ? `&proc=${encodeURIComponent(proc)}` : "") +
+               (level ? `&level=${encodeURIComponent(level)}` : "")),
   liveRetryEncodes:   ()                    => req("POST", "/admin/live/encodes/retry"),
   liveAdminUnblock:   (cid)                 => req("DELETE", `/admin/live/channels/${cid}/block`),
   liveAdminStopVideo: (vid)                 => req("POST", `/admin/live/videos/${vid}/stop`),

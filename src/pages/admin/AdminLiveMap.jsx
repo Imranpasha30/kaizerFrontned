@@ -304,6 +304,143 @@ function UsageNode({ usage, pos, drag, measure }) {
 }
 
 /* ── the tab ─────────────────────────────────────────────────────── */
+
+/* ── the live stack's own output ──────────────────────────────────────
+ * Under the graph, not on its own tab: the graph says which stage is
+ * unhappy and this says why, and making someone navigate between the two
+ * is how a diagnosis gets abandoned halfway. */
+function LiveLogs() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [level, setLevel] = useState("");
+  const [proc, setProc] = useState("");
+  const [auto, setAuto] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const boxRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    try {
+      const d = await adminApi.liveLogs(400, proc, level);
+      setData(d); setErr("");
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally { setBusy(false); }
+  }, [proc, level]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!auto) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [auto, load]);
+
+  // Follow the tail only while the reader is already at the bottom: yanking
+  // the view down while someone is reading an error above is worse than not
+  // following at all.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }, [data]);
+
+  const tone = (lv) =>
+    lv === "error" ? "var(--adm-danger, #f87171)"
+    : lv === "warn" ? "var(--adm-warn, #fbbf24)"
+    : "var(--adm-text-dim, #9aa4b2)";
+
+  const c = data?.counts || {};
+  return (
+    <DashCard title="Live stack log" icon={Activity} className="mb-3">
+      <div className="flex items-center flex-wrap gap-2 mb-2 text-[11px]">
+        {["", "error", "warn", "info"].map((lv) => (
+          <button key={lv || "all"} type="button" onClick={() => setLevel(lv)}
+                  className="px-2 py-0.5 rounded border"
+                  style={{
+                    borderColor: level === lv ? tone(lv || "info") : "var(--adm-border, #2a2f37)",
+                    color: level === lv ? tone(lv || "info") : "var(--adm-text-dim, #9aa4b2)",
+                  }}>
+            {lv || "all"}{lv && c[lv] != null ? ` ${c[lv]}` : ""}
+          </button>
+        ))}
+        <select value={proc} onChange={(e) => setProc(e.target.value)}
+                className="px-1.5 py-0.5 rounded border bg-transparent"
+                style={{ borderColor: "var(--adm-border, #2a2f37)", color: "var(--adm-text, #e6e9ef)" }}>
+          <option value="">every process</option>
+          {(data?.processes || []).map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <label className="inline-flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          follow
+        </label>
+        <button type="button" onClick={load} disabled={busy}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border disabled:opacity-40"
+                style={{ borderColor: "var(--adm-border, #2a2f37)" }}>
+          <RefreshCw size={10} className={busy ? "animate-spin" : ""} /> refresh
+        </button>
+      </div>
+
+      {err && (
+        <div className="text-[11px] mb-2" style={{ color: "var(--adm-danger, #f87171)" }}>
+          could not read the live log: {err}
+        </div>
+      )}
+
+      <div ref={boxRef}
+           className="rounded font-mono text-[11px] leading-[1.45] p-2"
+           style={{
+             background: "var(--adm-surface, #0f1216)",
+             border: "1px solid var(--adm-border, #2a2f37)",
+             maxHeight: 340, overflow: "auto", resize: "vertical",
+           }}>
+        {(data?.lines || []).length === 0 && (
+          <div style={{ color: "var(--adm-text-dim, #9aa4b2)" }}>
+            {/* An empty box must not read as "nothing is wrong": a process that
+                has not restarted since this shipped mirrors nothing at all. */}
+            nothing yet. {data?.note || ""}
+          </div>
+        )}
+        {(data?.lines || []).map((l) => (
+          <div key={l.id} className="whitespace-pre-wrap break-words">
+            <span style={{ color: "var(--adm-text-dim, #9aa4b2)" }}>
+              {l.ts ? new Date(l.ts * 1000).toLocaleTimeString() : ""}{" "}
+            </span>
+            <span style={{ color: "var(--adm-violet, #8b5cf6)" }}>{l.proc}</span>{" "}
+            <span style={{ color: tone(l.level) }}>{l.line}</span>
+          </div>
+        ))}
+      </div>
+
+      {(data?.relay_logs || []).length > 0 && (
+        <div className="mt-2">
+          <div className="text-[10px] uppercase tracking-[0.12em] font-mono mb-1"
+               style={{ color: "var(--adm-text-dim, #9aa4b2)" }}>
+            relay logs on this machine
+          </div>
+          {data.relay_logs.map((f) => (
+            <details key={f.file} className="mb-1">
+              <summary className="cursor-pointer text-[11px] font-mono"
+                       style={{ color: "var(--adm-cyan, #22d3ee)" }}>{f.file}</summary>
+              {/* One element per line rather than a joined string: the relay
+                  writes its own file and the lines are what matter, so they
+                  stay individually selectable and wrap on their own. */}
+              <div className="font-mono text-[10.5px] whitespace-pre-wrap break-words mt-1 p-2 rounded"
+                   style={{ background: "var(--adm-surface, #0f1216)",
+                            border: "1px solid var(--adm-border, #2a2f37)",
+                            maxHeight: 200, overflow: "auto" }}>
+                {f.lines.map((ln, i) => (
+                  <div key={i}>{ln}</div>
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </DashCard>
+  );
+}
+
 export default function AdminLiveMap() {
   const [map, setMap] = useState(null);
   const [error, setError] = useState("");
@@ -541,6 +678,12 @@ export default function AdminLiveMap() {
           ))}
         </div>
       </div>
+
+      {/* ── the live stack's own output ──
+          Directly under the graph: the graph says which stage is unhappy and
+          the log says why, and splitting them across tabs is how a diagnosis
+          gets abandoned halfway. */}
+      <LiveLogs />
 
       {/* ── a user's cap, opened from the credit node ── */}
       {capFor !== null ? (
