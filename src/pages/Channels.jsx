@@ -94,6 +94,10 @@ export default function Channels() {
       {/* Channel groups — user-defined presets for publish fan-out */}
       <ChannelGroupsManager ytAccounts={ytAccounts} />
 
+      {/* Per-channel choice: spend API quota, or push to the customer's
+          own Studio stream key for nothing. Renders nothing where the
+          live engine is not deployed. */}
+
       {/* Postiz 3rd-party delivery (admin) — paste key + bind channels */}
       <PostizDeliveryPanel />
 

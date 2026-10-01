@@ -5,7 +5,8 @@ import {
   Loader2, Search, ChevronLeft, ChevronRight, X, AlertCircle, CheckCircle2,
   UserCog, HardDrive, Server, Thermometer, Database, Clock, ExternalLink,
   BarChart3, Eye, EyeOff, Settings as SettingsIcon, Globe, Youtube as YoutubeIcon,
-  Gauge, Terminal, Star, Workflow, Brain, Layers, Clapperboard, ClipboardList} from "lucide-react";
+  Gauge, Terminal, Star, Workflow, Brain, Layers, Clapperboard, ClipboardList, Network
+} from "lucide-react";
 import { adminApi, api } from "../api/client";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -20,6 +21,8 @@ import AdminLearning from "./AdminLearning";
 import AdminPlanTiers from "./AdminPlanTiers";
 import AdminDesktopLicenses from "./AdminDesktopLicenses";
 import AdminAccounts from "./AdminAccounts";
+import AdminLiveActivity from "./admin/AdminLiveActivity";
+import AdminLiveMap from "./admin/AdminLiveMap";
 import AdminEditingFeatures from "./admin/AdminEditingFeatures";
 import AdminOnboarding from "./admin/AdminOnboarding";
 import "../theme/admin-theme.css";
@@ -1702,6 +1705,11 @@ function AuditTab() {
 // ──────────────────────────────────────────────────────────────────────────
 
 const TABS = [
+  { path: "live-activity", label: "Live activity", icon: Radio, comp: AdminLiveActivity },
+  // Beside Live activity deliberately: that tab lists the rows, this one shows
+  // the shape. Live streaming fails at the joins between components, and a
+  // list of components cannot show a broken join.
+  { path: "live-map", label: "Live map", icon: Network, comp: AdminLiveMap },
   { path: "overview", label: "Overview",    icon: Activity,    comp: OverviewTab   },
   { path: "system",   label: "System",      icon: Cpu,         comp: SystemTab     },
   { path: "capacity", label: "Capacity",    icon: Gauge,       comp: AdminCapacity },

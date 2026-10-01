@@ -5,7 +5,9 @@
 // device slots — e.g. a VPN adapter changed the machine fingerprint).
 import { useCallback, useEffect, useState } from "react";
 import { Laptop, RefreshCcw, ShieldOff } from "lucide-react";
-import { api } from "../api/client";
+// adminDesktopLicenses / adminRevokeDesktopLicense are defined on adminApi
+// only. Taken off `api` they are undefined and this tab throws on open.
+import { adminApi } from "../api/client";
 
 function ago(iso) {
   if (!iso) return "—";
@@ -23,7 +25,7 @@ export default function AdminDesktopLicenses() {
 
   const load = useCallback(() => {
     setErr("");
-    api.adminDesktopLicenses()
+    adminApi.adminDesktopLicenses()
       .then(setData)
       .catch((e) => setErr(e?.message || "Failed to load licenses"));
   }, []);
@@ -36,7 +38,7 @@ export default function AdminDesktopLicenses() {
     )) return;
     setBusyId(lic.id);
     try {
-      await api.adminRevokeDesktopLicense(lic.id);
+      await adminApi.adminRevokeDesktopLicense(lic.id);
       load();
     } catch (e) {
       setErr(e?.message || "Revoke failed");

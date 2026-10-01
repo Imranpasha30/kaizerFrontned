@@ -740,6 +740,14 @@ export const api = {
   liveStream:          (id)           => req("GET",  `/live-studio/streams/${id}`),
   liveStartStream:     (id)           => req("POST", `/live-studio/streams/${id}/start`),
   liveCancelStream:    (id)           => req("POST", `/live-studio/streams/${id}/cancel`),
+  liveEngineCredit:    ()                 => req("GET",    "/live/credit"),
+  liveEngineCheck:     (source)           => req("POST",   "/live/assets/check", { source }),
+  liveEngineGoLive:    (body)             => req("POST",   "/live/videos", body),
+  liveEngineVideo:     (vid)              => req("GET",    `/live/videos/${vid}`),
+  liveEngineStopVideo: (vid)              => req("DELETE", `/live/videos/${vid}`),
+  liveEngineAddChannel:(vid, body)        => req("POST",   `/live/videos/${vid}/channels`, body),
+  liveEngineStopChannel:(vid, cid)        => req("DELETE", `/live/videos/${vid}/channels/${cid}`),
+  liveEngineRestart:   (vid, cid)         => req("POST",   `/live/videos/${vid}/channels/${cid}/restart`),
   liveHealth:          ()             => req("GET",  "/live-studio/health"),
   liveValidateSeo:     (body)         => req("POST", "/live-studio/seo/validate", body),
 
@@ -1329,6 +1337,22 @@ export const api = {
 
 // ── Phase 12 — Admin panel ──────────────────────────────────────────────────
 export const adminApi = {
+  // Live Studio activity across every account: what is on air now, what
+  // finished, what failed. `days` windows the history; live_now is never
+  // windowed, because a broadcast started last week can still be running.
+  liveBroadcasts: (days = 7)                => req("GET",  `/admin/live-broadcasts?days=${days}`),
+  // Did manual mode really cost nothing? Measured from youtube_api_calls,
+  // which records every call this backend makes with its published unit cost.
+  liveCreditProof: (hours = 24)             => req("GET",  `/admin/live/credit-proof?hours=${hours}`),
+  liveEngineOverview: (events = 40)         => req("GET",  `/admin/live/overview?events=${events}`),
+  // The Live Map: every stage of live streaming in one read, because the panel
+  // polls it every two seconds and nine round trips at that rate is a
+  // self-inflicted load problem.
+  liveMap:            (events = 40)         => req("GET",  `/admin/live/map?events=${events}`),
+  liveRetryEncodes:   ()                    => req("POST", "/admin/live/encodes/retry"),
+  liveAdminUnblock:   (cid)                 => req("DELETE", `/admin/live/channels/${cid}/block`),
+  liveAdminStopVideo: (vid)                 => req("POST", `/admin/live/videos/${vid}/stop`),
+  liveSetUserCap:     (uid, daily_credit)   => req("PUT",  `/admin/live/users/${uid}/cap`, { daily_credit }),
   system:       ()                          => req("GET",  "/admin/system"),
   listUsers:    (q = "", limit = 50, offset = 0) =>
     req("GET", `/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),

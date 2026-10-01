@@ -5,6 +5,7 @@ import {
   Play, ExternalLink, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { api } from "../api/client";
+import LiveEnginePanel from "./LiveEnginePanel";
 
 /**
  * Live Studio — bulk RTMP-live publishing.
@@ -44,6 +45,23 @@ const MAX_PARALLEL_STREAMS = 4;
 // Per-channel concurrent broadcasts already kicked off; backend caps
 // total at KAIZER_LIVE_STUDIO_CONCURRENCY (default 8) — anything past
 // that queues server-side.
+
+/* THERE IS ONE WAY TO GO LIVE, so there is no mode to choose here any more.
+ *
+ * A per-channel mode used to be cycled on each chip: auto, API, or the
+ * channel's pasted Studio key. The key option is gone, and with it the choice.
+ * Pushing to a pasted key costs no quota, which is why it was built -- and it
+ * was then tested on a real channel: 90 seconds of video, the stream read
+ * `active` the whole time, and no broadcast ever appeared. YouTube stopped
+ * auto-creating a broadcast for a persistent key on 1 September 2020, so a key
+ * now carries video nobody can watch unless a broadcast already exists, and the
+ * only way to make one is insert (50) + bind (50).
+ *
+ * So every channel is an API broadcast on its own reused stream key, which is
+ * 1 unit to look up instead of 50 to mint: 153 units a broadcast, 65 a day. The
+ * number that matters to an operator is "broadcasts left today", and that is
+ * shown by LiveEnginePanel rather than guessed at per chip. */
+
 
 export default function LiveStudio() {
   // ── Catalog ─────────────────────────────────────────────────
@@ -190,11 +208,8 @@ export default function LiveStudio() {
     setVideos((prev) => prev.map((v) => {
       if (v.tmpId !== tmpId) return v;
       const s = new Set(v.channelIds);
-      if (s.has(channelId)) {
-        s.delete(channelId);
-      } else {
-        s.add(channelId);
-      }
+      if (s.has(channelId)) s.delete(channelId);
+      else s.add(channelId);
       return { ...v, channelIds: s };
     }));
   }
@@ -604,6 +619,37 @@ export default function LiveStudio() {
                       reading "queued — waiting for an available broadcast
                       slot". Same friendlyError() map as the archive list,
                       so one error never gets two different names. */}
+                  {/* HOW MUCH OF IT REACHED YOUTUBE. A broadcast can run its
+                      full duration and still be barely watchable: if the upload
+                      cannot carry the bitrate, YouTube reports
+                      videoIngestionStarved and viewers buffer, while every
+                      signal on our side reads healthy. The engine measured this
+                      all along and the number died with the broadcast; it is
+                      kept on the row now, so say it. Absent = not measured,
+                      which is not the same as zero. */}
+                  {s.delivery && s.delivery.delivered_pct != null && (
+                    <div className="px-2 pb-1.5">
+                      <div className={`rounded border p-2 text-[11px] ${
+                        s.delivery.delivered_pct >= 97
+                          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"
+                          : s.delivery.delivered_pct >= 85
+                          ? "border-amber-500/30 bg-amber-500/5 text-amber-200"
+                          : "border-red-500/40 bg-red-500/5 text-red-200"}`}>
+                        <div className="font-medium">{s.delivery.summary}</div>
+                        {s.delivery.delivered_pct < 97 && (
+                          <div className="opacity-80 mt-0.5">
+                            Sent {(s.delivery.delivered_bytes / 1e6).toFixed(0)} MB
+                            of {(s.delivery.source_bytes / 1e6).toFixed(0)} MB
+                            {s.delivery.source_mbps
+                              ? ` · the file needed ${s.delivery.source_mbps} Mbps`
+                              : ""}
+                            {s.delivery.dropped ? ` · ${s.delivery.dropped} dropped` : ""}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {s.status === "failed" && (s.error || s.message) && (
                     <div className="px-2 pb-1.5">
                       <div className="rounded border border-red-500/40 bg-red-500/5 p-2 text-[11px] text-red-200 space-y-1">
@@ -623,6 +669,21 @@ export default function LiveStudio() {
                           </details>
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Per-channel control of this broadcast, when the live
+                      engine is running: stop or restart one channel, switch
+                      it between the API and its saved Studio key, add a
+                      channel mid-broadcast, and see how many starts the
+                      day's quota has left.
+
+                      Renders nothing when the engine is switched off, so
+                      this page is exactly as it is today on the classic
+                      path rather than showing controls that cannot work. */}
+                  {s.engine_video_id && (
+                    <div className="px-2 pb-1.5">
+                      <LiveEnginePanel videoId={s.engine_video_id} channels={channels} />
                     </div>
                   )}
 
