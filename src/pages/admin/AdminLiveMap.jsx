@@ -50,7 +50,39 @@ const toneOf = (s) => TONE[s] || TONE.idle;
  * Fixed coordinates, taken from the rig so the shape is the one that was
  * agreed. The stage scrolls horizontally rather than reflowing: a pipeline
  * drawn left to right stops meaning anything if the boxes rearrange. */
+/* The DEFAULT stage. Both axes grow past this as nodes are dragged -- the
+ * children are absolutely positioned, so the container never grows on its own
+ * and a node dragged past the edge would simply be clipped. */
 const STAGE = { w: 1286, h: 700 };
+const STAGE_PAD = 48;
+
+/* Where the arrangement is kept. Without persistence a reload throws the
+ * layout away, and this panel reloads often. Versioned, so adding a node later
+ * does not resurrect a stale saved layout that never knew about it. */
+const POS_KEY = "kaizer.livemap.positions.v1";
+
+function loadPositions() {
+  try {
+    const raw = localStorage.getItem(POS_KEY);
+    if (!raw) return {};
+    const saved = JSON.parse(raw);
+    // Only keep keys that still exist, and only numbers.
+    const out = {};
+    for (const k of Object.keys(LAYOUT)) {
+      const p = saved[k];
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+        out[k] = { x: Math.max(0, p.x), y: Math.max(0, p.y) };
+      }
+    }
+    return out;
+  } catch {
+    return {};          // private mode, cleared storage, corrupt JSON
+  }
+}
+
+function savePositions(pos) {
+  try { localStorage.setItem(POS_KEY, JSON.stringify(pos)); } catch { /* not fatal */ }
+}
 const LAYOUT = {
   usage:   { x: 16,   y: 16,  w: 274, accent: "var(--adm-violet, #8b5cf6)", icon: Users },
   uploads: { x: 318,  y: 16,  w: 176, accent: "#6B4FD8", icon: Video },
@@ -69,9 +101,11 @@ const LAYOUT = {
 const H = { usage: 300, credit: 170, default: 150 };
 const heightOf = (k) => H[k] || H.default;
 
-function anchors(key) {
-  const n = LAYOUT[key];
-  const h = heightOf(key);
+function anchors(key, pos, heights) {
+  // Live position, not the constant: a node that has been dragged must drag
+  // its wires with it.
+  const n = { ...LAYOUT[key], ...(pos?.[key] || {}) };
+  const h = (heights && heights[key]) || heightOf(key);
   return {
     left:   { x: n.x,            y: n.y + h / 2 },
     right:  { x: n.x + n.w,      y: n.y + h / 2 },
@@ -96,10 +130,10 @@ const PORTS = {
   "credit>control":  ["right", "left"],
 };
 
-function wirePath(from, to) {
+function wirePath(from, to, pos, heights) {
   const [fp, tp] = PORTS[`${from}>${to}`] || ["right", "left"];
-  const a = anchors(from)[fp];
-  const b = anchors(to)[tp];
+  const a = anchors(from, pos, heights)[fp];
+  const b = anchors(to, pos, heights)[tp];
   // A cubic curve that leaves and arrives perpendicular to the edge it touches,
   // so the direction of flow is readable where the wire meets the box.
   const horiz = fp === "left" || fp === "right";
@@ -111,23 +145,27 @@ function wirePath(from, to) {
   return `M ${a.x} ${a.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${b.x} ${b.y}`;
 }
 
-function midpoint(from, to) {
+function midpoint(from, to, pos, heights) {
   const [fp, tp] = PORTS[`${from}>${to}`] || ["right", "left"];
-  const a = anchors(from)[fp];
-  const b = anchors(to)[tp];
+  const a = anchors(from, pos, heights)[fp];
+  const b = anchors(to, pos, heights)[tp];
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
 /* ── one node ────────────────────────────────────────────────────── */
-function Node({ id, node, onAction }) {
+function Node({ id, node, onAction, pos, drag, measure }) {
   const L = LAYOUT[id];
   const t = toneOf(node.state);
   const Icon = L.icon;
+  // Where it actually is: the saved/dragged position when there is one, the
+  // designed position when there is not.
+  const at = { x: L.x, y: L.y, ...(pos || {}) };
   return (
     <div
+      ref={measure}
       className="absolute rounded"
       style={{
-        left: L.x, top: L.y, width: L.w,
+        left: at.x, top: at.y, width: L.w,
         background: "var(--adm-card, #15181d)",
         border: `1px solid ${node.state === "ok" || node.state === "idle" ? "var(--adm-border, #2a2f37)" : t.color}`,
         borderTop: `3px solid ${L.accent}`,
@@ -135,7 +173,12 @@ function Node({ id, node, onAction }) {
       }}
     >
       <div className="flex items-center justify-between gap-2 px-2 py-1.5"
-           style={{ borderBottom: "1px solid var(--adm-divider, #23272e)" }}>
+           onPointerDown={(e) => drag?.onDown(id, e)}
+           onPointerMove={drag?.onMove}
+           onPointerUp={drag?.onUp}
+           onPointerCancel={drag?.onUp}
+           style={{ borderBottom: "1px solid var(--adm-divider, #23272e)",
+                    cursor: drag ? "grab" : undefined, touchAction: "none" }}>
         <span className="inline-flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.12em] font-mono"
               style={{ color: L.accent }}>
           <Icon size={10} /> {node.name}
@@ -196,8 +239,9 @@ function Node({ id, node, onAction }) {
 }
 
 /* ── the usage node: the questions this tab was asked to answer ──── */
-function UsageNode({ usage }) {
+function UsageNode({ usage, pos, drag, measure }) {
   const L = LAYOUT.usage;
+  const at = { x: L.x, y: L.y, ...(pos || {}) };
   const rows = [
     ["users using Live Studio now", usage.users_live_now],
     ["users in the last 24 h", usage.users_today],
@@ -207,14 +251,19 @@ function UsageNode({ usage }) {
     ["broadcast starts, 24 h", usage.broadcast_starts_24h],
   ];
   return (
-    <div className="absolute rounded" style={{
-      left: L.x, top: L.y, width: L.w,
+    <div ref={measure} className="absolute rounded" style={{
+      left: at.x, top: at.y, width: L.w,
       background: "var(--adm-card, #15181d)",
       border: "1px solid var(--adm-border, #2a2f37)",
       borderTop: `3px solid ${L.accent}`,
     }}>
       <div className="flex items-center justify-between px-2 py-1.5"
-           style={{ borderBottom: "1px solid var(--adm-divider, #23272e)" }}>
+           onPointerDown={(e) => drag?.onDown("usage", e)}
+           onPointerMove={drag?.onMove}
+           onPointerUp={drag?.onUp}
+           onPointerCancel={drag?.onUp}
+           style={{ borderBottom: "1px solid var(--adm-divider, #23272e)",
+                    cursor: drag ? "grab" : undefined, touchAction: "none" }}>
         <span className="inline-flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.12em] font-mono"
               style={{ color: L.accent }}>
           <Users size={10} /> Who is using it
@@ -262,6 +311,69 @@ export default function AdminLiveMap() {
   const [note, setNote] = useState("");
   const [capFor, setCapFor] = useState(null);
   const stop = useRef(false);
+
+  /* ── a movable canvas ──────────────────────────────────────────────
+   * Positions are STATE, not constants: this panel re-polls every two
+   * seconds, and anything recomputed from LAYOUT on each render would
+   * snap a dragged card back twice a second. Seeded from localStorage so
+   * an arrangement survives a reload. */
+  const [pos, setPos] = useState(() => loadPositions());
+  const [heights, setHeights] = useState({});
+  const dragRef = useRef(null);
+
+  // Each card reports its real rendered height, so the stage knows how tall
+  // it has to be and the wires land on real edges rather than guessed ones.
+  const measure = useCallback((id) => (el) => {
+    if (!el) return;
+    const h = el.offsetHeight;
+    setHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
+  }, []);
+
+  const drag = useMemo(() => ({
+    onDown: (id, e) => {
+      // Only the primary button, and never when the press began on a control
+      // inside the header.
+      if (e.button !== 0) return;
+      const base = { x: LAYOUT[id].x, y: LAYOUT[id].y, ...(pos[id] || {}) };
+      dragRef.current = { id, sx: e.clientX, sy: e.clientY, ox: base.x, oy: base.y };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* older engines */ }
+      e.currentTarget.style.cursor = "grabbing";
+      e.preventDefault();
+    },
+    onMove: (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      // Clamp at the top-left only. There is deliberately no right/bottom
+      // limit: the stage grows to follow.
+      const x = Math.max(0, d.ox + (e.clientX - d.sx));
+      const y = Math.max(0, d.oy + (e.clientY - d.sy));
+      setPos((p) => ({ ...p, [d.id]: { x, y } }));
+    },
+    onUp: (e) => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      if (e?.currentTarget) e.currentTarget.style.cursor = "grab";
+      // Persist on release rather than on every move: a drag fires hundreds
+      // of move events and localStorage is synchronous.
+      setPos((p) => { savePositions(p); return p; });
+    },
+  }), [pos]);
+
+  const resetLayout = useCallback(() => {
+    setPos({});
+    try { localStorage.removeItem(POS_KEY); } catch { /* not fatal */ }
+  }, []);
+
+  // The stage grows to contain whatever the nodes have been dragged to.
+  const stage = useMemo(() => {
+    let right = STAGE.w, bottom = STAGE.h;
+    for (const k of Object.keys(LAYOUT)) {
+      const at = { x: LAYOUT[k].x, y: LAYOUT[k].y, ...(pos[k] || {}) };
+      right = Math.max(right, at.x + LAYOUT[k].w + STAGE_PAD);
+      bottom = Math.max(bottom, at.y + (heights[k] || heightOf(k)) + STAGE_PAD);
+    }
+    return { w: right, h: bottom };
+  }, [pos, heights]);
 
   const load = useCallback(async () => {
     try {
@@ -339,7 +451,7 @@ export default function AdminLiveMap() {
       <PageHeader
         eyebrow="Live"
         title="Live Map"
-        subtitle="One ffmpeg per video, fanned out to every channel by one relay. Every number here is measured, none is modelled."
+        subtitle="One ffmpeg per video, fanned out to every channel by one relay. Every number here is measured, none is modelled. Drag a card by its header to rearrange; the canvas grows to follow and the layout is remembered."
         accent="violet"
         actions={
           <span className="inline-flex items-center gap-2 text-[11px]">
@@ -352,6 +464,18 @@ export default function AdminLiveMap() {
                     style={{ borderColor: "var(--adm-border, #2a2f37)" }}>
               <RefreshCw size={10} className={busy ? "animate-spin" : ""} /> refresh
             </button>
+            {/* The arrangement is SAVED, so there has to be a way back to the
+                designed one -- otherwise a card dragged somewhere unhelpful is
+                stuck there across reloads. Only offered once something has
+                actually been moved. */}
+            {Object.keys(pos).length > 0 && (
+              <button type="button" onClick={resetLayout}
+                      title="put every card back where it was designed to sit"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded border"
+                      style={{ borderColor: "var(--adm-border, #2a2f37)" }}>
+                reset layout
+              </button>
+            )}
           </span>
         }
       />
@@ -381,20 +505,23 @@ export default function AdminLiveMap() {
       {/* ── the graph ── */}
       <div className="rounded mb-3" style={{
         border: "1px solid var(--adm-border, #2a2f37)",
-        background: "var(--adm-surface, #0f1216)", overflowX: "auto",
+        background: "var(--adm-surface, #0f1216)", overflow: "auto",
+        // Tall enough to work in, capped so the page stays navigable; the
+        // stage inside is free to be larger and scrolls within this.
+        maxHeight: "78vh", resize: "vertical",
       }}>
         <div className="relative" style={{
-          width: STAGE.w, height: STAGE.h,
+          width: stage.w, height: stage.h,
           backgroundImage: "radial-gradient(var(--adm-divider, #23272e) 1px, transparent 1.2px)",
           backgroundSize: "20px 20px",
         }}>
-          <svg width={STAGE.w} height={STAGE.h} className="absolute inset-0 pointer-events-none">
+          <svg width={stage.w} height={stage.h} className="absolute inset-0 pointer-events-none">
             {wires.map((w) => {
               const t = toneOf(w.state);
-              const mid = midpoint(w.from, w.to);
+              const mid = midpoint(w.from, w.to, pos, heights);
               return (
                 <g key={`${w.from}>${w.to}`}>
-                  <path d={wirePath(w.from, w.to)} fill="none" stroke={t.color}
+                  <path d={wirePath(w.from, w.to, pos, heights)} fill="none" stroke={t.color}
                         strokeWidth={2}
                         strokeOpacity={w.state === "ok" ? 0.4 : w.state === "idle" ? 0.22 : 0.85}
                         strokeDasharray={w.kind === "ctl" ? "3 4" : w.state === "bad" ? "6 4" : undefined} />
@@ -407,9 +534,10 @@ export default function AdminLiveMap() {
               );
             })}
           </svg>
-          <UsageNode usage={u} />
+          <UsageNode usage={u} pos={pos.usage} drag={drag} measure={measure("usage")} />
           {Object.keys(LAYOUT).filter((k) => k !== "usage" && map.nodes[k]).map((k) => (
-            <Node key={k} id={k} node={map.nodes[k]} onAction={onAction} />
+            <Node key={k} id={k} node={map.nodes[k]} onAction={onAction}
+                  pos={pos[k]} drag={drag} measure={measure(k)} />
           ))}
         </div>
       </div>
